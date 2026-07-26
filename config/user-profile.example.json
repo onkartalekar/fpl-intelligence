@@ -10,21 +10,5 @@
   },
   "experience": {
     "previous_entry_id": null
-  },
-  "interface": {
-    "type": "local_dashboard",
-    "recommendation_depth": "full_scenario_analysis",
-    "updates": "one_final_deadline_report"
-  },
-  "sources": {
-    "budget": "free_only",
-    "betting_odds": false,
-    "social_policy": "high_confidence_only",
-    "transfer_policy": "first_party_confirmed_only"
-  },
-  "privacy": {
-    "storage": "local_mac",
-    "store_fpl_password": false,
-    "account_actions": false
   }
 }

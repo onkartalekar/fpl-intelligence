@@ -4,7 +4,7 @@ A local, source-backed foundation for 2026/27 FPL decisions.
 
 ## Current status
 
-- Manager profile configured for Eastern Time
+- Manager profile timezone is configurable per user (defaults to Eastern Time)
 - Official Premier League transfer-centre collection enabled
 - Rumours and secondary reports excluded
 - Official FPL feed collection enabled
@@ -23,6 +23,14 @@ cp config/user-profile.example.json config/user-profile.json
 Then edit `config/user-profile.json` and set `manager.team_id` to your own
 ID. Without it, the dashboard's "My Team" panel stays in a
 `not_configured` state and no public manager data is fetched.
+
+Only a few fields in this file are read by the dashboard right now:
+`manager.team_id`, `manager.timezone`, and `manager.confirmed_free_transfers`
+(with `manager.confirmed_free_transfers_event`). The rest --
+`deadline_availability`, `weekly_time_budget_minutes`, `primary_goal`,
+`mini_leagues`, `risk_profile`, and `experience.previous_entry_id` -- are
+recorded for your own reference only; editing them doesn't change model
+behavior yet.
 
 ## Open the dashboard
 
