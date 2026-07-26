@@ -140,8 +140,8 @@ class RefreshProjectTests(unittest.TestCase):
         }
         manager_payload = {
             "entry": {
-                "id": 364759, "name": "BrunoMans", "player_first_name": "Onkar",
-                "player_last_name": "Talekar", "current_event": None, "started_event": 1,
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": None, "started_event": 1,
             },
             "history": {"current": [], "past": [], "chips": []},
             "transfers": [],
@@ -358,8 +358,8 @@ class RefreshProjectTests(unittest.TestCase):
         bootstrap, fixtures, manager = gw2_inputs()
         raw_manager = {
             "entry": {
-                "id": 364759, "name": "BrunoMans", "player_first_name": "Onkar",
-                "player_last_name": "Talekar", "current_event": 1, "started_event": 1,
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
             },
             "history": {"current": [], "past": [], "chips": []},
             "transfers": [],
