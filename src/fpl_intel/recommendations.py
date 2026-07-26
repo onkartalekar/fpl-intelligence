@@ -286,6 +286,7 @@ def project_players(
                 {
                     "club_short": team_by_id.get(fixture_info["opponent"], {}).get("short_name", "UNK"),
                     "is_home": fixture_info["is_home"],
+                    "difficulty": fixture_info["difficulty"],
                 }
                 for fixture_info in event_fixtures
             ]
