@@ -169,6 +169,8 @@ def _refresh_project_unlocked(
     source_errors=None,
 ):
     root = Path(root)
+    profile = _load_json_or(root / "config" / "user-profile.json", {})
+    timezone_name = profile.get("manager", {}).get("timezone") or "America/New_York"
     previous_state = _load_current_json(root, "dashboard-state.json", {})
     source_errors = dict(source_errors or {})
     if source_errors.get("transfers"):
@@ -199,7 +201,7 @@ def _refresh_project_unlocked(
     if previous_event and not previous_event.get("started") and not previous_event.get("finished"):
         archive_forecast(performance_store, previous_decision, previous_event.get("deadline_time"))
     bootstrap = bootstrap_payload if bootstrap_payload is not None else fetch_bootstrap()
-    generated_at = generated_at or datetime.now(ZoneInfo("America/New_York")).isoformat()
+    generated_at = generated_at or datetime.now(ZoneInfo(timezone_name)).isoformat()
     fpl_summary = summarize_bootstrap(bootstrap, expected_first_deadline_year=2026)
     if fixture_payload is not None:
         raw_fixtures = fixture_payload
@@ -244,7 +246,6 @@ def _refresh_project_unlocked(
         if payload is not None:
             performance_store["actual_events"][key] = normalize_live_event(payload)
             _record_actual_collection_attempt(performance_store, event_id, generated_at)
-    profile = _load_json_or(root / "config" / "user-profile.json", {})
     team_id = profile.get("manager", {}).get("team_id")
     manager_raw = None
     manager_state = {"connection_status": "not_configured", "squad": []}
@@ -323,7 +324,7 @@ def _refresh_project_unlocked(
 
     state = {
         "generated_at": generated_at,
-        "timezone": "America/New_York",
+        "timezone": timezone_name,
         "fpl": fpl_summary,
         "source_health": source_health,
         "manager": manager_state,
