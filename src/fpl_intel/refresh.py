@@ -316,8 +316,9 @@ def _refresh_project_unlocked(
 
     source_payload = _load_json(root / "config" / "sources.json")
     sources = [
-        {"name": source["name"], "url": source["url"]}
+        {"name": source["name"], "url": source["url"].format(team_id=team_id)}
         for source in source_payload.get("sources", [])
+        if "{team_id}" not in source.get("url", "") or team_id
     ]
 
     state = {

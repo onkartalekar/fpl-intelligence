@@ -11,6 +11,19 @@ A local, source-backed foundation for 2026/27 FPL decisions.
 - 2026/27 feed is live: projections and the legal-squad optimizer are active (see below)
 - No credentials or account actions
 
+## Configure your manager
+
+Copy the example profile and set your own FPL team ID (found in your FPL
+entry URL, `fantasy.premierleague.com/entry/<team_id>/...`):
+
+```bash
+cp config/user-profile.example.json config/user-profile.json
+```
+
+Then edit `config/user-profile.json` and set `manager.team_id` to your own
+ID. Without it, the dashboard's "My Team" panel stays in a
+`not_configured` state and no public manager data is fetched.
+
 ## Open the dashboard
 
 Start the local dashboard service:

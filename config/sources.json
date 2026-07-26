@@ -17,7 +17,7 @@
     {
       "id": "public-fpl-manager",
       "name": "Public FPL manager entry",
-      "url": "https://fantasy.premierleague.com/api/entry/364759/",
+      "url": "https://fantasy.premierleague.com/api/entry/{team_id}/",
       "purpose": ["manager_identity", "public_rank", "public_points", "public_team_state"],
       "source_class": "first_party"
     },

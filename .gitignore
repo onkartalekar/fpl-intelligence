@@ -226,4 +226,7 @@ __marimo__/
 
 # App runtime lock files
 .refresh.lock
+
+# Per-user FPL profile (copy config/user-profile.example.json to create yours)
+config/user-profile.json
 :
