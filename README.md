@@ -34,7 +34,17 @@ behavior yet.
 
 ## Open the dashboard
 
-Start the local dashboard service:
+`dashboard.html` and everything under `data/` except `data/history/` and
+the `backtest-baseline-*`/`confirmed-transfers.json` fixtures are generated
+locally and gitignored -- a fresh clone won't have them yet. Run a refresh
+once to create them:
+
+```bash
+cd <path-to-clone>/fpl-intelligence
+python3 scripts/refresh_dashboard.py
+```
+
+Then start the local dashboard service:
 
 ```bash
 cd <path-to-clone>/fpl-intelligence

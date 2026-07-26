@@ -229,4 +229,12 @@ __marimo__/
 
 # Per-user FPL profile (copy config/user-profile.example.json to create yours)
 config/user-profile.json
+
+# Generated per-user dashboard state (run scripts/refresh_dashboard.py to create these)
+dashboard.html
+data/dashboard-state.json
+data/fpl-manager-latest.json
+data/current-generation.json
+data/fpl-bootstrap-latest.json
+data/generations/
 :
