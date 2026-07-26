@@ -282,11 +282,19 @@ def project_players(
                     event_components[key] += fixture_components[key]
             modeled_total = sum(event_components.values())
             blended_total = fixture_points[-1]
+            opponents = [
+                {
+                    "club_short": team_by_id.get(fixture_info["opponent"], {}).get("short_name", "UNK"),
+                    "is_home": fixture_info["is_home"],
+                }
+                for fixture_info in event_fixtures
+            ]
             component_xp.append({
                 **{key: round(value, 2) for key, value in event_components.items()},
                 "modeled_total_before_ep_next": round(modeled_total, 2),
                 "ep_next_adjustment": round(blended_total - modeled_total, 2),
                 "blended_total": round(blended_total, 2),
+                "opponents": opponents,
             })
         xp_1 = sum(fixture_points[:1])
         xp_3 = sum(fixture_points[:3])
@@ -637,6 +645,39 @@ def _optimize_squad(
     return best_squad
 
 
+def _selection_rationale(squad, eligible, alternatives_per_player=2):
+    """For each squad player, the top not-selected same-position alternatives by xp_5.
+
+    This surfaces the budget/value trade-offs behind a pick -- e.g. a cheaper
+    player was chosen even though a pricier one projects more points, freeing
+    budget spent elsewhere in the squad -- rather than leaving that judgment
+    implicit in the optimizer's search.
+    """
+    squad_ids = {player["id"] for player in squad}
+    pool_by_position = {}
+    for player in eligible:
+        if player["id"] in squad_ids:
+            continue
+        pool_by_position.setdefault(player["position_short"], []).append(player)
+    for pool in pool_by_position.values():
+        pool.sort(key=lambda row: row["xp_5"], reverse=True)
+    rationale = {}
+    for player in squad:
+        pool = pool_by_position.get(player["position_short"], [])
+        rationale[player["id"]] = [
+            {
+                "id": alternative["id"],
+                "name": alternative["name"],
+                "price": alternative["price"],
+                "xp_5": alternative["xp_5"],
+                "price_delta": round(alternative["price"] - player["price"], 1),
+                "xp_5_delta": round(alternative["xp_5"] - player["xp_5"], 1),
+            }
+            for alternative in pool[:alternatives_per_player]
+        ]
+    return rationale
+
+
 def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit, initial_squad=None, event=1):
     squad = _optimize_squad(eligible, quotas, budget, club_limit, profile, initial_squad)
     by_id = {player["id"]: player for player in squad}
@@ -681,6 +722,7 @@ def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit,
             "players": sorted(squad, key=lambda row: (row["position_id"], -row["xp_5"])),
             "cost": round(sum(player["price"] for player in squad), 1),
             "money_remaining": round(budget - sum(player["price"] for player in squad), 1),
+            "selection_rationale": _selection_rationale(squad, eligible),
             "starting_xi": starting_xi,
             "formation": formation,
             "bench": bench,

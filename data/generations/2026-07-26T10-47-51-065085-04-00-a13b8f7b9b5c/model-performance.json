@@ -1,0 +1,1300 @@
+{
+  "forecasts": [
+    {
+      "origin_event": 1,
+      "generated_at": "2026-07-23T21:57:32.006192-04:00",
+      "model_version": "0.3",
+      "profiles": [
+        {
+          "profile_id": "conservative",
+          "label": "Conservative",
+          "horizons": {
+            "1": {
+              "modeled_points": 50.5,
+              "lower_points": 42.5,
+              "upper_points": 58.6,
+              "lineup_player_ids": [
+                1,
+                356,
+                388,
+                498,
+                61,
+                426,
+                397,
+                480,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            },
+            "3": {
+              "modeled_points": 162.6,
+              "lower_points": 136.6,
+              "upper_points": 188.6,
+              "lineup_player_ids": [
+                1,
+                388,
+                498,
+                356,
+                61,
+                426,
+                397,
+                480,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            },
+            "5": {
+              "modeled_points": 273.7,
+              "lower_points": 230.0,
+              "upper_points": 317.5,
+              "lineup_player_ids": [
+                1,
+                388,
+                498,
+                356,
+                61,
+                426,
+                397,
+                480,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            }
+          }
+        },
+        {
+          "profile_id": "balanced",
+          "label": "Balanced",
+          "horizons": {
+            "1": {
+              "modeled_points": 50.1,
+              "lower_points": 42.1,
+              "upper_points": 58.1,
+              "lineup_player_ids": [
+                82,
+                4,
+                356,
+                388,
+                498,
+                426,
+                397,
+                13,
+                106,
+                165,
+                346
+              ],
+              "captain_id": 426
+            },
+            "3": {
+              "modeled_points": 161.3,
+              "lower_points": 135.5,
+              "upper_points": 187.1,
+              "lineup_player_ids": [
+                82,
+                4,
+                388,
+                498,
+                356,
+                426,
+                397,
+                13,
+                106,
+                165,
+                346
+              ],
+              "captain_id": 426
+            },
+            "5": {
+              "modeled_points": 271.5,
+              "lower_points": 228.1,
+              "upper_points": 314.9,
+              "lineup_player_ids": [
+                82,
+                4,
+                388,
+                498,
+                356,
+                426,
+                397,
+                13,
+                106,
+                165,
+                346
+              ],
+              "captain_id": 426
+            }
+          }
+        },
+        {
+          "profile_id": "aggressive",
+          "label": "Aggressive",
+          "horizons": {
+            "1": {
+              "modeled_points": 51.0,
+              "lower_points": 42.9,
+              "upper_points": 59.2,
+              "lineup_player_ids": [
+                1,
+                4,
+                356,
+                498,
+                388,
+                61,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            },
+            "3": {
+              "modeled_points": 163.1,
+              "lower_points": 137.1,
+              "upper_points": 189.2,
+              "lineup_player_ids": [
+                1,
+                4,
+                498,
+                388,
+                356,
+                61,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            },
+            "5": {
+              "modeled_points": 274.6,
+              "lower_points": 230.7,
+              "upper_points": 318.4,
+              "lineup_player_ids": [
+                1,
+                4,
+                388,
+                498,
+                356,
+                61,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426
+            }
+          }
+        }
+      ]
+    },
+    {
+      "origin_event": 1,
+      "forecast_id": "gw1:0.6",
+      "generated_at": "2026-07-25T20:22:28.453126-04:00",
+      "model_version": "0.6",
+      "profiles": [
+        {
+          "profile_id": "conservative",
+          "label": "Conservative",
+          "horizons": {
+            "1": {
+              "modeled_points": 37.0,
+              "lower_points": 16.4,
+              "upper_points": 59.6,
+              "lineup_player_ids": [
+                3,
+                112,
+                328,
+                4,
+                481,
+                260,
+                525,
+                242,
+                426,
+                411,
+                81
+              ],
+              "captain_id": 481,
+              "event_lineups": []
+            },
+            "3": {
+              "modeled_points": 116.1,
+              "lower_points": 51.1,
+              "upper_points": 189.0,
+              "lineup_player_ids": [
+                497,
+                112,
+                328,
+                4,
+                481,
+                260,
+                525,
+                426,
+                242,
+                411,
+                81
+              ],
+              "captain_id": 481,
+              "event_lineups": []
+            },
+            "5": {
+              "modeled_points": 193.7,
+              "lower_points": 85.2,
+              "upper_points": 315.9,
+              "lineup_player_ids": [
+                497,
+                112,
+                328,
+                4,
+                481,
+                260,
+                525,
+                426,
+                242,
+                411,
+                81
+              ],
+              "captain_id": 481,
+              "event_lineups": []
+            }
+          }
+        },
+        {
+          "profile_id": "balanced",
+          "label": "Balanced",
+          "horizons": {
+            "1": {
+              "modeled_points": 52.6,
+              "lower_points": 8.8,
+              "upper_points": 96.3,
+              "lineup_player_ids": [
+                1,
+                388,
+                498,
+                229,
+                426,
+                397,
+                480,
+                13,
+                370,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            },
+            "3": {
+              "modeled_points": 168.7,
+              "lower_points": 28.2,
+              "upper_points": 309.2,
+              "lineup_player_ids": [
+                1,
+                388,
+                498,
+                229,
+                426,
+                397,
+                480,
+                13,
+                370,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            },
+            "5": {
+              "modeled_points": 284.0,
+              "lower_points": 47.3,
+              "upper_points": 520.7,
+              "lineup_player_ids": [
+                1,
+                388,
+                498,
+                229,
+                426,
+                397,
+                480,
+                13,
+                370,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            }
+          }
+        },
+        {
+          "profile_id": "aggressive",
+          "label": "Aggressive",
+          "horizons": {
+            "1": {
+              "modeled_points": 53.8,
+              "lower_points": 9.1,
+              "upper_points": 98.5,
+              "lineup_player_ids": [
+                1,
+                4,
+                388,
+                498,
+                426,
+                480,
+                397,
+                13,
+                370,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            },
+            "3": {
+              "modeled_points": 171.0,
+              "lower_points": 28.6,
+              "upper_points": 313.3,
+              "lineup_player_ids": [
+                1,
+                4,
+                388,
+                498,
+                426,
+                397,
+                480,
+                370,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            },
+            "5": {
+              "modeled_points": 287.3,
+              "lower_points": 47.9,
+              "upper_points": 526.6,
+              "lineup_player_ids": [
+                1,
+                4,
+                388,
+                498,
+                426,
+                397,
+                480,
+                370,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "origin_event": 1,
+      "forecast_id": "gw1:0.7",
+      "generated_at": "2026-07-25T22:02:04.201196-04:00",
+      "model_version": "0.7",
+      "profiles": [
+        {
+          "profile_id": "conservative",
+          "label": "Conservative",
+          "horizons": {
+            "1": {
+              "modeled_points": 37.6,
+              "lower_points": 25.9,
+              "upper_points": 49.3,
+              "lineup_player_ids": [
+                497,
+                112,
+                328,
+                4,
+                388,
+                481,
+                260,
+                525,
+                54,
+                411,
+                106
+              ],
+              "captain_id": 481,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    4,
+                    388,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    55,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                }
+              ]
+            },
+            "3": {
+              "modeled_points": 120.4,
+              "lower_points": 96.7,
+              "upper_points": 144.2,
+              "lineup_player_ids": [
+                497,
+                112,
+                328,
+                4,
+                388,
+                481,
+                260,
+                525,
+                54,
+                411,
+                106
+              ],
+              "captain_id": 481,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    4,
+                    388,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    55,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    388,
+                    4,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    542,
+                    55,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    388,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106,
+                    55
+                  ],
+                  "bench_player_ids": [
+                    4,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "3-4-3"
+                }
+              ]
+            },
+            "5": {
+              "modeled_points": 201.4,
+              "lower_points": 168.5,
+              "upper_points": 234.4,
+              "lineup_player_ids": [
+                497,
+                112,
+                328,
+                4,
+                388,
+                481,
+                260,
+                525,
+                54,
+                411,
+                106
+              ],
+              "captain_id": 481,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    4,
+                    388,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    55,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    388,
+                    4,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    542,
+                    55,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    388,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    106,
+                    55
+                  ],
+                  "bench_player_ids": [
+                    4,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "3-4-3"
+                },
+                {
+                  "event": 4,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    328,
+                    4,
+                    260,
+                    481,
+                    525,
+                    54,
+                    411,
+                    106,
+                    55
+                  ],
+                  "bench_player_ids": [
+                    388,
+                    113,
+                    542,
+                    325
+                  ],
+                  "captain_id": 260,
+                  "vice_captain_id": 481,
+                  "formation": "3-4-3"
+                },
+                {
+                  "event": 5,
+                  "lineup_player_ids": [
+                    497,
+                    112,
+                    388,
+                    328,
+                    4,
+                    481,
+                    260,
+                    525,
+                    54,
+                    411,
+                    55
+                  ],
+                  "bench_player_ids": [
+                    106,
+                    542,
+                    113,
+                    325
+                  ],
+                  "captain_id": 481,
+                  "vice_captain_id": 260,
+                  "formation": "4-4-2"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "profile_id": "balanced",
+          "label": "Balanced",
+          "horizons": {
+            "1": {
+              "modeled_points": 51.8,
+              "lower_points": 31.9,
+              "upper_points": 71.6,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                498,
+                426,
+                397,
+                13,
+                542,
+                19,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    498,
+                    426,
+                    397,
+                    13,
+                    542,
+                    19,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    346,
+                    204,
+                    113,
+                    82
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "3-5-2"
+                }
+              ]
+            },
+            "3": {
+              "modeled_points": 167.4,
+              "lower_points": 127.5,
+              "upper_points": 207.2,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                498,
+                426,
+                397,
+                13,
+                542,
+                19,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    498,
+                    426,
+                    397,
+                    13,
+                    542,
+                    19,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    346,
+                    204,
+                    113,
+                    82
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "3-5-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    529,
+                    498,
+                    388,
+                    4,
+                    426,
+                    397,
+                    13,
+                    542,
+                    165,
+                    106,
+                    346
+                  ],
+                  "bench_player_ids": [
+                    19,
+                    204,
+                    113,
+                    82
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "3-4-3"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    82,
+                    388,
+                    498,
+                    4,
+                    113,
+                    426,
+                    397,
+                    13,
+                    542,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    346,
+                    204,
+                    19,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "4-4-2"
+                }
+              ]
+            },
+            "5": {
+              "modeled_points": 279.4,
+              "lower_points": 224.6,
+              "upper_points": 334.1,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                498,
+                426,
+                397,
+                13,
+                542,
+                19,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    498,
+                    426,
+                    397,
+                    13,
+                    542,
+                    19,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    346,
+                    204,
+                    113,
+                    82
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "3-5-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    529,
+                    498,
+                    388,
+                    4,
+                    426,
+                    397,
+                    13,
+                    542,
+                    165,
+                    106,
+                    346
+                  ],
+                  "bench_player_ids": [
+                    19,
+                    204,
+                    113,
+                    82
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "3-4-3"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    82,
+                    388,
+                    498,
+                    4,
+                    113,
+                    426,
+                    397,
+                    13,
+                    542,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    346,
+                    204,
+                    19,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "4-4-2"
+                },
+                {
+                  "event": 4,
+                  "lineup_player_ids": [
+                    82,
+                    4,
+                    498,
+                    204,
+                    388,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106,
+                    346
+                  ],
+                  "bench_player_ids": [
+                    113,
+                    542,
+                    19,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "4-3-3"
+                },
+                {
+                  "event": 5,
+                  "lineup_player_ids": [
+                    82,
+                    388,
+                    4,
+                    498,
+                    204,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106,
+                    346
+                  ],
+                  "bench_player_ids": [
+                    19,
+                    542,
+                    113,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "4-3-3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "profile_id": "aggressive",
+          "label": "Aggressive",
+          "horizons": {
+            "1": {
+              "modeled_points": 52.7,
+              "lower_points": 32.6,
+              "upper_points": 72.9,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                498,
+                356,
+                200,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    498,
+                    356,
+                    200,
+                    426,
+                    397,
+                    13,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    109
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "5-3-2"
+                }
+              ]
+            },
+            "3": {
+              "modeled_points": 169.3,
+              "lower_points": 129.1,
+              "upper_points": 209.5,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                356,
+                498,
+                200,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    356,
+                    498,
+                    200,
+                    426,
+                    397,
+                    13,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    109
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    529,
+                    498,
+                    388,
+                    4,
+                    356,
+                    200,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    102,
+                    127,
+                    528,
+                    109
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    109,
+                    388,
+                    356,
+                    498,
+                    4,
+                    200,
+                    426,
+                    397,
+                    13,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "5-3-2"
+                }
+              ]
+            },
+            "5": {
+              "modeled_points": 283.6,
+              "lower_points": 228.1,
+              "upper_points": 339.1,
+              "lineup_player_ids": [
+                529,
+                4,
+                388,
+                356,
+                498,
+                200,
+                426,
+                397,
+                13,
+                106,
+                165
+              ],
+              "captain_id": 426,
+              "event_lineups": [
+                {
+                  "event": 1,
+                  "lineup_player_ids": [
+                    529,
+                    4,
+                    388,
+                    356,
+                    498,
+                    200,
+                    426,
+                    397,
+                    13,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    109
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 2,
+                  "lineup_player_ids": [
+                    529,
+                    498,
+                    388,
+                    4,
+                    356,
+                    200,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    102,
+                    127,
+                    528,
+                    109
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 3,
+                  "lineup_player_ids": [
+                    109,
+                    388,
+                    356,
+                    498,
+                    4,
+                    200,
+                    426,
+                    397,
+                    13,
+                    106,
+                    165
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 4,
+                  "lineup_player_ids": [
+                    109,
+                    4,
+                    356,
+                    200,
+                    498,
+                    388,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    127,
+                    102,
+                    528,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 4,
+                  "formation": "5-3-2"
+                },
+                {
+                  "event": 5,
+                  "lineup_player_ids": [
+                    109,
+                    388,
+                    4,
+                    498,
+                    356,
+                    200,
+                    426,
+                    397,
+                    13,
+                    165,
+                    106
+                  ],
+                  "bench_player_ids": [
+                    102,
+                    127,
+                    528,
+                    529
+                  ],
+                  "captain_id": 426,
+                  "vice_captain_id": 397,
+                  "formation": "5-3-2"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "actual_events": {},
+  "champion_forecasts": {
+    "1": "gw1:0.7"
+  }
+}
