@@ -1,0 +1,17 @@
+{
+  "conservative": {
+    "action": "double_transfer",
+    "edge": 0.76,
+    "ft": 2
+  },
+  "balanced": {
+    "action": "double_transfer",
+    "edge": 0.81,
+    "ft": 2
+  },
+  "aggressive": {
+    "action": "double_transfer",
+    "edge": 0.63,
+    "ft": 2
+  }
+}

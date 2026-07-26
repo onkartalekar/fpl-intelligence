@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "transfers": [],
+  "note": "Only first-party confirmed transfers belong here. Empty is an honest initial state, not evidence that no transfers occurred."
+}

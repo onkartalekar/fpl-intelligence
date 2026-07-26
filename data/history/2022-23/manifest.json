@@ -1,0 +1,23 @@
+{
+  "season": "2022-23",
+  "retrieved_at": "2026-07-25T21:37:05.740793+00:00",
+  "license": "MIT (vaastav/Fantasy-Premier-League)",
+  "files": {
+    "merged_gw.csv": {
+      "source_url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2022-23/gws/merged_gw.csv",
+      "bytes": 4638801
+    },
+    "fixtures.csv": {
+      "source_url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2022-23/fixtures.csv",
+      "bytes": 696260
+    },
+    "teams.csv": {
+      "source_url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2022-23/teams.csv",
+      "bytes": 1711
+    },
+    "players_raw.csv": {
+      "source_url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2022-23/players_raw.csv",
+      "bytes": 280362
+    }
+  }
+}

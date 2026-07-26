@@ -1,0 +1,44 @@
+{
+  "sources": [
+    {
+      "id": "official-fpl",
+      "name": "Official Fantasy Premier League API",
+      "url": "https://fantasy.premierleague.com/api/bootstrap-static/",
+      "purpose": ["players", "clubs", "positions", "prices", "availability", "events"],
+      "source_class": "first_party"
+    },
+    {
+      "id": "official-fpl-fixtures",
+      "name": "Official FPL fixtures",
+      "url": "https://fantasy.premierleague.com/api/fixtures/",
+      "purpose": ["fixtures", "kickoff_times", "fixture_difficulty"],
+      "source_class": "first_party"
+    },
+    {
+      "id": "public-fpl-manager",
+      "name": "Public FPL manager entry",
+      "url": "https://fantasy.premierleague.com/api/entry/364759/",
+      "purpose": ["manager_identity", "public_rank", "public_points", "public_team_state"],
+      "source_class": "first_party"
+    },
+    {
+      "id": "official-fpl-rules",
+      "name": "Official FPL rules",
+      "url": "https://fantasy.premierleague.com/en/help/rules",
+      "purpose": ["transfers", "free_transfers", "point_costs", "chips"],
+      "source_class": "first_party"
+    },
+    {
+      "id": "official-pl-transfers",
+      "name": "Premier League transfers",
+      "url": "https://www.premierleague.com/en/transfers",
+      "purpose": ["confirmed_transfers"],
+      "source_class": "first_party"
+    }
+  ],
+  "policy": {
+    "rumours": "exclude",
+    "secondary_reports": "exclude_for_confirmation",
+    "predicted_lineups": "include_only_when_high_confidence_and_label_as_prediction"
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "model_version": "0.3",
+  "method": "Player-level projections replayed at each historical gameweek deadline from strictly pre-origin season-to-date data, scored against official results already recorded in the historical dataset.",
+  "limitations": [
+    "The official ep_next estimate is unavailable historically, so its GW1 blend is inactive.",
+    "Injury/availability status is unavailable historically; every player is treated as available.",
+    "Recent-transfer role-transition scenarios are not replayed (no historical transfer feed).",
+    "Season-to-date totals are aggregated exactly as the live bootstrap would supply them at that deadline."
+  ],
+  "seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25"
+  ],
+  "first_origin_gw": 2,
+  "last_origin_gw": 38,
+  "horizons": [
+    1,
+    3,
+    5
+  ],
+  "cohort_definition": "Players with projected expected minutes above zero, or any actual minutes inside the horizon window.",
+  "completed_comparisons": 228153,
+  "summary": {
+    "count": 228153,
+    "mae": 2.68,
+    "bias": 1.63,
+    "rmse": 5.28,
+    "range_coverage": 0.09
+  },
+  "top_pool_summary": {
+    "count": 37800,
+    "mae": 6.21,
+    "bias": 4.73,
+    "rmse": 9.06,
+    "range_coverage": 0.15
+  },
+  "by_horizon": {
+    "1": {
+      "count": 80866,
+      "mae": 1.05,
+      "bias": 0.52,
+      "rmse": 2.23,
+      "range_coverage": 0.09
+    },
+    "3": {
+      "count": 76044,
+      "mae": 2.78,
+      "bias": 1.64,
+      "rmse": 4.97,
+      "range_coverage": 0.08
+    },
+    "5": {
+      "count": 71243,
+      "mae": 4.44,
+      "bias": 2.88,
+      "rmse": 7.56,
+      "range_coverage": 0.09
+    }
+  },
+  "by_position": {
+    "GKP": {
+      "count": 24746,
+      "mae": 2.19,
+      "bias": 1.12,
+      "rmse": 4.62,
+      "range_coverage": 0.05
+    },
+    "DEF": {
+      "count": 76408,
+      "mae": 2.55,
+      "bias": 1.47,
+      "rmse": 4.89,
+      "range_coverage": 0.08
+    },
+    "MID": {
+      "count": 99794,
+      "mae": 2.79,
+      "bias": 1.82,
+      "rmse": 5.48,
+      "range_coverage": 0.1
+    },
+    "FWD": {
+      "count": 27205,
+      "mae": 3.12,
+      "bias": 1.85,
+      "rmse": 6.08,
+      "range_coverage": 0.09
+    }
+  },
+  "by_confidence": {
+    "high": {
+      "count": 4187,
+      "mae": 4.19,
+      "bias": 1.1,
+      "rmse": 6.06,
+      "range_coverage": 0.17
+    },
+    "medium": {
+      "count": 30365,
+      "mae": 4.63,
+      "bias": 2.32,
+      "rmse": 7.0,
+      "range_coverage": 0.2
+    },
+    "low": {
+      "count": 193601,
+      "mae": 2.35,
+      "bias": 1.53,
+      "rmse": 4.93,
+      "range_coverage": 0.07
+    }
+  },
+  "by_season": {
+    "2022-23": {
+      "count": 72072,
+      "mae": 2.89,
+      "bias": 2.0,
+      "rmse": 5.6,
+      "range_coverage": 0.08
+    },
+    "2023-24": {
+      "count": 81281,
+      "mae": 2.53,
+      "bias": 1.37,
+      "rmse": 5.07,
+      "range_coverage": 0.09
+    },
+    "2024-25": {
+      "count": 74800,
+      "mae": 2.65,
+      "bias": 1.56,
+      "rmse": 5.18,
+      "range_coverage": 0.09
+    }
+  },
+  "held_out_seasons": [
+    "2025-26"
+  ],
+  "held_out_summary": {
+    "count": 81700,
+    "mae": 2.69,
+    "bias": 1.49,
+    "rmse": 5.24,
+    "range_coverage": 0.08
+  },
+  "held_out_by_horizon": {
+    "1": {
+      "count": 28906,
+      "mae": 1.07,
+      "bias": 0.47,
+      "rmse": 2.21,
+      "range_coverage": 0.08
+    },
+    "3": {
+      "count": 27228,
+      "mae": 2.79,
+      "bias": 1.49,
+      "rmse": 4.93,
+      "range_coverage": 0.08
+    },
+    "5": {
+      "count": 25566,
+      "mae": 4.41,
+      "bias": 2.64,
+      "rmse": 7.51,
+      "range_coverage": 0.09
+    }
+  },
+  "held_out_by_position": {
+    "GKP": {
+      "count": 9409,
+      "mae": 1.85,
+      "bias": 0.82,
+      "rmse": 4.01,
+      "range_coverage": 0.04
+    },
+    "DEF": {
+      "count": 26772,
+      "mae": 2.91,
+      "bias": 1.64,
+      "rmse": 5.46,
+      "range_coverage": 0.08
+    },
+    "MID": {
+      "count": 36530,
+      "mae": 2.7,
+      "bias": 1.48,
+      "rmse": 5.24,
+      "range_coverage": 0.09
+    },
+    "FWD": {
+      "count": 8989,
+      "mae": 2.85,
+      "bias": 1.77,
+      "rmse": 5.69,
+      "range_coverage": 0.1
+    }
+  }
+}

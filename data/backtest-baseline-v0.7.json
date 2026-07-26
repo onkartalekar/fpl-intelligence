@@ -1,0 +1,205 @@
+{
+  "model_version": "0.7",
+  "method": "Player-level projections replayed at each historical gameweek deadline from strictly pre-origin season-to-date data, scored against official results already recorded in the historical dataset.",
+  "limitations": [
+    "The official ep_next estimate is unavailable historically, so its GW1 blend is inactive.",
+    "Injury/availability status is unavailable historically; every player is treated as available.",
+    "Recent-transfer role-transition scenarios are not replayed (no historical transfer feed).",
+    "Historical point-in-time FDR snapshots are unavailable; fixture difficulty is neutralized to 3 until the strictly pre-origin team-strength model activates.",
+    "Players absent from all pre-origin rows cannot be projected; later debutants are included only after their first recorded appearance.",
+    "Season-to-date totals are aggregated exactly as the live bootstrap would supply them at that deadline.",
+    "Defensive-contribution scoring is era-aware: it is disabled for historical datasets before the rule/field exists, while 2025/26 uses strictly pre-origin cumulative defensive-contribution inputs. Aggregate cross-season metrics therefore span different official scoring regimes."
+  ],
+  "seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25"
+  ],
+  "first_origin_gw": 2,
+  "last_origin_gw": 38,
+  "horizons": [
+    1,
+    3,
+    5
+  ],
+  "cohort_definition": "Players with projected expected minutes above zero, or any actual minutes inside the horizon window.",
+  "completed_comparisons": 228153,
+  "summary": {
+    "count": 228153,
+    "mae": 2.42,
+    "bias": 0.3,
+    "rmse": 4.46,
+    "range_coverage": 0.82
+  },
+  "top_pool_summary": {
+    "count": 37800,
+    "mae": 5.17,
+    "bias": -0.25,
+    "rmse": 7.17,
+    "range_coverage": 0.81
+  },
+  "by_horizon": {
+    "1": {
+      "count": 80866,
+      "mae": 1.06,
+      "bias": 0.1,
+      "rmse": 2.06,
+      "range_coverage": 0.82
+    },
+    "3": {
+      "count": 76044,
+      "mae": 2.53,
+      "bias": 0.3,
+      "rmse": 4.28,
+      "range_coverage": 0.82
+    },
+    "5": {
+      "count": 71243,
+      "mae": 3.84,
+      "bias": 0.51,
+      "rmse": 6.27,
+      "range_coverage": 0.83
+    }
+  },
+  "by_position": {
+    "GKP": {
+      "count": 24746,
+      "mae": 1.94,
+      "bias": -0.2,
+      "rmse": 3.75,
+      "range_coverage": 0.9
+    },
+    "DEF": {
+      "count": 76408,
+      "mae": 2.45,
+      "bias": 0.11,
+      "rmse": 4.3,
+      "range_coverage": 0.81
+    },
+    "MID": {
+      "count": 99794,
+      "mae": 2.42,
+      "bias": 0.52,
+      "rmse": 4.55,
+      "range_coverage": 0.81
+    },
+    "FWD": {
+      "count": 27205,
+      "mae": 2.73,
+      "bias": 0.45,
+      "rmse": 5.12,
+      "range_coverage": 0.82
+    }
+  },
+  "by_confidence": {
+    "high": {
+      "count": 4187,
+      "mae": 4.34,
+      "bias": -0.55,
+      "rmse": 6.05,
+      "range_coverage": 0.75
+    },
+    "medium": {
+      "count": 30365,
+      "mae": 4.46,
+      "bias": 0.06,
+      "rmse": 6.36,
+      "range_coverage": 0.7
+    },
+    "low": {
+      "count": 193601,
+      "mae": 2.06,
+      "bias": 0.35,
+      "rmse": 4.04,
+      "range_coverage": 0.84
+    }
+  },
+  "by_season": {
+    "2022-23": {
+      "count": 72072,
+      "mae": 2.46,
+      "bias": 1.15,
+      "rmse": 4.68,
+      "range_coverage": 0.77
+    },
+    "2023-24": {
+      "count": 81281,
+      "mae": 2.38,
+      "bias": -0.11,
+      "rmse": 4.38,
+      "range_coverage": 0.85
+    },
+    "2024-25": {
+      "count": 74800,
+      "mae": 2.41,
+      "bias": -0.09,
+      "rmse": 4.32,
+      "range_coverage": 0.84
+    }
+  },
+  "fit_evaluation_role": "in_sample_diagnostic",
+  "post_tuning_seasons": [
+    "2025-26"
+  ],
+  "post_tuning_evaluation_role": "reviewed_post_tuning_check_not_independent_validation",
+  "post_tuning_summary": {
+    "count": 81700,
+    "mae": 2.41,
+    "bias": 0.05,
+    "rmse": 4.43,
+    "range_coverage": 0.85
+  },
+  "post_tuning_by_horizon": {
+    "1": {
+      "count": 28906,
+      "mae": 1.07,
+      "bias": 0.02,
+      "rmse": 2.04,
+      "range_coverage": 0.84
+    },
+    "3": {
+      "count": 27228,
+      "mae": 2.52,
+      "bias": 0.05,
+      "rmse": 4.23,
+      "range_coverage": 0.85
+    },
+    "5": {
+      "count": 25566,
+      "mae": 3.79,
+      "bias": 0.08,
+      "rmse": 6.23,
+      "range_coverage": 0.86
+    }
+  },
+  "post_tuning_by_position": {
+    "GKP": {
+      "count": 9409,
+      "mae": 1.7,
+      "bias": -0.48,
+      "rmse": 3.27,
+      "range_coverage": 0.93
+    },
+    "DEF": {
+      "count": 26772,
+      "mae": 2.64,
+      "bias": 0.05,
+      "rmse": 4.64,
+      "range_coverage": 0.83
+    },
+    "MID": {
+      "count": 36530,
+      "mae": 2.36,
+      "bias": 0.13,
+      "rmse": 4.4,
+      "range_coverage": 0.85
+    },
+    "FWD": {
+      "count": 8989,
+      "mae": 2.63,
+      "bias": 0.29,
+      "rmse": 4.91,
+      "range_coverage": 0.84
+    }
+  }
+}
