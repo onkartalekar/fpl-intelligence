@@ -653,6 +653,15 @@ def build_transfer_decisions(
     event = _next_event_id(bootstrap)
     if event <= 1:
         return {"status": "waiting_for_gw2", "event": event, "reason": "Transfer recommendations begin at Gameweek 2."}
+    if manager.get("connection_status") == "not_configured":
+        return {
+            "status": "manager_not_configured",
+            "event": event,
+            "reason": (
+                "No public team ID is configured. Copy config/user-profile.example.json to "
+                "config/user-profile.json, set manager.team_id to your own FPL team ID, then refresh."
+            ),
+        }
     if not manager.get("squad_publicly_available") or len(manager.get("squad", [])) != 15:
         return {
             "status": "manager_squad_unavailable",
