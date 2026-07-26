@@ -201,7 +201,7 @@ All tunable constants load once at import time from
 change before adopting it:
 
 ```bash
-cd /Users/onkartalekar/HermesArtifacts/fpl-intelligence
+cd <path-to-clone>/fpl-intelligence
 python3 scripts/fetch_history.py     # once: pull prior-season data into data/history/
 python3 scripts/fit_coefficients.py  # writes a *candidate* file, never overwrites the active config
 python3 scripts/run_backtest.py      # scores a model version against 3 prior seasons + a held-out season

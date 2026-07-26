@@ -29,7 +29,7 @@ ID. Without it, the dashboard's "My Team" panel stays in a
 Start the local dashboard service:
 
 ```bash
-cd /Users/onkartalekar/HermesArtifacts/fpl-intelligence
+cd <path-to-clone>/fpl-intelligence
 python3 scripts/start_dashboard.py
 ```
 
@@ -44,7 +44,7 @@ Use the **Refresh now** button whenever you want new data. Refreshes are never s
 The standalone file remains available at:
 
 ```text
-/Users/onkartalekar/HermesArtifacts/fpl-intelligence/dashboard.html
+<path-to-clone>/fpl-intelligence/dashboard.html
 ```
 
 When opened as a standalone file, its Refresh button is disabled because a static HTML file cannot securely start the local Python collector.
@@ -54,7 +54,7 @@ When opened as a standalone file, its Refresh button is disabled because a stati
 From Terminal:
 
 ```bash
-cd /Users/onkartalekar/HermesArtifacts/fpl-intelligence
+cd <path-to-clone>/fpl-intelligence
 python3 scripts/refresh_dashboard.py
 ```
 
@@ -90,7 +90,7 @@ Coefficients live in `config/model-coefficients.json`. To validate a model
 change before adopting it:
 
 ```bash
-cd /Users/onkartalekar/HermesArtifacts/fpl-intelligence
+cd <path-to-clone>/fpl-intelligence
 python3 scripts/fetch_history.py     # once: pull prior-season data into data/history/
 python3 scripts/fit_coefficients.py  # writes a *candidate* file, never overwrites the active config
 python3 scripts/run_backtest.py      # scores a model version against 3 prior seasons + a held-out season
@@ -105,7 +105,7 @@ adopted models) is in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 ## Tests
 
 ```bash
-cd /Users/onkartalekar/HermesArtifacts/fpl-intelligence
+cd <path-to-clone>/fpl-intelligence
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
