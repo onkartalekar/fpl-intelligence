@@ -18,8 +18,13 @@ from .fpl_data import (
     summarize_bootstrap,
 )
 from .generation import publish_generation, resolve_artifact
-from .manager_data import collect_public_manager, summarize_manager
-from .model_performance import archive_forecast, build_performance_report, normalize_live_event
+from .manager_data import collect_public_manager, fetch_manager_event_picks, summarize_manager
+from .model_performance import (
+    archive_forecast,
+    build_performance_report,
+    normalize_live_event,
+    normalize_manager_picks,
+)
 from .recommendations import build_gw_recommendations
 from .transfer_decisions import build_transfer_decisions
 from .relevance import enrich_transfers, summarize_clubs
@@ -166,6 +171,7 @@ def _refresh_project_unlocked(
     manager_payload=None,
     fixture_payload=None,
     event_live_payloads=None,
+    manager_picks_payloads=None,
     source_errors=None,
 ):
     root = Path(root)
@@ -228,25 +234,35 @@ def _refresh_project_unlocked(
     }
     actual_collection_errors = []
     provided_live = event_live_payloads or {}
+    provided_manager_picks = manager_picks_payloads or {}
+    team_id = profile.get("manager", {}).get("team_id")
     for event in bootstrap.get("events", []):
         if not event.get("finished"):
             continue
         event_id = int(event["id"])
         key = str(event_id)
-        if key in performance_store.setdefault("actual_events", {}):
-            continue
-        payload = provided_live.get(event_id) or provided_live.get(key)
-        if payload is None and bootstrap_payload is None:
-            try:
-                payload = fetch_event_live(event_id)
-            except Exception as error:
-                _record_actual_collection_attempt(performance_store, event_id, generated_at, error)
-                actual_collection_errors.append(f"GW{event_id}: result collection failed")
-                continue
-        if payload is not None:
-            performance_store["actual_events"][key] = normalize_live_event(payload)
-            _record_actual_collection_attempt(performance_store, event_id, generated_at)
-    team_id = profile.get("manager", {}).get("team_id")
+        if key not in performance_store.setdefault("actual_events", {}):
+            payload = provided_live.get(event_id) or provided_live.get(key)
+            if payload is None and bootstrap_payload is None:
+                try:
+                    payload = fetch_event_live(event_id)
+                except Exception as error:
+                    _record_actual_collection_attempt(performance_store, event_id, generated_at, error)
+                    actual_collection_errors.append(f"GW{event_id}: result collection failed")
+                    payload = None
+            if payload is not None:
+                performance_store["actual_events"][key] = normalize_live_event(payload)
+                _record_actual_collection_attempt(performance_store, event_id, generated_at)
+        if team_id and key not in performance_store.setdefault("manager_picks", {}):
+            picks_payload = provided_manager_picks.get(event_id) or provided_manager_picks.get(key)
+            if picks_payload is None and bootstrap_payload is None:
+                try:
+                    picks_payload = fetch_manager_event_picks(team_id, event_id)
+                except Exception:
+                    actual_collection_errors.append(f"GW{event_id}: manager picks collection failed")
+                    picks_payload = None
+            if picks_payload is not None:
+                performance_store["manager_picks"][key] = normalize_manager_picks(picks_payload)
     manager_raw = None
     manager_state = {"connection_status": "not_configured", "squad": []}
     if team_id:

@@ -523,6 +523,79 @@ class RefreshProjectTests(unittest.TestCase):
             self.assertEqual(comparison["actual_points"], 6)
             persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
             self.assertIn("1", persisted["actual_events"])
+            self.assertNotIn("manager_picks", persisted)
+
+    def test_refresh_backfills_manager_picks_and_scores_team_performance_when_configured(self):
+        bootstrap = {
+            "events": [
+                {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-14T17:30:00Z", "finished": True},
+                {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-21T17:30:00Z", "is_next": True, "finished": False},
+            ],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+        performance_store = {
+            "forecasts": [{
+                "origin_event": 1,
+                "forecast_id": "gw1:0.3",
+                "generated_at": "2026-08-13T12:00:00-04:00",
+                "model_version": "0.3",
+                "profiles": [{
+                    "profile_id": "balanced", "label": "Balanced",
+                    "horizons": {"1": {
+                        "modeled_points": 5.0, "lower_points": 2.0, "upper_points": 8.0,
+                        "lineup_player_ids": [1], "captain_id": 1,
+                    }},
+                }],
+            }],
+            "champion_forecasts": {"1": "gw1:0.3"},
+            "actual_events": {},
+            "player_forecasts": {
+                "1": {
+                    "forecast_id": "gw1:0.3", "model_version": "0.3",
+                    "generated_at": "2026-08-13T12:00:00-04:00",
+                    "players": {"1": [5.0, 2.0, 8.0]},
+                }
+            },
+        }
+        live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+        picks = {"picks": [{"element": 1, "multiplier": 2, "is_captain": True, "is_vice_captain": False}]}
+        manager_payload = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": None, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": None,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "data" / "model-performance.json").write_text(json.dumps(performance_store), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps({"manager": {"team_id": 364759}}), encoding="utf-8"
+            )
+
+            state = refresh_project(
+                root,
+                bootstrap_payload=bootstrap,
+                manager_payload=manager_payload,
+                event_live_payloads={1: live},
+                manager_picks_payloads={1: picks},
+                generated_at="2026-08-22T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertIn("1", persisted["manager_picks"])
+            self.assertEqual(persisted["manager_picks"]["1"][0]["element_id"], 1)
+            self.assertEqual(len(state["model_performance"]["team_performance"]["comparisons"]), 1)
+            comparison = state["model_performance"]["team_performance"]["comparisons"][0]
+            self.assertEqual(comparison["modeled_points"], 10.0)
+            self.assertEqual(comparison["actual_points"], 6)
 
 
 if __name__ == "__main__":
