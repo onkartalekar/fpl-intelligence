@@ -13,6 +13,16 @@ the current model's modeled points, actual points, and signed error. Join
 in each player's own pre-origin (strictly gameweek < origin_gw) ICT Index
 rate (per 90 minutes), then correlate that rate against the model's error.
 
+A correlation check alone answers "is there a relationship" but not "would
+actually adding this to the model beat the current backtest" -- the bar
+every other phase in IMPLEMENTATION_PLAN.md is held to per SPECIFICATION.md's
+model-change rule. So this script also fits a simple linear ICT-based
+correction (position-centered, since raw ICT scale differs hugely by
+position) on an early-origin training split (GW10-20) and measures its
+effect on held-out MAE (GW21-30) -- an honest out-of-sample check, not an
+in-sample fit that could just be chasing noise given how weak the raw
+correlation already is.
+
 Rationale: `ict_index` is an official FPL field (the sum of its
 Influence/Creativity/Threat sub-scores) already present in
 data/history/*/merged_gw.csv, capturing goal threat, chance creation,
@@ -40,8 +50,10 @@ from fpl_intel.backtest import load_season, season_comparisons
 FIT_SEASONS = ["2022-23", "2023-24", "2024-25"]
 FIRST_ORIGIN = 10
 LAST_ORIGIN = 30
+TRAIN_LAST_ORIGIN = 20  # GW10-20 fits the correction weight; GW21-30 is the held-out MAE check
 HORIZON = 3
 MIN_PRE_ORIGIN_MINUTES = 180  # ~2 full matches of ICT signal before trusting the rate
+MIN_REAL_IMPROVEMENT = 0.01  # same "beat by more than this, or it's noise" bar as fit_coefficients.py
 
 
 def _float(value, default=0.0):
@@ -106,12 +118,46 @@ def _format_r(r):
     return f"{r:.3f}" if r is not None else "n/a"
 
 
-def main():
-    error_vs_ict = []  # (pre-origin ICT rate, model error) -- the key question
-    modeled_vs_actual = []  # (modeled_points, actual_points) -- baseline: does the harness itself look sane
-    ict_vs_actual = []  # (pre-origin ICT rate, forward actual points) -- does ICT predict anything at all
-    ict_vs_modeled = []  # (pre-origin ICT rate, modeled_points) -- is that signal already inside the model
+def _mean(values):
+    return sum(values) / len(values) if values else 0.0
 
+
+def _mae(values):
+    return _mean([abs(v) for v in values])
+
+
+def fit_position_centered_weight(train_records):
+    """OLS weight for a single linear correction on position-centered ICT rate.
+
+    ``adjusted_error = error - weight * (ict_rate - position_mean_ict_rate)``.
+    Returns (weight, position_means); weight is the covariance/variance
+    estimate that minimizes squared adjusted error on the training split
+    (a least-squares fit, evaluated for its effect on MAE afterward --
+    MAE-optimal and squared-error-optimal aren't identical, but with a
+    near-zero raw correlation the two won't meaningfully disagree here).
+    """
+    position_ict_values = {}
+    for record in train_records:
+        position_ict_values.setdefault(record["position"], []).append(record["ict_rate"])
+    position_means = {position: _mean(values) for position, values in position_ict_values.items()}
+
+    pairs = [
+        (record["ict_rate"] - position_means.get(record["position"], 0.0), record["error"])
+        for record in train_records
+    ]
+    weight = None
+    n = len(pairs)
+    if n >= 2:
+        mean_x = _mean([x for x, _ in pairs])
+        mean_y = _mean([y for _, y in pairs])
+        cov = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
+        var_x = sum((x - mean_x) ** 2 for x, _ in pairs)
+        weight = cov / var_x if var_x > 0 else 0.0
+    return weight or 0.0, position_means
+
+
+def main():
+    records = []  # one dict per player/origin/horizon comparison with sufficient ICT history
     per_season_error_vs_ict = {}
 
     for season_label in FIT_SEASONS:
@@ -128,13 +174,24 @@ def main():
             ict_rate, minutes_sample = pre_origin_ict_rate(rows, row["origin_gw"])
             if ict_rate is None or minutes_sample < MIN_PRE_ORIGIN_MINUTES:
                 continue
-            error_vs_ict.append((ict_rate, row["error"]))
+            records.append(
+                {
+                    "origin_gw": row["origin_gw"],
+                    "position": row["position"],
+                    "ict_rate": ict_rate,
+                    "error": row["error"],
+                    "modeled_points": row["modeled_points"],
+                    "actual_points": row["actual_points"],
+                }
+            )
             season_pairs.append((ict_rate, row["error"]))
-            modeled_vs_actual.append((row["modeled_points"], row["actual_points"]))
-            ict_vs_actual.append((ict_rate, row["actual_points"]))
-            ict_vs_modeled.append((ict_rate, row["modeled_points"]))
         per_season_error_vs_ict[season_label] = season_pairs
         print(f"{season_label}: {len(season_pairs)} player/origin comparisons with sufficient ICT history")
+
+    error_vs_ict = [(r["ict_rate"], r["error"]) for r in records]
+    modeled_vs_actual = [(r["modeled_points"], r["actual_points"]) for r in records]
+    ict_vs_actual = [(r["ict_rate"], r["actual_points"]) for r in records]
+    ict_vs_modeled = [(r["ict_rate"], r["modeled_points"]) for r in records]
 
     print("\n--- Correlations (Pearson r) ---")
     print(
@@ -166,6 +223,37 @@ def main():
         "high-ICT players are systematically under-projected by the current model, "
         "which would be a real, actionable signal."
     )
+
+    print("\n--- Out-of-sample MAE check (the actual adoption bar) ---")
+    train_records = [r for r in records if r["origin_gw"] <= TRAIN_LAST_ORIGIN]
+    test_records = [r for r in records if r["origin_gw"] > TRAIN_LAST_ORIGIN]
+    weight, position_means = fit_position_centered_weight(train_records)
+    print(
+        f"Fit on GW{FIRST_ORIGIN}-{TRAIN_LAST_ORIGIN} (n={len(train_records)}): "
+        f"weight={weight:.4f}, position means={ {p: round(v, 2) for p, v in position_means.items()} }"
+    )
+
+    baseline_errors = [r["error"] for r in test_records]
+    adjusted_errors = [
+        r["error"] - weight * (r["ict_rate"] - position_means.get(r["position"], 0.0))
+        for r in test_records
+    ]
+    baseline_mae, adjusted_mae = _mae(baseline_errors), _mae(adjusted_errors)
+    baseline_bias, adjusted_bias = _mean(baseline_errors), _mean(adjusted_errors)
+    improvement = baseline_mae - adjusted_mae
+    print(
+        f"Held out on GW{TRAIN_LAST_ORIGIN + 1}-{LAST_ORIGIN} (n={len(test_records)}): "
+        f"baseline MAE={baseline_mae:.4f} (bias={baseline_bias:+.4f}) -> "
+        f"ICT-corrected MAE={adjusted_mae:.4f} (bias={adjusted_bias:+.4f}), "
+        f"improvement={improvement:+.4f}"
+    )
+    if improvement > MIN_REAL_IMPROVEMENT:
+        print(f"-> beats baseline by more than {MIN_REAL_IMPROVEMENT} MAE: a real improvement.")
+    else:
+        print(
+            f"-> does not beat baseline by more than {MIN_REAL_IMPROVEMENT} MAE: "
+            "not a real improvement, consistent with the near-zero raw correlation above."
+        )
 
 
 if __name__ == "__main__":

@@ -818,14 +818,13 @@ range (scaled by their own `ep_next`) instead of ~1.2.
 ## Phase 6 — ICT Index investigation
 
 **Why:** FPL's official bootstrap payload includes an Influence/
-Creativity/Threat composite (`ict_index`, plus its three sub-scores),
-already present in `data/history/*/merged_gw.csv` (unlike npxG/xT/SCA/
-GCA — see the "Considered and declined" entry above, this needs no new
-data source). It captures shots, key passes, and general match
-involvement that isn't fully reducible to `expected_goals_per_90`/
-`expected_assists_per_90`, so it was worth checking whether it explains
-any of the projection model's current error rather than assuming either
-way.
+Creativity/Threat composite (`ict_index`), already present in
+`data/history/*/merged_gw.csv` (unlike npxG/xT/SCA/GCA — see the
+"Considered and declined" entry above, this needs no new data source).
+It captures shots, key passes, and general match involvement that isn't
+fully reducible to `expected_goals_per_90`/`expected_assists_per_90`, so
+it was worth checking whether it explains any of the projection model's
+current error rather than assuming either way.
 
 **Work:** `scripts/investigate_ict_index.py` — a standalone research
 script (not part of the fit/validate pipeline; writes nothing to
@@ -836,21 +835,28 @@ three fit seasons, the model's already-computed `modeled_points`,
 season-to-date `ict_index` per 90 minutes, computed strictly from
 gameweeks before that origin (same no-lookahead boundary as the rest of
 the harness), requiring at least 180 pre-origin minutes before trusting
-the rate. Correlates (Pearson r) that rate against three targets:
-the model's current error, the model's own `modeled_points`, and
-`actual_points` directly.
+the rate. Two checks, in increasing order of rigor:
+1. Correlates (Pearson r) that rate against the model's current error,
+   its own `modeled_points`, and `actual_points` directly -- cheap, but
+   only answers "is there a relationship," not "would adding this
+   actually beat the current backtest."
+2. Fits a single linear, position-centered ICT correction on an early
+   training split (GW10-20), then measures its effect on held-out MAE
+   (GW21-30) -- the same out-of-sample bar SPECIFICATION.md's
+   model-change rule holds every other phase to, not just an in-sample
+   correlation that could be chasing noise.
 
-**Exit criteria:** a correlation between pre-origin ICT rate and model
-error would be a real, actionable signal (the model under- or
-over-projects high-ICT players in a consistent direction); a near-zero
-correlation with error, despite a real correlation with points, would
-mean ICT Index is redundant with what the model already captures from
-`xG`/`xA`/bonus/residual — a clean negative result, not further
-pursued.
+**Exit criteria:** the correction must beat baseline MAE on the held-out
+split by more than 0.01 (the same real-improvement bar
+`fit_coefficients.py` uses for `reliability_denominator`) to be
+considered a real, actionable signal; anything at or below that bar is a
+clean negative result, not further pursued.
 
-**Status: investigated (2026-07-26) — a clean negative result, not
-adopted.** n=21,278 player/origin/horizon comparisons pooled across all
-three fit seasons (min. 180 pre-origin minutes):
+**Status: investigated (2026-07-26) — a clean negative result on both
+checks, not adopted.** n=21,278 player/origin/horizon comparisons pooled
+across all three fit seasons (min. 180 pre-origin minutes):
+
+**Correlation screen:**
 
 | Comparison | Pearson r |
 |---|---|
@@ -863,12 +869,19 @@ ICT Index is real signal — it does correlate with a player's forward
 points (0.237) — but it correlates even more strongly with what the
 model already projects (0.375), and has essentially no relationship
 with where the model is currently wrong (0.019, and inconsistent in
-sign across seasons individually). In other words: a high-ICT player is
-already being projected well by `xG`/`xA`/bonus/residual; ICT Index
-doesn't point at a blind spot in the current model, it mostly restates
-information the model already has under a different name. Not
-incorporated. Script left in `scripts/` as reusable infrastructure if
-a future model change (e.g. a different attacking-component formula)
+sign across seasons individually). A high-ICT player is already being
+projected well by `xG`/`xA`/bonus/residual; ICT Index mostly restates
+information the model already has under a different name.
+
+**Out-of-sample MAE check (the actual adoption bar):** fit on
+GW10-20 (n=11,480) found a correction weight of essentially zero
+(-0.0004). Applied to the held-out GW21-30 split (n=9,798): baseline
+MAE 3.9571 → ICT-corrected MAE 3.9571, an improvement of 0.0000 --
+confirming the correlation-screen finding with the same rigor as every
+adopted/rejected phase above, not just an in-sample correlation.
+
+Not incorporated. Script left in `scripts/` as reusable infrastructure
+if a future model change (e.g. a different attacking-component formula)
 changes what the model's error looks like enough to be worth
 re-checking against ICT.
 
