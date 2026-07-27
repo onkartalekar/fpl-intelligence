@@ -815,6 +815,65 @@ range (scaled by their own `ep_next`) instead of ~1.2.
 
 ---
 
+## Phase 6 — ICT Index investigation
+
+**Why:** FPL's official bootstrap payload includes an Influence/
+Creativity/Threat composite (`ict_index`, plus its three sub-scores),
+already present in `data/history/*/merged_gw.csv` (unlike npxG/xT/SCA/
+GCA — see the "Considered and declined" entry above, this needs no new
+data source). It captures shots, key passes, and general match
+involvement that isn't fully reducible to `expected_goals_per_90`/
+`expected_assists_per_90`, so it was worth checking whether it explains
+any of the projection model's current error rather than assuming either
+way.
+
+**Work:** `scripts/investigate_ict_index.py` — a standalone research
+script (not part of the fit/validate pipeline; writes nothing to
+`config/model-coefficients.json`). Reuses `backtest.season_comparisons()`
+unmodified to get, per player/origin-gameweek/3-GW-horizon across all
+three fit seasons, the model's already-computed `modeled_points`,
+`actual_points`, and signed `error`. Joins in each player's own
+season-to-date `ict_index` per 90 minutes, computed strictly from
+gameweeks before that origin (same no-lookahead boundary as the rest of
+the harness), requiring at least 180 pre-origin minutes before trusting
+the rate. Correlates (Pearson r) that rate against three targets:
+the model's current error, the model's own `modeled_points`, and
+`actual_points` directly.
+
+**Exit criteria:** a correlation between pre-origin ICT rate and model
+error would be a real, actionable signal (the model under- or
+over-projects high-ICT players in a consistent direction); a near-zero
+correlation with error, despite a real correlation with points, would
+mean ICT Index is redundant with what the model already captures from
+`xG`/`xA`/bonus/residual — a clean negative result, not further
+pursued.
+
+**Status: investigated (2026-07-26) — a clean negative result, not
+adopted.** n=21,278 player/origin/horizon comparisons pooled across all
+three fit seasons (min. 180 pre-origin minutes):
+
+| Comparison | Pearson r |
+|---|---|
+| `modeled_points` vs `actual_points` (sanity baseline) | 0.433 |
+| Pre-origin ICT rate vs forward `actual_points` | 0.237 |
+| Pre-origin ICT rate vs `modeled_points` | 0.375 |
+| Pre-origin ICT rate vs model **error** (`actual` − `modeled`) | 0.019 (2022-23: 0.058, 2023-24: 0.009, 2024-25: −0.006) |
+
+ICT Index is real signal — it does correlate with a player's forward
+points (0.237) — but it correlates even more strongly with what the
+model already projects (0.375), and has essentially no relationship
+with where the model is currently wrong (0.019, and inconsistent in
+sign across seasons individually). In other words: a high-ICT player is
+already being projected well by `xG`/`xA`/bonus/residual; ICT Index
+doesn't point at a blind spot in the current model, it mostly restates
+information the model already has under a different name. Not
+incorporated. Script left in `scripts/` as reusable infrastructure if
+a future model change (e.g. a different attacking-component formula)
+changes what the model's error looks like enough to be worth
+re-checking against ICT.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep
