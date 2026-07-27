@@ -14,6 +14,13 @@ fitted from historical results by `scripts/fit_coefficients.py`, and every
 projection can be decomposed back into named components in the dashboard's
 player inspector.
 
+**Terms used throughout:** `GW` = gameweek; `GKP`/`DEF`/`MID`/`FWD` =
+goalkeeper/defender/midfielder/forward; `XI` = starting eleven; `xG`/`xA`
+= expected goals/expected assists (official per-90 stats FPL publishes
+for every player); `FDR` = fixture difficulty rating, FPL's official 1-5
+opponent-strength score; `MAE` = Mean Absolute Error, the average size of
+a projection's miss regardless of direction, used to score backtests.
+
 ## Component scoring
 
 The core idea (`src/fpl_intel/projection.py`) is additive: instead of one
