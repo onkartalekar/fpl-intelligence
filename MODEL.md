@@ -197,8 +197,12 @@ change.
 
 All tunable constants load once at import time from
 `config/model-coefficients.json` via `src/fpl_intel/coefficients.py`
-(falling back to `_DEFAULTS` for any missing key). To refit and validate a
-change before adopting it:
+(falling back to `_DEFAULTS` for any missing key) -- a plain file read,
+not a computation. `data/history/`'s prior-season CSVs and the scripts
+below are only involved in *producing* that file; nothing the live
+dashboard does on a normal refresh reads `data/history/` or recomputes a
+coefficient. You only need this section if you're changing the model
+itself. To refit and validate a change before adopting it:
 
 ```bash
 cd <path-to-clone>/fpl-intelligence

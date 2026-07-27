@@ -39,6 +39,12 @@ the `backtest-baseline-*`/`confirmed-transfers.json` fixtures are generated
 locally and gitignored -- a fresh clone won't have them yet. Run a refresh
 once to create them:
 
+(`data/history/` -- four seasons of prior-year data, committed in full --
+is not one of those generated files, but you don't need to do anything
+with it either. It exists solely so `config/model-coefficients.json` can
+be re-fitted and backtested by someone changing the model; the live
+dashboard never reads it. See [MODEL.md](MODEL.md#coefficients-and-validation).)
+
 ```bash
 cd <path-to-clone>/fpl-intelligence
 python3 scripts/refresh_dashboard.py
