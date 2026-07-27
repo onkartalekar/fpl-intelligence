@@ -815,6 +815,44 @@ range (scaled by their own `ep_next`) instead of ~1.2.
 
 ---
 
+## Considered and declined — npxG / xT / SCA / GCA as new inputs (2026-07-26)
+
+**Context:** while documenting the model's use of `xG`/`xA`, the question
+came up of whether other advanced football-analytics stats (non-penalty
+xG, expected threat, shot-/goal-creating actions) could sharpen the
+attacking projection further. Researched their availability rather than
+guessing.
+
+**Findings:**
+- **npxG** (non-penalty xG) — Understat.com has published per-player npxG
+  for the Premier League every season since 2014/15, free to view, via an
+  undocumented internal JSON endpoint (`understatapi` is a community
+  scraper for it). FBref carries it too. Note FPL's own official
+  `expected_goals` field (already used by this model, via
+  `data/history/`) is *not* penalty-adjusted, so this would be a genuinely
+  new signal, not something derivable from data already on hand.
+- **SCA/GCA** (shot-/goal-creating actions) — FBref publishes per-season
+  Premier League tables for these back through at least 2020-21, covering
+  all three fit seasons. Free to view, no bulk API.
+- **xT** (expected threat) — not available as a published per-player
+  historical stat anywhere. It's a possession-value model computed from
+  event-level (pass-by-pass) data, and the only free event-level source
+  (StatsBomb's open data) doesn't cover recent full Premier League
+  seasons. Effectively unavailable without a paid data provider.
+
+**Decision: not pursued for now.** Both npxG and SCA/GCA are technically
+obtainable, but only via scraping pages FBref/Understat don't offer a
+bulk download or public API for — FBref (part of the Sports-Reference
+family) explicitly rate-limits bot traffic to roughly 10 requests/minute
+and is scrape-averse. That would make these the project's first
+dependency on unofficial, ToS-sensitive third-party data, a different
+provenance category than every other input (official FPL API fields,
+redistributed as-is by `data/history/`'s vaastav mirror). Not silently
+dropped -- recorded here as a real option if the sourcing constraint is
+ever revisited.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep
