@@ -202,7 +202,26 @@ not a computation. `data/history/`'s prior-season CSVs and the scripts
 below are only involved in *producing* that file; nothing the live
 dashboard does on a normal refresh reads `data/history/` or recomputes a
 coefficient. You only need this section if you're changing the model
-itself. To refit and validate a change before adopting it:
+itself.
+
+### Where each coefficient comes from
+
+| Coefficient | How it's set | Used in |
+|---|---|---|
+| `clean_sheet_probability_by_difficulty`, `goals_conceded_multiplier_by_difficulty`, `attack_multiplier_by_difficulty` | Fitted: computed directly (empirically) from real 3-season fixture results conditioned on official FDR -- `fit_coefficients.py`'s `_empirical_fdr_tables()` | `projection.component_points_for_event()` -- see "Opponent strength" above |
+| `reliability_denominator` | Fitted: grid search against a reduced single-season backtest, kept only if it beats the current value by a real margin -- `fit_coefficients.py`'s `_search_reliability_denominator()` | `projection.player_component_rates()` -- the shrinkage curve, see "Shrinkage" above |
+| `uncertainty_bands` (`high`/`medium`/`low`) | Fitted: searched for ~75% empirical outcome coverage against a full fit-season backtest -- `fit_coefficients.py`'s `_fit_uncertainty_band()` | `recommendations.py` -- widens the lower/upper projection range by confidence tier |
+| `reliability_cap`, `residual_reliability_cap` | Hand-set, not touched by `fit_coefficients.py` | `projection.player_component_rates()` -- caps on the shrinkage curve above |
+| `residual_reliability_denominator_by_position` | Hand-set from bespoke multi-step investigation (not a mechanical fit -- see IMPLEMENTATION_PLAN.md Phase 3 continuation) | `projection.player_component_rates()` -- per-position residual shrinkage, see "Shrinkage" above |
+| `ep_next_blend_weight` | Hand-set; not fittable since `ep_next` isn't in the historical dataset | `recommendations.py` -- GW1-only blend, see "GW1-only" section above |
+| `team_strength_min_rounds`, `team_strength_half_life_matches` | Hand-set from a dedicated backtest study (currently a disabling gate) | `team_strength.py` -- see "Opponent strength" above |
+| `minutes_min_appearances`, `minutes_half_life_matches`, `minutes_rotation_volatility_threshold` | Hand-set from a dedicated backtest study (currently a disabling gate) | `minutes.py` -- see "Expected minutes" above |
+| `model_version` | Hand-set label, bumped on each promoted candidate | Display only -- shown in the dashboard's "Model basis and risks" panel |
+
+`fitted_at` and `source` are provenance notes for humans (when/why the
+active file was last promoted) -- neither is read by any model logic.
+
+To refit and validate a change before adopting it:
 
 ```bash
 cd <path-to-clone>/fpl-intelligence
