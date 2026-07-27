@@ -2,14 +2,150 @@
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
 import threading
+import zoneinfo
 
 from .generation import resolve_artifact
 from .refresh import RefreshAlreadyRunning
+
+
+_ALLOWED_RISK_PROFILES = {"conservative", "balanced", "aggressive"}
+_ALLOWED_PROFILE_KEYS = {
+    "team_id",
+    "timezone",
+    "confirmed_free_transfers",
+    "confirmed_free_transfers_event",
+    "risk_profile",
+}
+_TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
+_PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
+
+
+class ProfileValidationError(Exception):
+    """Raised when a submitted profile payload fails validation."""
+
+
+def _validate_profile_payload(payload):
+    """Validate and normalize a /api/profile request body.
+
+    Returns a cleaned dict with exactly the five live manager keys, or
+    raises ProfileValidationError with a fixed, input-free message.
+    """
+    if not isinstance(payload, dict):
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    if not set(payload.keys()) <= _ALLOWED_PROFILE_KEYS:
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+
+    cleaned = {}
+
+    team_id = payload.get("team_id")
+    if team_id is None or team_id == "":
+        cleaned["team_id"] = None
+    else:
+        if isinstance(team_id, bool):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if isinstance(team_id, int):
+            team_id_value = team_id
+        elif isinstance(team_id, str) and team_id.isdigit():
+            team_id_value = int(team_id)
+        else:
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if not (1 <= team_id_value <= 99_999_999):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        cleaned["team_id"] = team_id_value
+
+    timezone_name = payload.get("timezone")
+    if not isinstance(timezone_name, str) or not timezone_name or len(timezone_name) > 64:
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    if not _TIMEZONE_SHAPE_RE.match(timezone_name):
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    if timezone_name not in zoneinfo.available_timezones():
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    cleaned["timezone"] = timezone_name
+
+    confirmed_free_transfers = payload.get("confirmed_free_transfers")
+    if confirmed_free_transfers is None or confirmed_free_transfers == "":
+        cleaned["confirmed_free_transfers"] = None
+    else:
+        if isinstance(confirmed_free_transfers, bool):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if isinstance(confirmed_free_transfers, int):
+            count_value = confirmed_free_transfers
+        elif isinstance(confirmed_free_transfers, str) and confirmed_free_transfers.isdigit():
+            count_value = int(confirmed_free_transfers)
+        else:
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if not (0 <= count_value <= 5):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        cleaned["confirmed_free_transfers"] = count_value
+
+    event = payload.get("confirmed_free_transfers_event")
+    if cleaned["confirmed_free_transfers"] is None:
+        if event is not None and event != "":
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        cleaned["confirmed_free_transfers_event"] = None
+    else:
+        if event is None or event == "" or isinstance(event, bool):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if isinstance(event, int):
+            event_value = event
+        elif isinstance(event, str) and event.isdigit():
+            event_value = int(event)
+        else:
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        if not (1 <= event_value <= 38):
+            raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+        cleaned["confirmed_free_transfers_event"] = event_value
+
+    risk_profile = payload.get("risk_profile")
+    if risk_profile not in _ALLOWED_RISK_PROFILES:
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    cleaned["risk_profile"] = risk_profile
+
+    return cleaned
+
+
+def _default_profile_action(root, payload):
+    """Validate, merge, and atomically persist a profile update."""
+    cleaned = _validate_profile_payload(payload)
+
+    profile_path = root / "config" / "user-profile.json"
+    if profile_path.exists():
+        try:
+            existing = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+    else:
+        existing = {"manager": {}, "experience": {}}
+
+    manager = existing.get("manager")
+    if not isinstance(manager, dict):
+        manager = {}
+    manager["team_id"] = cleaned["team_id"]
+    manager["timezone"] = cleaned["timezone"]
+    manager["risk_profile"] = cleaned["risk_profile"]
+    if cleaned["confirmed_free_transfers"] is None:
+        manager.pop("confirmed_free_transfers", None)
+        manager.pop("confirmed_free_transfers_event", None)
+    else:
+        manager["confirmed_free_transfers"] = cleaned["confirmed_free_transfers"]
+        manager["confirmed_free_transfers_event"] = cleaned["confirmed_free_transfers_event"]
+    existing["manager"] = manager
+
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = profile_path.with_name(profile_path.name + ".tmp")
+    tmp_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp_path, profile_path)
+
+    return cleaned
 
 
 def build_refresh_result(state):
@@ -62,13 +198,14 @@ def _default_refresh_action(root):
     return build_refresh_result(state)
 
 
-def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=None):
-    """Create a localhost dashboard server with a token-protected refresh endpoint."""
+def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=None, profile_action=None):
+    """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
     root = Path(root).resolve()
     if host != "127.0.0.1":
         raise ValueError("Dashboard server must bind only to 127.0.0.1")
     token = token or secrets.token_urlsafe(32)
     action = refresh_action or (lambda: _default_refresh_action(root))
+    profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -142,12 +279,13 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
                 self._json(403, {"status": "error", "message": "Untrusted Origin header"})
                 return
             path = self.path.split("?", 1)[0]
-            if path != "/api/refresh":
+            if path not in {"/api/refresh", "/api/profile"}:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
             if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
                 self._json(403, {"status": "error", "message": "Invalid refresh token"})
                 return
+            max_body = 1024 if path == "/api/refresh" else 4096
             try:
                 content_length = int(self.headers.get("Content-Length", "0") or 0)
             except (TypeError, ValueError):
@@ -156,11 +294,16 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
             if content_length < 0:
                 self._json(400, {"status": "error", "message": "Invalid Content-Length"})
                 return
-            if content_length > 1024:
+            if content_length > max_body:
                 self._json(413, {"status": "error", "message": "Request body too large"})
                 return
-            if content_length:
-                self.rfile.read(content_length)
+            body = self.rfile.read(content_length) if content_length else b""
+            if path == "/api/refresh":
+                self._handle_refresh()
+            else:
+                self._handle_profile(body)
+
+        def _handle_refresh(self):
             if not refresh_lock.acquire(blocking=False):
                 self._json(409, {"status": "busy", "message": "A refresh is already running"})
                 return
@@ -172,6 +315,31 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
             except Exception as error:
                 print(f"Dashboard refresh failed: {error!r}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Dashboard refresh failed"})
+            finally:
+                refresh_lock.release()
+
+        def _handle_profile(self, body):
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": "Invalid profile payload"})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": "Invalid profile payload"})
+                return
+            if not refresh_lock.acquire(blocking=False):
+                self._json(409, {"status": "busy", "message": "A refresh is already running"})
+                return
+            try:
+                cleaned = profile_write_action(payload)
+                self._json(200, {"status": "ok", "profile": cleaned})
+            except ProfileValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+            except (BlockingIOError, RefreshAlreadyRunning):
+                self._json(409, {"status": "busy", "message": "A refresh is already running"})
+            except Exception as error:
+                print(f"Profile update failed: {error!r}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Profile update failed"})
             finally:
                 refresh_lock.release()
 
