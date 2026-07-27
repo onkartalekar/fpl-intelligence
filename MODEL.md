@@ -221,6 +221,76 @@ itself.
 `fitted_at` and `source` are provenance notes for humans (when/why the
 active file was last promoted) -- neither is read by any model logic.
 
+### What each coefficient means
+
+**`attack_multiplier_by_difficulty`** -- how much more or less than a
+league-average team scores against an opponent at that FDR tier (1.45x at
+FDR 1, 0.60x at FDR 5 in the current fit). This is the single biggest
+lever on a player's `attacking` component: it directly scales the
+goal/assist points every outfield player projects, so it's the main
+reason a mid-table midfielder's projection swings hard between an
+easy and a hard fixture.
+
+**`clean_sheet_probability_by_difficulty`** -- the empirical chance a team
+keeps a clean sheet against an opponent at that FDR tier (43% at FDR 1,
+9% at FDR 5). Scales `clean_sheet` points for GKP/DEF/MID directly --
+it's why a "good fixture" matters more for a nailed-on defender than for
+a rotation risk (the probability only pays off if `played_60_probability`
+is also high).
+
+**`goals_conceded_multiplier_by_difficulty`** -- how much more or less
+than average a team concedes against that FDR tier (0.51x at FDR 1,
+1.54x at FDR 5). Scales the expected-goals-against rate feeding the
+`goals_conceded` deduction for GKP/DEF -- the flip side of the clean-sheet
+table: an easy fixture both raises clean-sheet odds and lowers the
+expected penalty when a goal does go in.
+
+**`reliability_denominator`** -- the minutes value at which a player's
+own observed per-90 rate and the positional baseline are trusted equally
+(50/50). Below that many career minutes, a player's projection leans more
+on "what a typical player at this position does" than on their own small
+sample; above it, their own numbers dominate. This is the knob that
+stops a hot two-game streak from a fringe player being read as a
+sustained rate.
+
+**`reliability_cap`** -- the ceiling that trust in a player's own numbers
+can reach, even with a full season+ of minutes (0.82, so at least 18%
+weight always stays on the positional baseline). Exists so no player,
+however large their sample, is ever projected purely off their own
+history with zero regression toward the position norm.
+
+**`residual_reliability_denominator_by_position` / `residual_reliability_cap`**
+-- the same trust-curve mechanics as above, but for the `residual`
+component (a player's real over/under-performance vs. what their own
+rate stats predict) rather than the raw per-90 rates. Set separately
+per position because a dedicated investigation found MID/FWD's residual
+is a faster, more trustworthy signal (their denominator is 100 vs.
+GKP/DEF's 900) -- elite finishing shows up in a smaller sample than a
+defense's clean-sheet variance does.
+
+**`uncertainty_bands`** (`high`/`medium`/`low`) -- how wide the lower/upper
+projection range is around the central estimate, one width per confidence
+tier. This is what actually separates the conservative, balanced, and
+aggressive squad profiles: a low-confidence player (short track record,
+flagged availability) has a wide band, so the conservative optimizer
+punishes them far more than the aggressive one does for the same central
+projection.
+
+**`ep_next_blend_weight`** -- the 30% weight given to FPL's own official
+`ep_next` estimate, blended in only for the very first projected
+gameweek. A deliberate concession that FPL's number can reflect very
+recent team news (press conferences, training reports) that the model's
+rate-stats approach has no way to see before a deadline.
+
+**`team_strength_min_rounds` / `team_strength_half_life_matches`** and
+**`minutes_min_appearances` / `minutes_half_life_matches` /
+`minutes_rotation_volatility_threshold`** -- gate thresholds and recency
+decay rates for the two built-but-disabled models (see "Opponent
+strength" and "Expected minutes" above for why they're off). The
+`_min_*` values are currently set one unit past what a season can reach,
+so they function purely as an off switch; the `_half_life_*`/threshold
+values would only matter if that gate were ever lowered.
+
 To refit and validate a change before adopting it:
 
 ```bash
