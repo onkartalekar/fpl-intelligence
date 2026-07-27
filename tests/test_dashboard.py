@@ -287,6 +287,44 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn(".decision-layout{display:grid;align-items:start;", html)
         self.assertIn(".formation-pitch{", html)
 
+    def test_decision_subnav_covers_every_section(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('data-scroll-to="decision-section-weekly"', html)
+        self.assertIn('data-scroll-to="decision-section-bench"', html)
+        self.assertIn('id="decision-section-bench"', html)
+        self.assertIn(
+            "['decision-section-summary','decision-section-weekly',"
+            "'decision-section-profiles','decision-section-xi',"
+            "'decision-section-bench','decision-section-squad']",
+            html,
+        )
+
+    def test_decision_scroll_targets_clear_sticky_subnav(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn("scroll-margin-top:58px", html)
+        self.assertIn("matchMedia('(prefers-reduced-motion: reduce)')", html)
+        self.assertNotIn("renderDecisionLegacy", html)
+
+    def test_mobile_inspector_order_is_scoped_to_transfers(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn(".transfer-layout .inspector{order:-1}", html)
+        self.assertNotIn(".inspector{position:static;order:-1}", html)
+        self.assertIn(".decision-subnav{flex-wrap:nowrap;overflow-x:auto", html)
+        self.assertIn("@media(max-width:980px){.decision-layout{grid-template-columns:1fr}", html)
+
+    def test_decision_center_surfaces_watchlist_and_rotation(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="decision-watchlist"', html)
+        self.assertIn('id="decision-rotation"', html)
+        self.assertIn("decision.watchlist", html)
+        self.assertIn("evaluation_horizons", html)
+        self.assertIn("Five-gameweek XI rotation", html)
+        self.assertIn("Watchlist", html)
+
     def test_risk_profile_controls_follow_aria_tabs_keyboard_pattern(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
