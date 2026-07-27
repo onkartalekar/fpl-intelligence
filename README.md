@@ -1,6 +1,7 @@
 # FPL Intelligence
 
-A local, source-backed foundation for 2026/27 FPL decisions.
+A local, source-backed foundation for 2026/27 FPL (Fantasy Premier
+League) decisions.
 
 ## Current status
 
