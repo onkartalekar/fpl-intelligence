@@ -25,7 +25,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 2,
+      "age_days": 3,
       "matched_fpl_element_id": null
     },
     {
@@ -53,7 +53,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 2,
+      "age_days": 3,
       "matched_fpl_element_id": null
     },
     {
@@ -81,7 +81,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 2,
+      "age_days": 3,
       "matched_fpl_element_id": null
     },
     {
@@ -109,7 +109,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": 353
     },
     {
@@ -137,7 +137,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": null
     },
     {
@@ -170,7 +170,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": null
     },
     {
@@ -198,7 +198,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": 558
     },
     {
@@ -226,7 +226,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": 557
     },
     {
@@ -254,7 +254,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "new_7d",
-      "age_days": 3,
+      "age_days": 4,
       "matched_fpl_element_id": null
     },
     {
@@ -282,7 +282,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "new_7d",
-      "age_days": 4,
+      "age_days": 5,
       "matched_fpl_element_id": null
     },
     {
@@ -310,7 +310,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "new_7d",
-      "age_days": 4,
+      "age_days": 5,
       "matched_fpl_element_id": 259
     },
     {
@@ -338,7 +338,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "new_7d",
-      "age_days": 4,
+      "age_days": 5,
       "matched_fpl_element_id": null
     },
     {
@@ -366,7 +366,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "recent_14d",
-      "age_days": 9,
+      "age_days": 10,
       "matched_fpl_element_id": null
     },
     {
@@ -394,7 +394,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 9,
+      "age_days": 10,
       "matched_fpl_element_id": 53
     },
     {
@@ -422,7 +422,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 9,
+      "age_days": 10,
       "matched_fpl_element_id": 54
     },
     {
@@ -450,7 +450,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 9,
+      "age_days": 10,
       "matched_fpl_element_id": 334
     },
     {
@@ -478,7 +478,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 10,
+      "age_days": 11,
       "matched_fpl_element_id": 38
     },
     {
@@ -506,7 +506,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 10,
+      "age_days": 11,
       "matched_fpl_element_id": 117
     },
     {
@@ -534,7 +534,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "recent_14d",
-      "age_days": 10,
+      "age_days": 11,
       "matched_fpl_element_id": null
     },
     {
@@ -562,7 +562,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "recent_14d",
-      "age_days": 11,
+      "age_days": 12,
       "matched_fpl_element_id": null
     },
     {
@@ -590,7 +590,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 11,
+      "age_days": 12,
       "matched_fpl_element_id": 541
     },
     {
@@ -618,7 +618,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 12,
+      "age_days": 13,
       "matched_fpl_element_id": 81
     },
     {
@@ -646,7 +646,7 @@
       "movement_direction": "released",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 12,
+      "age_days": 13,
       "matched_fpl_element_id": 325
     },
     {
@@ -674,7 +674,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 12,
+      "age_days": 13,
       "matched_fpl_element_id": 325
     },
     {
@@ -707,7 +707,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "recent_14d",
-      "age_days": 12,
+      "age_days": 13,
       "matched_fpl_element_id": 504
     },
     {
@@ -735,7 +735,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -763,7 +763,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -791,7 +791,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -819,7 +819,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": 410
     },
     {
@@ -847,7 +847,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -875,7 +875,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 15,
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -903,7 +903,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": null
     },
     {
@@ -931,7 +931,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": null
     },
     {
@@ -959,7 +959,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": 207
     },
     {
@@ -987,7 +987,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": null
     },
     {
@@ -1015,7 +1015,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": 3
     },
     {
@@ -1043,7 +1043,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 17,
+      "age_days": 18,
       "matched_fpl_element_id": 108
     },
     {
@@ -1071,7 +1071,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 20,
+      "age_days": 21,
       "matched_fpl_element_id": 455
     },
     {
@@ -1099,7 +1099,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 20,
+      "age_days": 21,
       "matched_fpl_element_id": null
     },
     {
@@ -1127,7 +1127,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 29,
+      "age_days": 30,
       "matched_fpl_element_id": null
     },
     {
@@ -1155,7 +1155,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 30,
+      "age_days": 31,
       "matched_fpl_element_id": 246
     },
     {
@@ -1183,7 +1183,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 30,
+      "age_days": 31,
       "matched_fpl_element_id": 247
     },
     {
@@ -1211,7 +1211,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": 525
     },
     {
@@ -1244,7 +1244,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": 112
     },
     {
@@ -1272,7 +1272,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": null
     },
     {
@@ -1300,7 +1300,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": null
     },
     {
@@ -1328,7 +1328,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": 377
     },
     {
@@ -1356,7 +1356,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": null
     },
     {
@@ -1384,7 +1384,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": null
     },
     {
@@ -1412,7 +1412,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 38,
+      "age_days": 39,
       "matched_fpl_element_id": null
     },
     {
@@ -1440,7 +1440,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": null
     },
     {
@@ -1468,7 +1468,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": null
     },
     {
@@ -1496,7 +1496,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": null
     },
     {
@@ -1524,7 +1524,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": null
     },
     {
@@ -1552,7 +1552,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": 328
     },
     {
@@ -1580,7 +1580,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": 328
     },
     {
@@ -1608,8 +1608,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": 120
+    },
+    {
+      "player": "Jack Harrison",
+      "from_club": "Leeds United",
+      "to_club": "New England Revolution",
+      "announced_at": "2026-06-15T17:39:00Z",
+      "source_url": "https://www.leedsunited.com/en/news/jack-harrison-completes-move-to-new-england-revolution?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "leedsunited.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Leeds United",
+      "premier_league_item_id": 4681367,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.leedsunited.com/en/news/jack-harrison-completes-move-to-new-england-revolution?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.leedsunited.com/en/news/jack-harrison-completes-move-to-new-england-revolution?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 42,
+      "matched_fpl_element_id": 342
     },
     {
       "player": "Harry Wilson",
@@ -1636,7 +1664,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": 260
     },
     {
@@ -1664,7 +1692,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": null
     },
     {
@@ -1692,7 +1720,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 41,
+      "age_days": 42,
       "matched_fpl_element_id": 119
     },
     {
@@ -1720,7 +1748,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1748,7 +1776,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1781,7 +1809,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": 242
     },
     {
@@ -1809,7 +1837,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1837,7 +1865,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": 152
     },
     {
@@ -1865,7 +1893,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1893,7 +1921,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": 164
     },
     {
@@ -1921,7 +1949,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1949,7 +1977,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -1977,7 +2005,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2005,7 +2033,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2033,7 +2061,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2061,7 +2089,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2094,7 +2122,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": 481
     },
     {
@@ -2122,7 +2150,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2150,7 +2178,7 @@
       "movement_direction": "released",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": 3
     },
     {
@@ -2178,7 +2206,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2206,7 +2234,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 44,
+      "age_days": 45,
       "matched_fpl_element_id": null
     },
     {
@@ -2234,7 +2262,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2262,7 +2290,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2290,7 +2318,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2318,7 +2346,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2346,7 +2374,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2374,7 +2402,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2402,7 +2430,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2430,7 +2458,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2458,7 +2486,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2486,7 +2514,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2514,7 +2542,7 @@
       "movement_direction": "released",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": 260
     },
     {
@@ -2542,7 +2570,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2570,7 +2598,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2598,7 +2626,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2626,7 +2654,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2654,7 +2682,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 48,
+      "age_days": 49,
       "matched_fpl_element_id": null
     },
     {
@@ -2682,7 +2710,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 50,
+      "age_days": 51,
       "matched_fpl_element_id": 135
     },
     {
@@ -2710,7 +2738,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 51,
+      "age_days": 52,
       "matched_fpl_element_id": 497
     },
     {
@@ -2738,7 +2766,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 51,
+      "age_days": 52,
       "matched_fpl_element_id": null
     },
     {
@@ -2766,7 +2794,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 51,
+      "age_days": 52,
       "matched_fpl_element_id": null
     },
     {
@@ -2794,7 +2822,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2822,7 +2850,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2850,7 +2878,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2878,7 +2906,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2906,7 +2934,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2934,7 +2962,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2962,7 +2990,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -2990,7 +3018,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 53,
       "matched_fpl_element_id": null
     },
     {
@@ -3023,7 +3051,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -3051,7 +3079,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -3084,7 +3112,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 54,
       "matched_fpl_element_id": 162
     },
     {
@@ -3112,7 +3140,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -3140,7 +3168,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 54,
+      "age_days": 55,
       "matched_fpl_element_id": null
     },
     {
@@ -3168,7 +3196,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 60,
+      "age_days": 61,
       "matched_fpl_element_id": null
     },
     {
@@ -3196,7 +3224,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 60,
+      "age_days": 61,
       "matched_fpl_element_id": null
     },
     {
@@ -3224,7 +3252,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 64,
+      "age_days": 65,
       "matched_fpl_element_id": null
     },
     {
@@ -3252,7 +3280,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3280,7 +3308,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3308,7 +3336,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3336,7 +3364,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3364,7 +3392,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": 9
     },
     {
@@ -3392,7 +3420,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3420,7 +3448,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3448,7 +3476,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3476,7 +3504,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3504,7 +3532,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3532,7 +3560,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3560,7 +3588,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3588,7 +3616,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3616,7 +3644,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3644,7 +3672,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3672,7 +3700,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3700,7 +3728,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3728,7 +3756,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3756,7 +3784,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 166,
+      "age_days": 167,
       "matched_fpl_element_id": null
     },
     {
@@ -3784,7 +3812,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 173,
+      "age_days": 174,
       "matched_fpl_element_id": null
     },
     {
@@ -3812,8 +3840,36 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 173,
+      "age_days": 174,
       "matched_fpl_element_id": 24
+    },
+    {
+      "player": "Matt Cox",
+      "from_club": "Brentford",
+      "to_club": "Barnet",
+      "announced_at": "2026-02-03T00:14:00Z",
+      "source_url": "https://www.brentfordfc.com/en/news/article/first-team-matt-cox-joins-barnet-on-loan-transfer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "brentfordfc.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Brentford",
+      "premier_league_item_id": 4681366,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.brentfordfc.com/en/news/article/first-team-matt-cox-joins-barnet-on-loan-transfer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.brentfordfc.com/en/news/article/first-team-matt-cox-joins-barnet-on-loan-transfer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 174,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Jannik Schuster",
@@ -3840,7 +3896,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 173,
+      "age_days": 174,
       "matched_fpl_element_id": 93
     },
     {
@@ -3868,7 +3924,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 173,
+      "age_days": 174,
       "matched_fpl_element_id": 105
     },
     {
@@ -3896,7 +3952,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -3929,7 +3985,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": 43
     },
     {
@@ -3957,7 +4013,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -3985,7 +4041,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4013,7 +4069,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4041,7 +4097,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4069,7 +4125,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4102,7 +4158,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": 40
     },
     {
@@ -4130,7 +4186,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4158,7 +4214,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4186,7 +4242,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4214,7 +4270,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4242,7 +4298,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4270,7 +4326,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": 362
     },
     {
@@ -4298,7 +4354,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4326,7 +4382,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4354,7 +4410,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4382,7 +4438,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4410,7 +4466,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4438,7 +4494,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 175,
+      "age_days": 176,
       "matched_fpl_element_id": null
     },
     {
@@ -4466,7 +4522,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 212,
+      "age_days": 213,
       "matched_fpl_element_id": null
     },
     {
@@ -4494,7 +4550,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 212,
+      "age_days": 213,
       "matched_fpl_element_id": null
     },
     {
@@ -4522,7 +4578,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 212,
+      "age_days": 213,
       "matched_fpl_element_id": null
     },
     {
@@ -4550,7 +4606,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 222,
+      "age_days": 223,
       "matched_fpl_element_id": null
     },
     {
@@ -4578,7 +4634,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 222,
+      "age_days": 223,
       "matched_fpl_element_id": 272
     },
     {
@@ -4606,7 +4662,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 222,
+      "age_days": 223,
       "matched_fpl_element_id": 104
     },
     {
@@ -4634,7 +4690,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 222,
+      "age_days": 223,
       "matched_fpl_element_id": null
     },
     {
@@ -4662,7 +4718,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 222,
+      "age_days": 223,
       "matched_fpl_element_id": null
     }
   ]
