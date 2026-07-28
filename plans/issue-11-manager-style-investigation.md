@@ -133,6 +133,46 @@ the bar is a clean negative result, recorded and not pursued.
   (a) already refuted, (b) not viably testable at this sample size,
   (c) tested and refuted.
 
+### (d) Direct classification of a manager's actual tactical style -- DECLINE (2026-07-27)
+
+- **What:** issue #11's original intent, clarified after (a)-(c) were
+  already drafted -- not a statistical proxy for style, but the real
+  thing: a categorical read of each PL manager's actual playing
+  philosophy (high press vs. low block, possession vs. direct,
+  back-three vs. back-four preference, etc.), sourced and joined per
+  club per season.
+- **Data search performed:** checked for a free, structured, season-
+  consistent source covering all 20 PL managers across the three fit
+  seasons.
+  - **Official Premier League trend articles** (premierleague.com) --
+    free, first-party, legitimate in principle, but published as
+    editorial prose about league-wide trends for the current season
+    (e.g. "4-2-3-1 used by 11 of 20 teams in 2024-25"), not a
+    structured per-manager, per-season dataset with stable categories
+    to join against.
+  - **Opta Analyst / theanalyst.com** -- the same site investigated for
+    issue #13. Publishes a "Playing Styles" article per season, but
+    it sits on the identical undocumented endpoint and ToS/robots.txt
+    restrictions already found there, and (per that investigation)
+    only exposes current-season aggregates even where reachable.
+  - **Wikipedia manager biographies** -- contain real qualitative
+    prose ("Guardiola's tiki-taka," "Mourinho's park the bus"), but no
+    structured table analogous to the tenure-dates page used for
+    candidate (b). Turning this into a usable input means someone
+    hand-labeling ~20-30 managers into style buckets from personal
+    football knowledge, not extracting verifiable data from a source.
+  - **Third-party tactical analytics** (Total Football Analysis,
+    Wyscout-based writeups) -- subscription/ToS-restricted, the same
+    category as the already-declined FBref/Understat sources in the
+    npxG entry.
+- **Verdict:** decline, on the same data-availability grounds as the
+  npxG/xT/SCA/GCA entry and the issue #13 Opta investigation -- nothing
+  freely available, structured, and verifiable exists. The alternative
+  (hand-curated subjective style tags with no cited source) would be
+  the project's first non-source-backed input, a real departure from
+  every other coefficient in the model, which are all either fitted
+  from history or hand-set from a documented rationale -- not pursued.
+
 ## Proposed investigation
 
 One standalone, stdlib-only research script,
