@@ -871,6 +871,21 @@ def build_gw_recommendations(
         "profile_recommendations": profile_recommendations,
         "recommended_squad": balanced["squad"],
         "captaincy": balanced["captaincy"],
+        "player_forecasts": [
+            {
+                "id": player["id"],
+                "modeled": round(player["fixture_xp"][0], 2) if player["fixture_xp"] else 0.0,
+                "lower": (
+                    round(player["profile_fixture_xp"]["conservative"][0], 2)
+                    if player["profile_fixture_xp"]["conservative"] else 0.0
+                ),
+                "upper": (
+                    round(player["profile_fixture_xp"]["aggressive"][0], 2)
+                    if player["profile_fixture_xp"]["aggressive"] else 0.0
+                ),
+            }
+            for player in projections
+        ],
         "watchlist": {
             position: sorted(
                 (player for player in eligible if player["position_short"] == position),

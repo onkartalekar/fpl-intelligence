@@ -4,6 +4,7 @@ from fpl_intel.model_performance import (
     archive_forecast,
     build_performance_report,
     normalize_live_event,
+    normalize_manager_picks,
 )
 
 
@@ -45,6 +46,15 @@ class ModelPerformanceTests(unittest.TestCase):
             "model": {"version": "0.3", "is_champion": True},
             "profile_recommendations": profiles,
         }
+
+    def _decision_with_player_forecasts(self, player_forecasts=None):
+        decision = self._decision()
+        decision["player_forecasts"] = player_forecasts if player_forecasts is not None else [
+            {"id": 1, "modeled": 5.0, "lower": 2.0, "upper": 8.0},
+            {"id": 2, "modeled": 4.0, "lower": 1.0, "upper": 7.0},
+            {"id": 3, "modeled": 0.0, "lower": 0.0, "upper": 0.0},
+        ]
+        return decision
 
     def test_archives_pre_event_forecast_once(self):
         store = {"forecasts": [], "actual_events": {}}
@@ -178,6 +188,118 @@ class ModelPerformanceTests(unittest.TestCase):
 
         self.assertEqual({row["horizon"] for row in report["comparisons"]}, {1})
         self.assertGreater(report["pending_comparisons"], 0)
+
+    def test_archive_forecast_freezes_player_forecasts_once(self):
+        store = {"forecasts": [], "actual_events": {}}
+        decision = self._decision_with_player_forecasts()
+
+        self._archive(store, decision)
+
+        self.assertIn("1", store["player_forecasts"])
+        frozen = store["player_forecasts"]["1"]
+        self.assertEqual(frozen["players"]["1"], [5.0, 2.0, 8.0])
+        self.assertEqual(frozen["players"]["2"], [4.0, 1.0, 7.0])
+
+        # A second archive attempt for the same origin+version must not
+        # rewrite the frozen player forecasts (first-write-wins, immutable).
+        second = self._decision_with_player_forecasts([
+            {"id": 1, "modeled": 99.0, "lower": 99.0, "upper": 99.0},
+        ])
+        self._archive(store, second)
+
+        self.assertEqual(store["player_forecasts"]["1"]["players"]["1"], [5.0, 2.0, 8.0])
+
+    def test_archive_forecast_does_not_freeze_player_forecasts_for_non_champion(self):
+        store = {"forecasts": [], "actual_events": {}}
+        decision = self._decision_with_player_forecasts()
+        decision["model"] = {"version": "candidate", "is_champion": False}
+
+        self._archive(store, decision)
+
+        self.assertNotIn("player_forecasts", store)
+
+    def test_player_performance_applies_cohort_rule_and_scores_error(self):
+        store = {"forecasts": [], "actual_events": {}}
+        self._archive(store, self._decision_with_player_forecasts())
+        store["actual_events"]["1"] = {"1": 6, "2": 0, "3": 0}
+
+        report = build_performance_report(store)
+        player_performance = report["player_performance"]
+
+        self.assertEqual(player_performance["status"], "active")
+        self.assertEqual(player_performance["events"], [1])
+        element_ids = {row["element_id"] for row in player_performance["comparisons"]}
+        self.assertEqual(element_ids, {1, 2})  # player 3 (0 modeled, 0 actual) excluded by cohort rule
+
+        row = next(row for row in player_performance["comparisons"] if row["element_id"] == 1)
+        self.assertEqual(row["modeled_points"], 5.0)
+        self.assertEqual(row["actual_points"], 6)
+        self.assertEqual(row["error"], 1.0)
+        self.assertTrue(row["inside_range"])
+        self.assertEqual(player_performance["summary"]["mae"], 2.5)
+
+    def test_normalize_manager_picks_maps_payload(self):
+        payload = {
+            "picks": [
+                {"element": 1, "multiplier": 2, "is_captain": True, "is_vice_captain": False},
+                {"element": 2, "multiplier": 1, "is_captain": False, "is_vice_captain": True},
+                {"element": 3, "multiplier": 0, "is_captain": False, "is_vice_captain": False},
+            ]
+        }
+
+        picks = normalize_manager_picks(payload)
+
+        self.assertEqual(
+            picks,
+            [
+                {"element_id": 1, "multiplier": 2, "is_captain": True},
+                {"element_id": 2, "multiplier": 1, "is_captain": False},
+                {"element_id": 3, "multiplier": 0, "is_captain": False},
+            ],
+        )
+
+    def test_team_performance_scores_multiplier_weighted_picks_with_captain(self):
+        store = {"forecasts": [], "actual_events": {}}
+        self._archive(store, self._decision_with_player_forecasts())
+        store["actual_events"]["1"] = {"1": 6, "2": 3}
+        store["manager_picks"] = {
+            "1": [
+                {"element_id": 1, "multiplier": 2, "is_captain": True},
+                {"element_id": 2, "multiplier": 1, "is_captain": False},
+            ]
+        }
+
+        report = build_performance_report(store)
+        team_performance = report["team_performance"]
+
+        self.assertEqual(team_performance["status"], "active")
+        comparison = team_performance["comparisons"][0]
+        # captain (multiplier 2) doubles player 1's modeled/actual contribution.
+        self.assertEqual(comparison["modeled_points"], 2 * 5.0 + 1 * 4.0)
+        self.assertEqual(comparison["actual_points"], 2 * 6 + 1 * 3)
+        self.assertEqual(comparison["error"], comparison["actual_points"] - comparison["modeled_points"])
+
+    def test_team_performance_emits_no_comparison_without_frozen_forecast(self):
+        store = {"forecasts": [], "actual_events": {}}
+        store["actual_events"]["1"] = {"1": 6}
+        store["manager_picks"] = {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}
+
+        report = build_performance_report(store)
+
+        self.assertEqual(report["team_performance"]["status"], "waiting_for_results")
+        self.assertEqual(report["team_performance"]["comparisons"], [])
+
+    def test_old_store_shape_yields_empty_player_and_team_performance(self):
+        store = {"forecasts": [], "actual_events": {}}
+
+        report = build_performance_report(store)
+
+        self.assertEqual(report["player_performance"], {
+            "status": "waiting_for_results", "events": [], "comparisons": [],
+            "summary": {"count": 0, "mae": None, "bias": None, "rmse": None, "range_coverage": None},
+        })
+        self.assertEqual(report["team_performance"]["status"], "waiting_for_results")
+        self.assertEqual(report["team_performance"]["comparisons"], [])
 
 
 if __name__ == "__main__":

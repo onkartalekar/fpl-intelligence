@@ -17,6 +17,19 @@ def normalize_live_event(payload):
     }
 
 
+def normalize_manager_picks(payload):
+    """Return a manager's published picks as compact element/multiplier/captain rows."""
+    return [
+        {
+            "element_id": int(pick["element"]),
+            "multiplier": int(pick.get("multiplier") or 0),
+            "is_captain": bool(pick.get("is_captain")),
+        }
+        for pick in (payload or {}).get("picks", [])
+        if pick.get("element") is not None
+    ]
+
+
 def archive_forecast(store, decision, deadline_time=None):
     """Archive the first pre-result forecast for an origin event without rewriting it."""
     if decision.get("status") != "active_preliminary" or not decision.get("event"):
@@ -97,8 +110,23 @@ def archive_forecast(store, decision, deadline_time=None):
             }
         )
         champions = store.setdefault("champion_forecasts", {})
-        if (decision.get("model") or {}).get("is_champion"):
+        is_champion = bool((decision.get("model") or {}).get("is_champion"))
+        if is_champion:
             champions[str(origin_event)] = forecast_id
+        player_forecasts = decision.get("player_forecasts")
+        if player_forecasts and is_champion:
+            frozen_players = store.setdefault("player_forecasts", {})
+            origin_key = str(origin_event)
+            if origin_key not in frozen_players:
+                frozen_players[origin_key] = {
+                    "forecast_id": forecast_id,
+                    "model_version": model_version,
+                    "generated_at": decision.get("generated_at"),
+                    "players": {
+                        str(row["id"]): [row.get("modeled", 0.0), row.get("lower", 0.0), row.get("upper", 0.0)]
+                        for row in player_forecasts
+                    },
+                }
     return store
 
 
@@ -165,6 +193,108 @@ def _calibration(summary, comparisons):
         "completed_origin_events": count,
         "status": "Calibration diagnostics are active. Changes remain reviewable rather than automatic.",
         "recommendations": recommendations,
+    }
+
+
+def _player_performance(store):
+    """Compare frozen per-player forecasts with official per-player actuals.
+
+    Mirrors the backtest cohort rule (project_players/season_comparisons):
+    a player only enters the comparison set for an origin event if the
+    model gave them a positive modeled score or they actually scored --
+    this keeps untouched fringe players from diluting the error metrics
+    with trivial correct-zero predictions.
+    """
+    frozen_forecasts = store.get("player_forecasts", {})
+    actual_events = store.get("actual_events", {})
+    comparisons = []
+    scored_events = []
+    for origin_key, frozen in frozen_forecasts.items():
+        if origin_key not in actual_events:
+            continue
+        event = int(origin_key)
+        scored_events.append(event)
+        actual = actual_events[origin_key]
+        for element_id, values in frozen.get("players", {}).items():
+            modeled, lower, upper = (float(values[0]), float(values[1]), float(values[2]))
+            actual_points = int(actual.get(element_id, 0))
+            if modeled <= 0 and actual_points == 0:
+                continue
+            comparisons.append(
+                {
+                    "event": event,
+                    "element_id": int(element_id),
+                    "modeled_points": modeled,
+                    "actual_points": actual_points,
+                    "error": _rounded(actual_points - modeled),
+                    "absolute_error": _rounded(abs(actual_points - modeled)),
+                    "lower_points": lower,
+                    "upper_points": upper,
+                    "inside_range": lower <= actual_points <= upper,
+                }
+            )
+    comparisons.sort(key=lambda row: (row["event"], row["element_id"]), reverse=True)
+    return {
+        "status": "active" if comparisons else "waiting_for_results",
+        "events": sorted(scored_events),
+        "comparisons": comparisons,
+        "summary": _summarize(comparisons),
+    }
+
+
+def _team_performance(store):
+    """Score the manager's own published picks against frozen per-player forecasts.
+
+    Only events with BOTH published picks (facts) and a frozen pre-deadline
+    forecast (never reconstructed with hindsight) are scored; an event
+    missing a frozen forecast yields no comparison rather than one derived
+    after the fact.
+    """
+    manager_picks = store.get("manager_picks", {})
+    actual_events = store.get("actual_events", {})
+    frozen_forecasts = store.get("player_forecasts", {})
+    comparisons = []
+    for event_key, picks in manager_picks.items():
+        if event_key not in actual_events:
+            continue
+        frozen = frozen_forecasts.get(event_key)
+        if not frozen:
+            continue
+        actual = actual_events[event_key]
+        players = frozen.get("players", {})
+        modeled_points = 0.0
+        lower_points = 0.0
+        upper_points = 0.0
+        actual_points = 0
+        for pick in picks:
+            multiplier = int(pick.get("multiplier") or 0)
+            element_id = str(pick.get("element_id"))
+            values = players.get(element_id, [0.0, 0.0, 0.0])
+            modeled_points += multiplier * float(values[0])
+            lower_points += multiplier * float(values[1])
+            upper_points += multiplier * float(values[2])
+            actual_points += multiplier * int(actual.get(element_id, 0))
+        comparisons.append(
+            {
+                "event": int(event_key),
+                "modeled_points": _rounded(modeled_points),
+                "lower_points": _rounded(lower_points),
+                "upper_points": _rounded(upper_points),
+                "actual_points": actual_points,
+                "error": _rounded(actual_points - modeled_points),
+                "absolute_error": _rounded(abs(actual_points - modeled_points)),
+                "inside_range": lower_points <= actual_points <= upper_points,
+            }
+        )
+    comparisons.sort(key=lambda row: row["event"], reverse=True)
+    return {
+        "status": "active" if comparisons else "waiting_for_results",
+        "comparisons": comparisons,
+        "summary": _summarize(comparisons),
+        "method": (
+            "Published official picks and multipliers scored with pre-deadline frozen "
+            "per-player projections; no autosubs are simulated on either side."
+        ),
     }
 
 
@@ -235,4 +365,6 @@ def build_performance_report(store):
         "by_horizon": by_horizon,
         "by_profile": by_profile,
         "calibration": _calibration(summary, comparisons),
+        "player_performance": _player_performance(store),
+        "team_performance": _team_performance(store),
     }

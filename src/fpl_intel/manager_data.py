@@ -30,6 +30,12 @@ def collect_public_manager(team_id, fetch_json=None):
     }
 
 
+def fetch_manager_event_picks(team_id, event_id, fetch_json=None):
+    """Fetch a manager's published picks for one specific past Gameweek."""
+    fetch_json = fetch_json or _fetch_json
+    return fetch_json(f"{_API_ROOT}/entry/{int(team_id)}/event/{int(event_id)}/picks/")
+
+
 def summarize_manager(raw, bootstrap):
     """Create dashboard-safe manager state and map public picks to FPL players."""
     entry = raw.get("entry", {})

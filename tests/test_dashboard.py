@@ -346,6 +346,19 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('<tr class="player-row">', html)
         self.assertIn('<tr class="performance-row">', html)
 
+    def test_model_performance_view_surfaces_team_and_player_forecast_panels(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="performance-team-history"', html)
+        self.assertIn('id="performance-team-summary"', html)
+        self.assertIn('id="performance-player-select"', html)
+        self.assertIn('id="performance-player-history"', html)
+        self.assertIn("My team -- modeled vs actual", html)
+        self.assertIn("Player forecast vs actual", html)
+        self.assertIn("performance.team_performance", html)
+        self.assertIn("performance.player_performance", html)
+        self.assertIn("Results are never backfilled with hindsight lineups.", html)
+
     def test_deadline_passed_state_requests_an_explicit_refresh(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
