@@ -658,8 +658,8 @@ def build_transfer_decisions(
             "status": "manager_not_configured",
             "event": event,
             "reason": (
-                "No public team ID is configured. Copy config/user-profile.example.json to "
-                "config/user-profile.json, set manager.team_id to your own FPL team ID, then refresh."
+                "No public team ID is configured. Add your FPL team ID in the My Team "
+                "profile form, then refresh."
             ),
         }
     if not manager.get("squad_publicly_available") or len(manager.get("squad", [])) != 15:

@@ -403,6 +403,123 @@ class RefreshProjectTests(unittest.TestCase):
         self.assertEqual(len(weekly["profiles"]), 3)
         self.assertIn("chip_recommendation", weekly["profiles"][1])
 
+    def test_refresh_applies_confirmed_risk_profile_as_default_profile(self):
+        from tests.test_transfer_decisions import gw2_inputs
+
+        bootstrap, fixtures, manager = gw2_inputs()
+        raw_manager = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {
+                "active_chip": None,
+                "entry_history": {"event": 1, "bank": 0, "value": 1000},
+                "picks": [
+                    {
+                        "element": row["element_id"], "position": index + 1,
+                        "multiplier": 1 if index < 11 else 0,
+                        "is_captain": index == 0, "is_vice_captain": index == 1,
+                        "purchase_price": row["purchase_price"],
+                        "selling_price": row["selling_price"],
+                    }
+                    for index, row in enumerate(manager["squad"])
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps(
+                    {
+                        "manager": {
+                            "team_id": 364759,
+                            "confirmed_free_transfers": 3,
+                            "confirmed_free_transfers_event": 2,
+                            "risk_profile": "aggressive",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = refresh_project(
+                root,
+                bootstrap_payload=bootstrap,
+                fixture_payload=fixtures,
+                manager_payload=raw_manager,
+                official_transfer_records=[],
+                generated_at="2026-08-29T12:00:00-04:00",
+            )
+
+        self.assertEqual(state["decision_center"]["default_profile"], "aggressive")
+        self.assertEqual(state["decision_center"]["weekly_decisions"]["default_profile"], "aggressive")
+
+    def test_refresh_publishes_whitelisted_profile_fields_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps(
+                    {
+                        "manager": {
+                            "team_id": 364759,
+                            "timezone": "America/New_York",
+                            "confirmed_free_transfers": 2,
+                            "confirmed_free_transfers_event": 3,
+                            "risk_profile": "conservative",
+                            "primary_goal": "overall_rank_below_50000",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = refresh_project(
+                root,
+                bootstrap_payload={"events": [], "elements": [], "teams": []},
+                generated_at="2026-07-23T12:00:00-04:00",
+            )
+
+        self.assertEqual(
+            set(state["profile"].keys()),
+            {
+                "team_id",
+                "timezone",
+                "confirmed_free_transfers",
+                "confirmed_free_transfers_event",
+                "risk_profile",
+            },
+        )
+        self.assertNotIn("primary_goal", state["profile"])
+        self.assertNotIn("primary_goal", json.dumps(state["profile"]))
+
+    def test_refresh_defaults_profile_when_no_profile_file_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+
+            state = refresh_project(
+                root,
+                bootstrap_payload={"events": [], "elements": [], "teams": []},
+                generated_at="2026-07-23T12:00:00-04:00",
+            )
+
+        self.assertEqual(state["profile"]["timezone"], "America/New_York")
+        self.assertIsNone(state["profile"]["team_id"])
+
     def test_refresh_deduplicates_same_move_across_club_aliases(self):
         bootstrap = {"events": [], "elements": [], "teams": []}
         base = {

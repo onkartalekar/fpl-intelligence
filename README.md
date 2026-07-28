@@ -14,8 +14,18 @@ League) decisions.
 
 ## Configure your manager
 
-Copy the example profile and set your own FPL team ID (found in your FPL
-entry URL, `fantasy.premierleague.com/entry/<team_id>/...`):
+The easiest way is in the dashboard itself: start the local server (see
+below), open the **My Team** view, and fill in the **Manager profile**
+form there. Enter your FPL team ID (found in your FPL entry URL,
+`fantasy.premierleague.com/entry/<team_id>/...`), pick your timezone and
+risk profile, and optionally confirm your free-transfer count for the
+current gameweek. Saving writes straight to `config/user-profile.json` on
+your machine and triggers a refresh -- no password or account access is
+ever requested.
+
+Editing the file by hand still works and remains a supported fallback,
+including when running from the standalone `dashboard.html` file (the
+in-UI form is disabled there, since it needs the local server):
 
 ```bash
 cp config/user-profile.example.json config/user-profile.json
@@ -26,12 +36,13 @@ ID. Without it, the dashboard's "My Team" panel stays in a
 `not_configured` state and no public manager data is fetched.
 
 Only a few fields in this file are read by the dashboard right now:
-`manager.team_id`, `manager.timezone`, and `manager.confirmed_free_transfers`
-(with `manager.confirmed_free_transfers_event`). The rest --
+`manager.team_id`, `manager.timezone`, `manager.risk_profile`, and
+`manager.confirmed_free_transfers` (with
+`manager.confirmed_free_transfers_event`). The rest --
 `deadline_availability`, `weekly_time_budget_minutes`, `primary_goal`,
-`mini_leagues`, `risk_profile`, and `experience.previous_entry_id` -- are
-recorded for your own reference only; editing them doesn't change model
-behavior yet.
+`mini_leagues`, and `experience.previous_entry_id` -- are recorded for
+your own reference only; editing them doesn't change model behavior yet,
+and they aren't exposed in the in-UI form.
 
 ## Open the dashboard
 
