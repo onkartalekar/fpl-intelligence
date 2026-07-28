@@ -6,8 +6,8 @@ League) decisions.
 ## Current status
 
 - Manager profile timezone is configurable per user (defaults to Eastern Time)
-- Official Premier League transfer-centre collection enabled
-- Rumours and secondary reports excluded
+- Official Premier League transfer-center collection enabled
+- Rumors and secondary reports excluded
 - Official FPL feed collection enabled
 - 2026/27 feed is live: projections and the legal-squad optimizer are active (see below)
 - No credentials or account actions
