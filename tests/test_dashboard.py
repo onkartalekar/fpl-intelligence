@@ -429,6 +429,8 @@ class DashboardRenderTests(unittest.TestCase):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertIn('id="profile-settings"', html)
+        self.assertIn('id="view-profile" class="view"', html)
+        self.assertIn('data-view="profile">My Profile</button>', html)
         self.assertIn('id="profile-form"', html)
         self.assertIn('id="profile-team-id"', html)
         self.assertIn('id="profile-timezone"', html)
