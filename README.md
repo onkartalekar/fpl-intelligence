@@ -15,7 +15,7 @@ League) decisions.
 ## Configure your manager
 
 The easiest way is in the dashboard itself: start the local server (see
-below), open the **My Team** view, and fill in the **Manager profile**
+below), open the **My Profile** view, and fill in the **Manager profile**
 form there. Enter your FPL team ID (found in your FPL entry URL,
 `fantasy.premierleague.com/entry/<team_id>/...`), pick your timezone and
 risk profile, and optionally confirm your free-transfer count for the
