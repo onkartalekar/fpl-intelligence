@@ -417,6 +417,14 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Public GW1 squad is hidden until the deadline", html)
         self.assertIn("Team ID", html)
 
+    def test_default_view_is_my_team(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="view-squad" class="view active"', html)
+        self.assertNotIn('id="view-overview" class="view active"', html)
+        self.assertIn('data-view="squad">My Team</button>', html)
+        self.assertIn("showView(titles[context.view]?context.view:'squad')", html)
+
     def test_renders_manager_profile_form(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
