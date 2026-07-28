@@ -417,6 +417,34 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Public GW1 squad is hidden until the deadline", html)
         self.assertIn("Team ID", html)
 
+    def test_renders_manager_profile_form(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="profile-settings"', html)
+        self.assertIn('id="profile-form"', html)
+        self.assertIn('id="profile-team-id"', html)
+        self.assertIn('id="profile-timezone"', html)
+        self.assertIn('id="profile-risk"', html)
+        self.assertIn('id="profile-free-transfers"', html)
+        self.assertIn('id="profile-free-transfers-event"', html)
+        self.assertIn('id="profile-save"', html)
+        self.assertIn('id="profile-message"', html)
+        self.assertIn("fetch('/api/profile'", html)
+        self.assertIn("X-Refresh-Token", html)
+        self.assertIn("Start the local dashboard service to edit your profile.", html)
+        self.assertIn("Manager profile form", html)
+        self.assertNotIn("Copy config/user-profile.example.json", html)
+
+    def test_profile_save_reuses_shared_refresh_routine(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn("function runRefresh()", html)
+        self.assertIn(
+            "captureWorkspaceContext();sessionStorage.setItem('fpl-refresh-result'", html
+        )
+        self.assertIn("runRefresh()", html)
+        self.assertEqual(html.count('meta[name="refresh-token"]'), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -318,6 +318,14 @@ def _refresh_project_unlocked(
         except ValueError as error:
             decision_center = {"status": "model_unavailable", "reason": str(error)}
 
+    risk = profile.get("manager", {}).get("risk_profile")
+    if risk in {"conservative", "balanced", "aggressive"}:
+        if decision_center.get("profile_recommendations"):
+            decision_center["default_profile"] = risk
+        weekly = decision_center.get("weekly_decisions")
+        if isinstance(weekly, dict) and weekly.get("profiles"):
+            weekly["default_profile"] = risk
+
     current_event = next(
         (
             event for event in bootstrap.get("events", [])
@@ -341,6 +349,13 @@ def _refresh_project_unlocked(
     state = {
         "generated_at": generated_at,
         "timezone": timezone_name,
+        "profile": {
+            "team_id": profile.get("manager", {}).get("team_id"),
+            "timezone": timezone_name,
+            "confirmed_free_transfers": profile.get("manager", {}).get("confirmed_free_transfers"),
+            "confirmed_free_transfers_event": profile.get("manager", {}).get("confirmed_free_transfers_event"),
+            "risk_profile": profile.get("manager", {}).get("risk_profile") or "balanced",
+        },
         "fpl": fpl_summary,
         "source_health": source_health,
         "manager": manager_state,
