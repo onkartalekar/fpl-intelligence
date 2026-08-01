@@ -7,11 +7,11 @@ _FIRST_PARTY_TYPES = {"official_premier_league", "official_club"}
 _PREMIER_LEAGUE_DOMAINS = {"premierleague.com", "fantasy.premierleague.com"}
 OFFICIAL_CLUB_DOMAINS = {
     "arsenal.com", "avfc.co.uk", "afcb.co.uk", "brentfordfc.com",
-    "brightonandhovealbion.com", "burnleyfootballclub.com", "chelseafc.com",
-    "cpfc.co.uk", "evertonfc.com", "fulhamfc.com", "leedsunited.com",
-    "liverpoolfc.com", "mancity.com", "manutd.com", "nufc.co.uk",
-    "nottinghamforest.co.uk", "safc.com", "tottenhamhotspur.com", "whufc.com",
-    "wolves.co.uk",
+    "brightonandhovealbion.com", "ccfc.co.uk", "chelseafc.com",
+    "cpfc.co.uk", "evertonfc.com", "fulhamfc.com", "wearehullcity.co.uk",
+    "itfc.co.uk", "leedsunited.com", "liverpoolfc.com", "mancity.com",
+    "manutd.com", "newcastleunited.com", "nottinghamforest.co.uk",
+    "safc.com", "tottenhamhotspur.com",
 }
 
 
