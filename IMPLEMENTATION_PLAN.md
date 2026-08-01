@@ -925,6 +925,57 @@ re-checking against ICT.
 
 ---
 
+## Considered and declined — transfer-driven team strength / squad-value panel (issue #31, 2026-08-01)
+
+**Context:** issue #31 asked whether summer transfer activity should
+adjust team strength or fixture difficulty, since neither currently
+reacts to it. Full investigation in `plans/issue-31-transfer-strength.md`.
+
+**Candidate 1 — feed a squad-value-delta into `team_strength.py` /
+the projection formula: declined.** Blocked by two independent things.
+First, an architectural wall `team_strength.py` had already hit on
+2026-07-25 for the closely related idea of seeding ratings from a
+preseason prior: the no-lookahead backtest architecture evaluates each
+season independently, with no cross-season state carry, and any
+transfer-window signal inherently needs to carry from the summer into
+the new season's early gameweeks. Second, `backtest.py` already
+documents "no historical transfer-window feed available offline" as a
+known simplification — confirmed by checking `data/history/{season}/`,
+which holds only match results, never transfer records. Even if the
+first blocker were solved, there is nothing to run the required
+out-of-sample check against. Beyond both blockers: the underlying
+mechanism this would enhance is itself a documented negative result —
+Phase 1's fitted team attack/defense model lost to the static FDR
+baseline (MAE 2.44 vs. 2.39) — so this is not being kept open as a
+"revisit once data exists" item the way npxG/SCA/GCA above are.
+
+**Candidate 2 — a display-only "squad changes this summer" panel
+(price-proxy value delta per club from confirmed transfers): declined.**
+This doesn't touch the projection formula, so it isn't bound by the
+backtest rule at all — the reason for declining it is different. Mocking
+it up against real data across all 20 clubs found a coverage gap far
+worse than an isolated missing player: departing players drop out of the
+FPL bootstrap list much faster than arriving ones are added to it, so
+every club's outgoing total is *systematically* less complete than its
+incoming total (e.g. Liverpool: 2 priced departures found against 15
+unpriced; Arsenal: 0 against 11). That biases the net figure in the same
+direction for every club, which a "directional estimate" disclaimer
+doesn't fix — it isn't imprecise, it's wrong in a consistent direction.
+Not shipped.
+
+**What shipped instead:** a departure or arrival still has a real,
+model-relevant effect this project already had partial infrastructure
+for — the *minutes* competition it creates for the players who stayed.
+`_recent_role_transitions()`/`_minutes_scenarios()` in
+`recommendations.py` already widened a transferred player's own
+expected-minutes scenarios; extended to their same-club, same-position
+teammates (`_teammate_transfer_impacts()`), it needed no new backtest
+justification, since it extends a mechanism `backtest.py` already
+excludes from replay for the same lack of historical transfer data.
+Shipped 2026-08-01.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep

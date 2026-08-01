@@ -252,6 +252,166 @@ class ProjectionTests(unittest.TestCase):
         )
         self.assertIn("new club", adjusted["role_transition_note"].lower())
 
+    def test_confirmed_departure_widens_same_position_teammates_minutes_upward(self):
+        bootstrap = sample_bootstrap()
+        # Team 1's two DEF players (ids 5 and 11, per sample_bootstrap's
+        # (index % 6) + 1 team cycling): id 5 departs, id 11 is the stayed
+        # teammate who should see minutes widen upward.
+        departed_id, stayed_id, other_team_def_id, same_team_gkp_id = 5, 11, 6, 1
+        baseline = {
+            row["id"]: row
+            for row in project_players(bootstrap, sample_fixtures(), horizon=5)
+        }
+        transfer = {
+            "player": "Player 5",
+            "from_club": "Club 1",
+            "to_club": "Foreign League Club",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-out",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": departed_id,
+        }
+
+        adjusted = {
+            row["id"]: row
+            for row in project_players(
+                bootstrap, sample_fixtures(), horizon=5,
+                recent_transfers=[transfer], as_of="2026-07-23T12:00:00-04:00",
+            )
+        }
+
+        self.assertEqual(adjusted[stayed_id]["teammate_transfer_impact"], "out")
+        self.assertGreater(
+            adjusted[stayed_id]["expected_minutes"], baseline[stayed_id]["expected_minutes"]
+        )
+        self.assertGreater(adjusted[stayed_id]["xp_5"], baseline[stayed_id]["xp_5"])
+        self.assertIn("departure", adjusted[stayed_id]["teammate_transfer_impact_note"].lower())
+        # A DEF at a different club is not affected.
+        self.assertIsNone(adjusted[other_team_def_id]["teammate_transfer_impact"])
+        self.assertEqual(
+            adjusted[other_team_def_id]["expected_minutes"], baseline[other_team_def_id]["expected_minutes"]
+        )
+        # A GKP at the same club (different position) is not affected.
+        self.assertIsNone(adjusted[same_team_gkp_id]["teammate_transfer_impact"])
+        # The departed player themselves is not treated as their own teammate.
+        self.assertIsNone(adjusted[departed_id]["teammate_transfer_impact"])
+
+    def test_confirmed_arrival_narrows_same_position_teammates_minutes_downward(self):
+        bootstrap = sample_bootstrap()
+        arriving_id, stayed_id = 5, 11
+        baseline = {
+            row["id"]: row
+            for row in project_players(bootstrap, sample_fixtures(), horizon=5)
+        }
+        transfer = {
+            "player": "Player 5",
+            "from_club": "Foreign League Club",
+            "to_club": "Club 1",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-in",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": arriving_id,
+        }
+
+        adjusted = {
+            row["id"]: row
+            for row in project_players(
+                bootstrap, sample_fixtures(), horizon=5,
+                recent_transfers=[transfer], as_of="2026-07-23T12:00:00-04:00",
+            )
+        }
+
+        self.assertEqual(adjusted[stayed_id]["teammate_transfer_impact"], "in")
+        self.assertLess(
+            adjusted[stayed_id]["expected_minutes"], baseline[stayed_id]["expected_minutes"]
+        )
+        self.assertIn("arrival", adjusted[stayed_id]["teammate_transfer_impact_note"].lower())
+
+    def test_own_role_transition_takes_precedence_over_teammate_impact(self):
+        bootstrap = sample_bootstrap()
+        # id 11 both (a) just moved to Club 1 themselves and (b) would
+        # otherwise be a same-club, same-position teammate of id 5's
+        # departure -- the player's own role_transition should win.
+        moved_in_id, departed_id = 11, 5
+        own_transfer = {
+            "player": "Player 11",
+            "from_club": "Previous Club",
+            "to_club": "Club 1",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-in",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": moved_in_id,
+        }
+        departure_transfer = {
+            "player": "Player 5",
+            "from_club": "Club 1",
+            "to_club": "Foreign League Club",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-out",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": departed_id,
+        }
+
+        adjusted = {
+            row["id"]: row
+            for row in project_players(
+                bootstrap, sample_fixtures(), horizon=5,
+                recent_transfers=[own_transfer, departure_transfer],
+                as_of="2026-07-23T12:00:00-04:00",
+            )
+        }
+
+        self.assertTrue(adjusted[moved_in_id]["role_transition"])
+        self.assertIsNone(adjusted[moved_in_id]["teammate_transfer_impact"])
+
+    def test_departure_impact_takes_precedence_over_arrival_impact(self):
+        bootstrap = sample_bootstrap()
+        # Team 1 DEF: id 5 leaves, id 12 (Club 2's other DEF) arrives at
+        # Club 1 in the same window -- id 11 (Club 1's remaining DEF) sees
+        # both a departure and an arrival at their position; departure wins.
+        departed_id, arriving_id, stayed_id = 5, 12, 11
+        departure_transfer = {
+            "player": "Player 5",
+            "from_club": "Club 1",
+            "to_club": "Foreign League Club",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-out",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": departed_id,
+        }
+        arrival_transfer = {
+            "player": "Player 12",
+            "from_club": "Club 2",
+            "to_club": "Club 1",
+            "premier_league_club": "Club 1",
+            "movement_type": "transfer-in",
+            "announced_at": "2026-07-02T12:00:00Z",
+            "verification_status": "confirmed_first_party",
+            "fpl_reconciliation_status": "matched_current_fpl",
+            "matched_fpl_element_id": arriving_id,
+        }
+
+        adjusted = {
+            row["id"]: row
+            for row in project_players(
+                bootstrap, sample_fixtures(), horizon=5,
+                recent_transfers=[departure_transfer, arrival_transfer],
+                as_of="2026-07-23T12:00:00-04:00",
+            )
+        }
+
+        self.assertEqual(adjusted[stayed_id]["teammate_transfer_impact"], "out")
+
 
 class RecommendationTests(unittest.TestCase):
     def test_multiweek_schedule_rotates_lineup_and_captain_by_event(self):

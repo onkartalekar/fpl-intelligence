@@ -2,13 +2,14 @@
 
 import math
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from . import minutes as minutes_model
 from . import team_strength
 from .coefficients import load_coefficients
 from .projection import component_points_for_event, component_rate_baselines, player_component_rates
+from .transfers import canonical_club
 
 
 _COEFFICIENTS = load_coefficients()
@@ -67,13 +68,14 @@ def _expected_minutes(player, fixtures_played=38):
     return round(min(86.0, historical) * availability, 1)
 
 
-def _recent_role_transitions(recent_transfers, as_of, window_days=60):
+def _confirmed_matched_transfers_within_window(recent_transfers, as_of, window_days):
+    """Confirmed, FPL-matched transfers announced within window_days of as_of."""
     if not recent_transfers:
-        return {}
+        return []
     reference = datetime.fromisoformat(str(as_of).replace("Z", "+00:00")) if as_of else datetime.now(timezone.utc)
     if reference.tzinfo is None:
         reference = reference.replace(tzinfo=timezone.utc)
-    transitions = {}
+    qualifying = []
     for transfer in recent_transfers:
         player_id = transfer.get("matched_fpl_element_id")
         announced_at = transfer.get("announced_at")
@@ -88,8 +90,15 @@ def _recent_role_transitions(recent_transfers, as_of, window_days=60):
             announced = announced.replace(tzinfo=timezone.utc)
         age_days = (reference.astimezone(timezone.utc) - announced.astimezone(timezone.utc)).total_seconds() / 86400
         if 0 <= age_days <= window_days:
-            transitions[int(player_id)] = transfer
-    return transitions
+            qualifying.append(transfer)
+    return qualifying
+
+
+def _recent_role_transitions(recent_transfers, as_of, window_days=60):
+    return {
+        int(transfer["matched_fpl_element_id"]): transfer
+        for transfer in _confirmed_matched_transfers_within_window(recent_transfers, as_of, window_days)
+    }
 
 
 def _minutes_scenarios(base_minutes, role_transition):
@@ -100,6 +109,90 @@ def _minutes_scenarios(base_minutes, role_transition):
         "conservative": round(min(55.0, base_minutes * 0.62), 1),
         "balanced": round(min(72.0, base_minutes * 0.78), 1),
         "aggressive": round(min(82.0, base_minutes * 0.92), 1),
+    }
+
+
+_TEAMMATE_DEPARTURE_MINUTES_MULTIPLIERS = {"conservative": 1.0, "balanced": 1.08, "aggressive": 1.18}
+_TEAMMATE_ARRIVAL_MINUTES_MULTIPLIERS = {"conservative": 0.75, "balanced": 0.90, "aggressive": 1.0}
+_TEAMMATE_MINUTES_CAP = 90.0
+_TEAMMATE_IMPACT_CONSERVATIVE_MULTIPLIER = 0.93
+_TEAMMATE_IMPACT_AGGRESSIVE_MULTIPLIER = 1.10
+
+
+def _teammate_transfer_impacts(recent_transfers, bootstrap, as_of, window_days=60):
+    """Same-club, same-position teammates of a player who recently left or joined.
+
+    A confirmed departure or arrival changes the real competition for minutes
+    at that position for the players who *stayed* -- not just for the
+    transferred player themselves, who instead gets the stronger
+    _recent_role_transitions() treatment (see project_players(), which skips
+    this for any player already flagged there). Returns {player_id: "out" |
+    "in"}. A player affected by both an arrival and a departure in the same
+    window keeps "out": a confirmed departure frees a specific minutes share,
+    while a new arrival's actual effect on the XI is comparatively less
+    certain, so departure is the stronger signal when both apply.
+    """
+    qualifying = _confirmed_matched_transfers_within_window(recent_transfers, as_of, window_days)
+    if not qualifying:
+        return {}
+
+    elements = bootstrap.get("elements", [])
+    position_by_id = {
+        int(player["id"]): player.get("element_type") for player in elements if player.get("id") is not None
+    }
+    team_id_by_canonical_name = {
+        canonical_club(team.get("name")): team.get("id")
+        for team in bootstrap.get("teams", [])
+        if team.get("name") and team.get("id") is not None
+    }
+    teammates_by_team_and_position = defaultdict(list)
+    for player in elements:
+        team_id, position_id, player_id = player.get("team"), player.get("element_type"), player.get("id")
+        if team_id is not None and position_id is not None and player_id is not None:
+            teammates_by_team_and_position[(team_id, position_id)].append(int(player_id))
+
+    departures, arrivals = set(), set()
+    for transfer in qualifying:
+        moved_player_id = int(transfer["matched_fpl_element_id"])
+        position_id = position_by_id.get(moved_player_id)
+        if position_id is None:
+            continue
+        from_team_id = team_id_by_canonical_name.get(canonical_club(transfer.get("from_club")))
+        to_team_id = team_id_by_canonical_name.get(canonical_club(transfer.get("to_club")))
+        # Derive both sides directly from from_club/to_club rather than a
+        # single movement_type/premier_league_club: an intra-Premier-League
+        # move is typically reported by *both* clubs' own transfer-centre
+        # feeds (the selling club's "out" and the buying club's "in"), but
+        # refresh.py's cross-source dedup (_merge_transfer_candidates) keeps
+        # only one merged record per move, so which single movement_type
+        # survives is not reliable. from_club/to_club both remain on the
+        # merged record regardless, so a club only counts as affected once
+        # its own name resolves to a real bootstrap team, independent of
+        # which side happened to survive the merge.
+        if from_team_id is not None and from_team_id != to_team_id:
+            for teammate_id in teammates_by_team_and_position.get((from_team_id, position_id), []):
+                if teammate_id != moved_player_id:
+                    departures.add(teammate_id)
+        if to_team_id is not None and to_team_id != from_team_id:
+            for teammate_id in teammates_by_team_and_position.get((to_team_id, position_id), []):
+                if teammate_id != moved_player_id:
+                    arrivals.add(teammate_id)
+
+    impacts = {player_id: "in" for player_id in arrivals}
+    impacts.update({player_id: "out" for player_id in departures})
+    return impacts
+
+
+def _teammate_minutes_scenarios(base_minutes, teammate_impact):
+    if not teammate_impact:
+        value = round(base_minutes, 1)
+        return {"conservative": value, "balanced": value, "aggressive": value}
+    multipliers = (
+        _TEAMMATE_DEPARTURE_MINUTES_MULTIPLIERS if teammate_impact == "out" else _TEAMMATE_ARRIVAL_MINUTES_MULTIPLIERS
+    )
+    return {
+        profile: round(min(_TEAMMATE_MINUTES_CAP, base_minutes * multiplier), 1)
+        for profile, multiplier in multipliers.items()
     }
 
 
@@ -167,6 +260,7 @@ def project_players(
     component_baselines = component_rate_baselines(players)
     schedule = _fixture_by_team(fixtures, start_event, horizon)
     role_transitions = _recent_role_transitions(recent_transfers, as_of)
+    teammate_transfer_impacts = _teammate_transfer_impacts(recent_transfers, bootstrap, as_of)
 
     # Phase 1: fitted team-strength ratings replace the FDR difficulty-bucket
     # tables once enough same-season matches exist to fit reliably; before
@@ -214,12 +308,21 @@ def project_players(
         else:
             base_expected_minutes = _expected_minutes(player, team_fixtures_played)
         role_transition = role_transitions.get(int(player.get("id") or 0))
+        # A player who moved themselves already gets the stronger role-transition
+        # treatment below; only apply the softer teammate-impact adjustment to
+        # players whose *own* situation is otherwise unchanged.
+        teammate_impact = None if role_transition else teammate_transfer_impacts.get(int(player.get("id") or 0))
         if role_transition:
             # A recent confirmed move to a new club is a different, more severe
             # kind of uncertainty than in-club rotation risk -- keep the
             # existing role-transition scenario treatment regardless of
             # whether a recency-weighted minutes history is also available.
             expected_minutes_scenarios = _minutes_scenarios(base_expected_minutes, role_transition)
+        elif teammate_impact:
+            # Same precedence reasoning as role_transition above: a same-
+            # position teammate's confirmed move is more specific, current
+            # information than a season-to-date recency-weighted history.
+            expected_minutes_scenarios = _teammate_minutes_scenarios(base_expected_minutes, teammate_impact)
         elif use_recency_minutes:
             expected_minutes_scenarios = minutes_model.minutes_scenarios_from_history(
                 recent_history, availability_multiplier=_availability_multiplier(player)
@@ -308,6 +411,19 @@ def project_players(
                 "balanced": fixture_points,
                 "aggressive": [round(points * 1.16, 2) for points in scenario_fixture_points["aggressive"]],
             }
+        elif teammate_impact:
+            # Softer than the role_transition band above -- this is a second-
+            # order effect (a teammate's move, not the player's own), so the
+            # range widens less.
+            profile_fixture_xp = {
+                "conservative": [
+                    round(points * _TEAMMATE_IMPACT_CONSERVATIVE_MULTIPLIER, 2) for points in fixture_points
+                ],
+                "balanced": fixture_points,
+                "aggressive": [
+                    round(points * _TEAMMATE_IMPACT_AGGRESSIVE_MULTIPLIER, 2) for points in fixture_points
+                ],
+            }
         else:
             profile_fixture_xp = {
                 "conservative": [round(points * (1 - uncertainty), 2) for points in fixture_points],
@@ -343,6 +459,13 @@ def project_players(
                 "role_transition_note": (
                     "Recent confirmed move to a new club; minutes are scenario-adjusted until the role is established."
                     if role_transition else ""
+                ),
+                "teammate_transfer_impact": teammate_impact,
+                "teammate_transfer_impact_note": (
+                    "A same-position teammate's confirmed departure may open up minutes; scenarios are adjusted accordingly."
+                    if teammate_impact == "out" else
+                    "A same-position teammate's confirmed arrival adds competition for minutes; scenarios are adjusted accordingly."
+                    if teammate_impact == "in" else ""
                 ),
                 "fixture_difficulties": difficulties,
                 "uses_team_strength": use_team_strength,
@@ -773,6 +896,9 @@ def build_gw_recommendations(
     role_transition_player_ids = sorted(
         player["id"] for player in projections if player["role_transition"]
     )
+    teammate_transfer_impact_player_ids = sorted(
+        player["id"] for player in projections if player["teammate_transfer_impact"]
+    )
     type_by_id = {item.get("id"): item for item in bootstrap.get("element_types", [])}
     quotas = {
         _POSITION_CODES[position_id]: int(item.get("squad_select") or 0)
@@ -867,6 +993,7 @@ def build_gw_recommendations(
                 "Projections are preliminary and have not yet been calibrated on 2026/27 results.",
             ],
             "role_transition_player_ids": role_transition_player_ids,
+            "teammate_transfer_impact_player_ids": teammate_transfer_impact_player_ids,
         },
         "profile_recommendations": profile_recommendations,
         "recommended_squad": balanced["squad"],
