@@ -153,7 +153,7 @@ only pick this up once FPL's own database has caught up.
 **Verdict: build.** Extends an existing, already-precedented mechanism
 rather than introducing a new one; no backtest obligation.
 
-### (c) Squad-value-delta as an informational panel, not a projection input -- BUILD, secondary
+### (c) Squad-value-delta as an informational panel, not a projection input -- DECLINE (2026-08-01)
 
 **What:** a display-only "Squad changes this summer" note per club
 (price-proxy squad-value delta from confirmed transfers, best-effort
@@ -166,17 +166,29 @@ out-of-sample rule binds changes to the projection *formula*
 (`MODEL.md`'s documented model). A contextual, non-scoring note is the
 same category as the existing `#fixture-congestion-limitation` panel
 already in Decision Center -- informational, not a scoring factor, so it
-carries no backtest obligation.
+carries no backtest obligation. This part of the reasoning still holds --
+the decline below is about data quality, not process.
 
-**Must be framed honestly:** given the confirmed Anthony Gordon gap
-above, copy must say this is a directional, best-effort estimate (some
-transfers may be missing from the total), not present it as a complete
-or precise figure -- consistent with this project's "no fabricated
-confidence" stance elsewhere (e.g. the manager-status "not yet
-available" pattern, never a silent zero).
+**Declined after mocking it up with real data.** Computing the actual
+delta across all 20 clubs (`official-transfers-latest.json` x
+`fpl-bootstrap-latest.json`) surfaced a coverage gap far more severe than
+the single Anthony Gordon example above: departing players drop out of
+the bootstrap player list far faster than arriving ones are added to it,
+so the "out" side of every club's total is *systematically* less
+complete than the "in" side, not just occasionally missing one entry.
+Concretely: Liverpool's total counted 2 priced departures against 15
+unpriced ones; Arsenal counted 0 priced departures against 11 unpriced.
+That understates money leaving every club, in the same direction every
+time -- which means the net figure isn't merely imprecise, it's biased
+toward making every club look like it strengthened. A "directional
+estimate" disclaimer doesn't fix a number that's wrong in a consistent
+direction; it would take real per-player investigation to know the true
+gap, at which point it's no longer a cheap display panel. Not worth
+shipping a number this likely to mislead a user making a squad decision
+on it.
 
-**Verdict: build.** No backtest blocker; the only work is the
-transfer-to-price matching and a clearly-labeled panel.
+**Verdict: decline.** Same category of decision as (a) -- not a backtest
+problem, but the underlying data doesn't support the number honestly.
 
 ### (d) Archive dated transfer-window snapshots -- OPTIONAL, low priority
 
@@ -185,14 +197,13 @@ per season (e.g. written once when a transfer window closes) instead of
 only ever holding the current rolling "latest" file.
 
 **Why it's optional now:** this was originally the groundwork to unblock
-candidate (a) in a future season, but (a) is declined outright above, not
-deferred -- so that motivation is gone. Still cheap and mildly useful on
-its own (e.g. a season-over-season view of candidate (c)'s squad-value
-deltas), but not load-bearing for anything in this plan. Worth doing
-opportunistically, not worth prioritizing.
+candidate (a) in a future season, but both (a) and (c) are now declined
+outright, not deferred -- so neither motivation applies. Still cheap on
+its own terms if ever wanted for some other reason, but nothing in this
+plan depends on it.
 
-**Verdict: optional.** No dependency from (b) or (c); skip unless it's
-convenient to add alongside them.
+**Verdict: optional.** No dependency from (b); skip unless it becomes
+useful for something else.
 
 ## Recommendation
 
@@ -202,17 +213,12 @@ convenient to add alongside them.
    same kind of minutes-scenario widening the transferred player already
    gets themselves -- this is the primary recommendation, since it plugs
    a real gap in an existing, already-shipped, already-backtest-exempt
-   mechanism.
-2. Ship (c): a secondary, lower-priority "squad changes this summer"
-   informational panel, computed from data already collected
-   (`official-transfers-latest.json` x `fpl-bootstrap-latest.json`),
-   explicitly labeled as a directional estimate given the known
-   name-matching gaps.
-3. Record (a) as declined in `IMPLEMENTATION_PLAN.md`'s "Considered and
-   declined" section, same house style as the npxG/xT/SCA/GCA entry --
-   declined outright (weak even if the data existed), not deferred
-   pending more data.
-4. (d) is opportunistic, not scheduled.
-5. Leave issue #31 open until (b) ships -- unlike #11/#13, which stayed
-   open as pure declines with nothing to implement, #31 has a real,
-   buildable near-term piece.
+   mechanism. **Shipped 2026-08-01.**
+2. Record both (a) and (c) as declined in `IMPLEMENTATION_PLAN.md`'s
+   "Considered and declined" section, same house style as the npxG/xT/
+   SCA/GCA entry -- (a) for lack of a viable backtest path plus a
+   documented negative result underneath it, (c) for a systematic data
+   coverage bias that a disclaimer can't fix.
+3. (d) is opportunistic, not scheduled.
+4. Issue #31's real, buildable piece has shipped -- fine to close once
+   the recording in step 2 is done.
