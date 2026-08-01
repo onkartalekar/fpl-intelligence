@@ -679,6 +679,9 @@ def build_transfer_decisions(
     role_transition_player_ids = sorted(
         row["id"] for row in projections if row["role_transition"]
     )
+    teammate_transfer_impact_player_ids = sorted(
+        row["id"] for row in projections if row["teammate_transfer_impact"]
+    )
     projection_by_id = {row["id"]: row for row in projections}
     squad = _public_squad(manager, projection_by_id)
     quotas = _quotas(bootstrap)
@@ -779,6 +782,7 @@ def build_transfer_decisions(
         "maximum_free_transfers": maximum_free_transfers,
         "public_state_event": manager.get("current_event"),
         "role_transition_player_ids": role_transition_player_ids,
+        "teammate_transfer_impact_player_ids": teammate_transfer_impact_player_ids,
         "state_warning": "Recommendations use the latest published deadline squad and cannot see unpublished in-Gameweek transfers.",
         "official_rules": {
             "source": _RULES_URL,

@@ -14,6 +14,26 @@ OFFICIAL_CLUB_DOMAINS = {
     "safc.com", "tottenhamhotspur.com",
 }
 
+# Normalizes club-name strings from different sources (the PL transfer
+# centre's own names, the FPL bootstrap feed's shorter/different names,
+# and free-text confirmed-transfer records) to a single comparable form.
+CLUB_ALIASES = {
+    "spurs": "tottenham hotspur",
+    "brighton": "brighton & hove albion",
+    "afc bournemouth": "bournemouth",
+    "nott'm forest": "nottingham forest",
+    "man utd": "manchester united",
+    "man city": "manchester city",
+    "newcastle": "newcastle united",
+    "ipswich town": "ipswich",
+    "leeds": "leeds united",
+}
+
+
+def canonical_club(name):
+    key = (name or "").casefold().strip()
+    return CLUB_ALIASES.get(key, key)
+
 
 def is_trusted_https_url(url, trusted_domains):
     parsed = urlparse(url)

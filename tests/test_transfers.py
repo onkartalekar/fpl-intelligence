@@ -1,6 +1,27 @@
 import unittest
 
-from fpl_intel.transfers import OFFICIAL_CLUB_DOMAINS, normalize_transfer
+from fpl_intel.transfers import OFFICIAL_CLUB_DOMAINS, canonical_club, normalize_transfer
+
+
+class CanonicalClubTests(unittest.TestCase):
+    def test_reconciles_pl_transfer_centre_names_with_bootstrap_team_names(self):
+        # (PL transfer-centre name, FPL bootstrap team name) pairs that
+        # differ in spelling for the same club -- both sides of each pair
+        # must canonicalize to the same string.
+        pairs = [
+            ("AFC Bournemouth", "Bournemouth"),
+            ("Brighton & Hove Albion", "Brighton"),
+            ("Ipswich", "Ipswich Town"),
+            ("Leeds United", "Leeds"),
+            ("Nottingham Forest", "Nott'm Forest"),
+            ("Tottenham Hotspur", "Spurs"),
+        ]
+        for transfer_centre_name, bootstrap_name in pairs:
+            with self.subTest(club=transfer_centre_name):
+                self.assertEqual(canonical_club(transfer_centre_name), canonical_club(bootstrap_name))
+
+    def test_is_case_and_whitespace_insensitive(self):
+        self.assertEqual(canonical_club("  Arsenal "), canonical_club("arsenal"))
 
 
 class OfficialClubDomainsTests(unittest.TestCase):

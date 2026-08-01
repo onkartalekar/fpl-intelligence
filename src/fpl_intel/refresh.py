@@ -28,27 +28,11 @@ from .model_performance import (
 from .recommendations import build_gw_recommendations
 from .transfer_decisions import build_transfer_decisions
 from .relevance import enrich_transfers, summarize_clubs
-from .transfers import normalize_transfer
+from .transfers import canonical_club, normalize_transfer
 
 
 class RefreshAlreadyRunning(RuntimeError):
     """Another process currently owns the project refresh lock."""
-
-
-_CLUB_ALIASES = {
-    "spurs": "tottenham hotspur",
-    "brighton": "brighton & hove albion",
-    "afc bournemouth": "bournemouth",
-    "nott'm forest": "nottingham forest",
-    "man utd": "manchester united",
-    "man city": "manchester city",
-    "newcastle": "newcastle united",
-}
-
-
-def _canonical_club(name):
-    key = name.casefold().strip()
-    return _CLUB_ALIASES.get(key, key)
 
 
 def _load_json(path):
@@ -68,8 +52,8 @@ def _load_current_json(root, filename, default):
 def _transfer_identity(record):
     return (
         (record.get("player") or "").casefold(),
-        _canonical_club(record.get("from_club") or ""),
-        _canonical_club(record.get("to_club") or ""),
+        canonical_club(record.get("from_club") or ""),
+        canonical_club(record.get("to_club") or ""),
     )
 
 
