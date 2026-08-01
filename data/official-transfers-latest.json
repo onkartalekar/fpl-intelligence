@@ -1,6 +1,426 @@
 {
   "transfers": [
     {
+      "player": "Antonio Silva",
+      "from_club": "Benfica",
+      "to_club": "AFC Bournemouth",
+      "announced_at": "2026-08-01T13:51:00Z",
+      "source_url": "https://www.afcb.co.uk/news/2026/august/01/afc-bournemouth-sign-ant-nio-silva-from-benfica?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "afcb.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "AFC Bournemouth",
+      "premier_league_item_id": 4682476,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.afcb.co.uk/news/2026/august/01/afc-bournemouth-sign-ant-nio-silva-from-benfica?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.afcb.co.uk/news/2026/august/01/afc-bournemouth-sign-ant-nio-silva-from-benfica?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "medium",
+      "freshness": "new_7d",
+      "age_days": 0,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Nathan Tinsdale",
+      "from_club": "Hull City",
+      "to_club": "Crawley Town",
+      "announced_at": "2026-08-01T11:42:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/august/01/tinsdale-joins-crawley-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4682462,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/august/01/tinsdale-joins-crawley-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/august/01/tinsdale-joins-crawley-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 0,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Valentin Joseph",
+      "from_club": "Blackburn",
+      "to_club": "Brighton & Hove Albion",
+      "announced_at": "2026-08-01T11:37:00Z",
+      "source_url": "https://www.brightonandhovealbion.com/media-article/joseph-joins-from-blackburn-rovers?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "brightonandhovealbion.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Brighton & Hove Albion",
+      "premier_league_item_id": 4682461,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.brightonandhovealbion.com/media-article/joseph-joins-from-blackburn-rovers?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.brightonandhovealbion.com/media-article/joseph-joins-from-blackburn-rovers?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "medium",
+      "freshness": "new_7d",
+      "age_days": 0,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Sam Szmodics",
+      "from_club": "Ipswich",
+      "to_club": "Derby County",
+      "announced_at": "2026-08-01T11:30:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/august/01/szmodics-joins-derby-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4682460,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/august/01/szmodics-joins-derby-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/august/01/szmodics-joins-derby-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "new_7d",
+      "age_days": 0,
+      "matched_fpl_element_id": 319
+    },
+    {
+      "player": "Tyler Fredricson",
+      "from_club": "Man Utd",
+      "to_club": "Lausanne-Sport",
+      "announced_at": "2026-07-30T11:40:00Z",
+      "source_url": "https://www.manutd.com/en/news/tyler-fredricson-leaves-man-united-for-a-new-chapter?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "manutd.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Man Utd",
+      "premier_league_item_id": 4682065,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.manutd.com/en/news/tyler-fredricson-leaves-man-united-for-a-new-chapter?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.manutd.com/en/news/tyler-fredricson-leaves-man-united-for-a-new-chapter?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "new_7d",
+      "age_days": 2,
+      "matched_fpl_element_id": 425
+    },
+    {
+      "player": "Danny Imray",
+      "from_club": "Crystal Palace",
+      "to_club": "Wrexham",
+      "announced_at": "2026-07-30T11:35:00Z",
+      "source_url": "https://www.cpfc.co.uk/news/announcement/danny-imray-joins-wrexham/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "cpfc.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Crystal Palace",
+      "premier_league_item_id": 4682064,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.cpfc.co.uk/news/announcement/danny-imray-joins-wrexham/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.cpfc.co.uk/news/announcement/danny-imray-joins-wrexham/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 2,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Aidan Stokes",
+      "from_club": "Brentford",
+      "to_club": "New York Red Bulls",
+      "announced_at": "2026-07-30T11:34:00Z",
+      "source_url": "https://www.brentfordfc.com/en/news/article/brentford-b-team-sign-aidan-stokes-loan-transfer-new-york-red-bulls?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "brentfordfc.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Brentford",
+      "premier_league_item_id": 4682063,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.brentfordfc.com/en/news/article/brentford-b-team-sign-aidan-stokes-loan-transfer-new-york-red-bulls?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.brentfordfc.com/en/news/article/brentford-b-team-sign-aidan-stokes-loan-transfer-new-york-red-bulls?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 2,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Somto Boniface",
+      "from_club": "Ipswich",
+      "to_club": "Leyton Orient",
+      "announced_at": "2026-07-30T11:31:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/28/league-one-loan-for-somto/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4682062,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/28/league-one-loan-for-somto/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/28/league-one-loan-for-somto/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 2,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Nathaniel Clyne",
+      "from_club": "Crystal Palace",
+      "to_club": "Released",
+      "announced_at": "2026-07-30T11:29:00Z",
+      "source_url": "https://www.cpfc.co.uk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watchnews/announcement/nathaniel-clyne-departs-palace/",
+      "source_type": "official_club",
+      "official_club_domain": "cpfc.co.uk",
+      "movement_type": "player-released",
+      "premier_league_club": "Crystal Palace",
+      "premier_league_item_id": 4682061,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.cpfc.co.uk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watchnews/announcement/nathaniel-clyne-departs-palace/",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.cpfc.co.uk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watchnews/announcement/nathaniel-clyne-departs-palace/"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 2,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Jordan Henderson",
+      "from_club": "Brentford",
+      "to_club": "Released",
+      "announced_at": "2026-07-29T13:10:00Z",
+      "source_url": "https://www.brentfordfc.com/en/news/article/first-team-jordan-henderson-leaves-brentford?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "brentfordfc.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Brentford",
+      "premier_league_item_id": 4681915,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.brentfordfc.com/en/news/article/first-team-jordan-henderson-leaves-brentford?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.brentfordfc.com/en/news/article/first-team-jordan-henderson-leaves-brentford?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "high",
+      "freshness": "new_7d",
+      "age_days": 3,
+      "matched_fpl_element_id": 101
+    },
+    {
+      "player": "Tommy Pilling",
+      "from_club": "Liverpool",
+      "to_club": "MFK Zemplin Michalovce",
+      "announced_at": "2026-07-29T10:34:00Z",
+      "source_url": "https://www.liverpoolfc.com/news/tommy-pilling-makes-permanent-move-mfk-zemplin-michalovce-0?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "liverpoolfc.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Liverpool",
+      "premier_league_item_id": 4681879,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.liverpoolfc.com/news/tommy-pilling-makes-permanent-move-mfk-zemplin-michalovce-0?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.liverpoolfc.com/news/tommy-pilling-makes-permanent-move-mfk-zemplin-michalovce-0?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 3,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Joe Gauci",
+      "from_club": "Aston Villa",
+      "to_club": "Lincoln City",
+      "announced_at": "2026-07-28T14:36:00Z",
+      "source_url": "https://www.avfc.co.uk/news/2026/july/28/news-gauci-in-lincoln-loan-move/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "avfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Aston Villa",
+      "premier_league_item_id": 4681737,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.avfc.co.uk/news/2026/july/28/news-gauci-in-lincoln-loan-move/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.avfc.co.uk/news/2026/july/28/news-gauci-in-lincoln-loan-move/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 4,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Joe Gardner",
+      "from_club": "Nottingham Forest",
+      "to_club": "Falkirk",
+      "announced_at": "2026-07-28T14:34:00Z",
+      "source_url": "https://www.nottinghamforest.co.uk/news/2026/july/28/gardner-completes-permanent-move-to-falkirk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "nottinghamforest.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Nottingham Forest",
+      "premier_league_item_id": 4681736,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.nottinghamforest.co.uk/news/2026/july/28/gardner-completes-permanent-move-to-falkirk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.nottinghamforest.co.uk/news/2026/july/28/gardner-completes-permanent-move-to-falkirk/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 4,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Harvey Cartwright",
+      "from_club": "Hull City",
+      "to_club": "Grimsby Town",
+      "announced_at": "2026-07-28T14:32:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/28/cartwright-joins-grimsby-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4681731,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/28/cartwright-joins-grimsby-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/28/cartwright-joins-grimsby-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "new_7d",
+      "age_days": 4,
+      "matched_fpl_element_id": 275
+    },
+    {
+      "player": "Elyh Harrison",
+      "from_club": "Man Utd",
+      "to_club": "Greenock Morton",
+      "announced_at": "2026-07-28T14:30:00Z",
+      "source_url": "https://www.manutd.com/en/news/loan-news-harrison-joins-greenock-morton?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "manutd.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Man Utd",
+      "premier_league_item_id": 4681730,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.manutd.com/en/news/loan-news-harrison-joins-greenock-morton?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.manutd.com/en/news/loan-news-harrison-joins-greenock-morton?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "new_7d",
+      "age_days": 4,
+      "matched_fpl_element_id": null
+    },
+    {
       "player": "Amara Nallo",
       "from_club": "Liverpool",
       "to_club": "HJK Helsinki",
@@ -24,8 +444,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 3,
+      "freshness": "recent_14d",
+      "age_days": 8,
       "matched_fpl_element_id": null
     },
     {
@@ -52,9 +472,37 @@
       ],
       "movement_direction": "released",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 3,
+      "freshness": "recent_14d",
+      "age_days": 8,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "Hidemasa Morita",
+      "from_club": "Not stated",
+      "to_club": "Hull City",
+      "announced_at": "2026-07-24T16:49:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/24/morita-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4681166,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/24/morita-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/24/morita-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 8,
+      "matched_fpl_element_id": 563
     },
     {
       "player": "Sekou Kone",
@@ -80,8 +528,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 3,
+      "freshness": "recent_14d",
+      "age_days": 8,
       "matched_fpl_element_id": null
     },
     {
@@ -108,9 +556,37 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "high",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": 353
+    },
+    {
+      "player": "Norman Bassette",
+      "from_club": "Coventry City",
+      "to_club": "KVC Westerlo",
+      "announced_at": "2026-07-23T15:47:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/july/22/norman-bassette-joins-kvc-westerlo-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4680922,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/july/22/norman-bassette-joins-kvc-westerlo-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/july/22/norman-bassette-joins-kvc-westerlo-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 9,
+      "matched_fpl_element_id": 197
     },
     {
       "player": "Max Merrick",
@@ -136,8 +612,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": null
     },
     {
@@ -169,8 +645,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": null
     },
     {
@@ -197,8 +673,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": 558
     },
     {
@@ -225,8 +701,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": 557
     },
     {
@@ -253,8 +729,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "medium",
-      "freshness": "new_7d",
-      "age_days": 4,
+      "freshness": "recent_14d",
+      "age_days": 9,
       "matched_fpl_element_id": null
     },
     {
@@ -281,8 +757,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "medium",
-      "freshness": "new_7d",
-      "age_days": 5,
+      "freshness": "recent_14d",
+      "age_days": 10,
       "matched_fpl_element_id": null
     },
     {
@@ -290,27 +766,32 @@
       "from_club": "Fulham",
       "to_club": "Ipswich",
       "announced_at": "2026-07-22T11:29:00Z",
-      "source_url": "https://www.fulhamfc.com/news/2026/july/22/diop-departs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/22/issa-diop-is-a-blue/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
       "source_type": "official_club",
-      "official_club_domain": "fulhamfc.com",
-      "movement_type": "transfer-out",
-      "premier_league_club": "Fulham",
-      "premier_league_item_id": 4680655,
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4680654,
       "verification_status": "confirmed_first_party",
       "fpl_reconciliation_status": "matched_current_fpl",
       "supporting_sources": [
         {
           "url": "https://www.fulhamfc.com/news/2026/july/22/diop-departs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
           "source_type": "official_club"
+        },
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/22/issa-diop-is-a-blue/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
         }
       ],
       "supporting_source_urls": [
-        "https://www.fulhamfc.com/news/2026/july/22/diop-departs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+        "https://www.fulhamfc.com/news/2026/july/22/diop-departs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+        "https://www.itfc.co.uk/news/2026/july/22/issa-diop-is-a-blue/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
       ],
-      "movement_direction": "out",
+      "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "new_7d",
-      "age_days": 5,
+      "freshness": "recent_14d",
+      "age_days": 10,
       "matched_fpl_element_id": 259
     },
     {
@@ -337,9 +818,121 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "new_7d",
-      "age_days": 5,
+      "freshness": "recent_14d",
+      "age_days": 10,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "Kjell Scherpen",
+      "from_club": "Royale Union Saint-Gilloise",
+      "to_club": "Ipswich",
+      "announced_at": "2026-07-21T15:48:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/28/kjell-scherpen-signs-for-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4681664,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/28/kjell-scherpen-signs-for-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/28/kjell-scherpen-signs-for-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 11,
+      "matched_fpl_element_id": 564
+    },
+    {
+      "player": "Daizen Maeda",
+      "from_club": "Celtic",
+      "to_club": "Ipswich",
+      "announced_at": "2026-07-21T15:48:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/25/Japan-international-Daizen-Maeda-joins-Ipswich-Town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4681250,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/25/Japan-international-Daizen-Maeda-joins-Ipswich-Town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/25/Japan-international-Daizen-Maeda-joins-Ipswich-Town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 11,
+      "matched_fpl_element_id": 562
+    },
+    {
+      "player": "Abdul Fatawu",
+      "from_club": "Leicester City",
+      "to_club": "Ipswich",
+      "announced_at": "2026-07-21T15:48:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/21/abdul-fatawu-joins-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4680519,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/21/abdul-fatawu-joins-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/21/abdul-fatawu-joins-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 11,
+      "matched_fpl_element_id": 315
+    },
+    {
+      "player": "Kayne van Oevelen",
+      "from_club": "FC Volendam",
+      "to_club": "Ipswich",
+      "announced_at": "2026-07-21T10:47:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/21/town-sign-dutch-keeper-kayne/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4680465,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/21/town-sign-dutch-keeper-kayne/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/21/town-sign-dutch-keeper-kayne/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "recent_14d",
+      "age_days": 11,
+      "matched_fpl_element_id": 554
     },
     {
       "player": "Reigan Heskey",
@@ -365,8 +958,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "recent_14d",
-      "age_days": 10,
+      "freshness": "older",
+      "age_days": 15,
       "matched_fpl_element_id": null
     },
     {
@@ -393,8 +986,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 10,
+      "freshness": "older",
+      "age_days": 15,
       "matched_fpl_element_id": 53
     },
     {
@@ -421,8 +1014,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 10,
+      "freshness": "older",
+      "age_days": 15,
       "matched_fpl_element_id": 54
     },
     {
@@ -449,8 +1042,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 10,
+      "freshness": "older",
+      "age_days": 15,
       "matched_fpl_element_id": 334
     },
     {
@@ -477,8 +1070,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 11,
+      "freshness": "older",
+      "age_days": 16,
       "matched_fpl_element_id": 38
     },
     {
@@ -505,8 +1098,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 11,
+      "freshness": "older",
+      "age_days": 16,
       "matched_fpl_element_id": 117
     },
     {
@@ -533,8 +1126,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "recent_14d",
-      "age_days": 11,
+      "freshness": "older",
+      "age_days": 16,
       "matched_fpl_element_id": null
     },
     {
@@ -561,8 +1154,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "low",
-      "freshness": "recent_14d",
-      "age_days": 12,
+      "freshness": "older",
+      "age_days": 17,
       "matched_fpl_element_id": null
     },
     {
@@ -589,8 +1182,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 12,
+      "freshness": "older",
+      "age_days": 17,
       "matched_fpl_element_id": 541
     },
     {
@@ -617,8 +1210,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 13,
+      "freshness": "older",
+      "age_days": 18,
       "matched_fpl_element_id": 81
     },
     {
@@ -645,8 +1238,8 @@
       ],
       "movement_direction": "released",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 13,
+      "freshness": "older",
+      "age_days": 18,
       "matched_fpl_element_id": 325
     },
     {
@@ -673,8 +1266,8 @@
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 13,
+      "freshness": "older",
+      "age_days": 18,
       "matched_fpl_element_id": 325
     },
     {
@@ -706,8 +1299,8 @@
       ],
       "movement_direction": "out",
       "fpl_relevance": "high",
-      "freshness": "recent_14d",
-      "age_days": 13,
+      "freshness": "older",
+      "age_days": 18,
       "matched_fpl_element_id": 504
     },
     {
@@ -735,8 +1328,64 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "Loum Tchaouna",
+      "from_club": "Burnley",
+      "to_club": "Coventry City",
+      "announced_at": "2026-07-11T15:07:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/july/11/loum-tchaouna-joins-coventry-city-from-burnley/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4679110,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/july/11/loum-tchaouna-joins-coventry-city-from-burnley/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/july/11/loum-tchaouna-joins-coventry-city-from-burnley/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 21,
+      "matched_fpl_element_id": 190
+    },
+    {
+      "player": "Aurele Amenda",
+      "from_club": "Frankfurt",
+      "to_club": "Coventry City",
+      "announced_at": "2026-07-11T15:07:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/july/16/coventry-city-sign-aur-le-amenda-from-eintracht-frankfurt/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4679794,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/july/16/coventry-city-sign-aur-le-amenda-from-eintracht-frankfurt/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/july/16/coventry-city-sign-aur-le-amenda-from-eintracht-frankfurt/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 21,
+      "matched_fpl_element_id": 182
     },
     {
       "player": "Yusuf Akhamrich",
@@ -763,7 +1412,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
       "matched_fpl_element_id": null
     },
     {
@@ -791,7 +1440,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
       "matched_fpl_element_id": null
     },
     {
@@ -819,8 +1468,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
       "matched_fpl_element_id": 410
+    },
+    {
+      "player": "Cieran Slicker",
+      "from_club": "Ipswich",
+      "to_club": "Barnsley",
+      "announced_at": "2026-07-11T09:00:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/13/league-one-loan-for-slicks/",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4679329,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/13/league-one-loan-for-slicks/",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/13/league-one-loan-for-slicks/"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 21,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Brajan Gruda",
@@ -847,7 +1524,35 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Antonio Cordero",
+      "from_club": "Newcastle",
+      "to_club": "Cadiz",
+      "announced_at": "2026-07-11T09:00:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/antonio-cordero-rejoins-cadiz-on-loan",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4679086,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/antonio-cordero-rejoins-cadiz-on-loan",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/antonio-cordero-rejoins-cadiz-on-loan"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 21,
       "matched_fpl_element_id": null
     },
     {
@@ -875,8 +1580,36 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 16,
+      "age_days": 21,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "Sean Steur",
+      "from_club": "Ajax",
+      "to_club": "Newcastle",
+      "announced_at": "2026-07-09T10:23:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/sean-steur-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4678742,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/sean-steur-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/sean-steur-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 23,
+      "matched_fpl_element_id": 462
     },
     {
       "player": "Sam Sene-Richardson",
@@ -903,7 +1636,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": null
     },
     {
@@ -931,7 +1664,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": null
     },
     {
@@ -959,7 +1692,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": 207
     },
     {
@@ -987,7 +1720,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": null
     },
     {
@@ -1015,8 +1748,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": 3
+    },
+    {
+      "player": "Harrison Ashby",
+      "from_club": "Newcastle",
+      "to_club": "Luton Town",
+      "announced_at": "2026-07-09T10:23:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/harrison-ashby-joins-luton-town-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4678726,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/harrison-ashby-joins-luton-town-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/harrison-ashby-joins-luton-town-on-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 23,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Callum Wilson",
@@ -1043,8 +1804,64 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 18,
+      "age_days": 23,
       "matched_fpl_element_id": 108
+    },
+    {
+      "player": "Aladji Bamba",
+      "from_club": "Monaco",
+      "to_club": "Newcastle",
+      "announced_at": "2026-07-09T10:23:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/aladji-bamba-signs-for-newcastle-united/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4681061,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/aladji-bamba-signs-for-newcastle-united/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/aladji-bamba-signs-for-newcastle-united/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 23,
+      "matched_fpl_element_id": 559
+    },
+    {
+      "player": "Afner Ca",
+      "from_club": "Levante",
+      "to_club": "Newcastle",
+      "announced_at": "2026-07-09T10:23:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-sign-forward-afner-ca?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4681114,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-sign-forward-afner-ca?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-sign-forward-afner-ca?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "medium",
+      "freshness": "older",
+      "age_days": 23,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Sandro Tonali",
@@ -1061,17 +1878,22 @@
       "fpl_reconciliation_status": "matched_current_fpl",
       "supporting_sources": [
         {
+          "url": "https://www.newcastleunited.com/en/news/sandro-tonali-leaves-newcastle-united-for-tottenham-hotspur?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        },
+        {
           "url": "https://www.tottenhamhotspur.com/news/1076467/welcome-sandro-tonali-makes-the-move-to-n17?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
           "source_type": "official_club"
         }
       ],
       "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/sandro-tonali-leaves-newcastle-united-for-tottenham-hotspur?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
         "https://www.tottenhamhotspur.com/news/1076467/welcome-sandro-tonali-makes-the-move-to-n17?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
       ],
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 21,
+      "age_days": 26,
       "matched_fpl_element_id": 455
     },
     {
@@ -1099,7 +1921,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 21,
+      "age_days": 26,
       "matched_fpl_element_id": null
     },
     {
@@ -1127,7 +1949,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 30,
+      "age_days": 35,
       "matched_fpl_element_id": null
     },
     {
@@ -1155,7 +1977,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 31,
+      "age_days": 36,
       "matched_fpl_element_id": 246
     },
     {
@@ -1183,7 +2005,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 31,
+      "age_days": 36,
       "matched_fpl_element_id": 247
     },
     {
@@ -1211,7 +2033,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": 525
     },
     {
@@ -1244,7 +2066,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": 112
     },
     {
@@ -1272,7 +2094,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": null
     },
     {
@@ -1300,7 +2122,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": null
     },
     {
@@ -1328,7 +2150,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": 377
     },
     {
@@ -1356,7 +2178,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": null
     },
     {
@@ -1384,7 +2206,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": null
     },
     {
@@ -1412,7 +2234,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 39,
+      "age_days": 44,
       "matched_fpl_element_id": null
     },
     {
@@ -1440,7 +2262,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": null
     },
     {
@@ -1468,7 +2290,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": null
     },
     {
@@ -1496,7 +2318,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": null
     },
     {
@@ -1524,7 +2346,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": null
     },
     {
@@ -1552,7 +2374,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 328
     },
     {
@@ -1580,8 +2402,36 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 328
+    },
+    {
+      "player": "Oscar Zambrano",
+      "from_club": "Maribor",
+      "to_club": "Hull City",
+      "announced_at": "2026-06-15T17:39:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/21/zambrano-completes-tigers-return/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4680539,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/21/zambrano-completes-tigers-return/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/21/zambrano-completes-tigers-return/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 47,
+      "matched_fpl_element_id": 294
     },
     {
       "player": "Michael Svoboda",
@@ -1608,8 +2458,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 120
+    },
+    {
+      "player": "Matt Targett",
+      "from_club": "Not stated",
+      "to_club": "Hull City",
+      "announced_at": "2026-06-15T17:39:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/23/targett-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4680795,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/23/targett-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/23/targett-signs-for-hull-city/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 47,
+      "matched_fpl_element_id": 556
     },
     {
       "player": "Jack Harrison",
@@ -1636,8 +2514,36 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 342
+    },
+    {
+      "player": "Jack Butland",
+      "from_club": "Rangers",
+      "to_club": "Hull City",
+      "announced_at": "2026-06-15T17:39:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/02/hull-city-complete-butland-signing/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4677627,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/02/hull-city-complete-butland-signing/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/02/hull-city-complete-butland-signing/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 47,
+      "matched_fpl_element_id": 274
     },
     {
       "player": "Harry Wilson",
@@ -1664,7 +2570,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 260
     },
     {
@@ -1692,7 +2598,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": null
     },
     {
@@ -1720,8 +2626,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 42,
+      "age_days": 47,
       "matched_fpl_element_id": 119
+    },
+    {
+      "player": "Ben Robinson",
+      "from_club": "Not stated",
+      "to_club": "Hull City",
+      "announced_at": "2026-06-15T17:39:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/07/robinson-joins-hull-city-academy/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4678420,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/07/robinson-joins-hull-city-academy/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/07/robinson-joins-hull-city-academy/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "medium",
+      "freshness": "older",
+      "age_days": 47,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Sam Byram",
@@ -1748,7 +2682,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -1776,7 +2710,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -1809,7 +2743,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": 242
     },
     {
@@ -1837,8 +2771,41 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "Maxence Lacroix",
+      "from_club": "Crystal Palace",
+      "to_club": "Chelsea",
+      "announced_at": "2026-06-12T17:41:00Z",
+      "source_url": "https://www.cpfc.co.uk/news/announcement/maxence-lacroix-departs-crystal-palace/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "cpfc.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Crystal Palace",
+      "premier_league_item_id": 4682057,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.chelseafc.com/en/news/article/maxence-lacroix-signs-for-chelsea?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        },
+        {
+          "url": "https://www.cpfc.co.uk/news/announcement/maxence-lacroix-departs-crystal-palace/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.chelseafc.com/en/news/article/maxence-lacroix-signs-for-chelsea?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+        "https://www.cpfc.co.uk/news/announcement/maxence-lacroix-departs-crystal-palace/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 50,
+      "matched_fpl_element_id": 200
     },
     {
       "player": "Marco Palestra",
@@ -1865,7 +2832,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": 152
     },
     {
@@ -1893,7 +2860,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -1921,7 +2888,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": 164
     },
     {
@@ -1949,7 +2916,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -1977,35 +2944,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
-      "matched_fpl_element_id": null
-    },
-    {
-      "player": "Chris Atherton",
-      "from_club": "Chelsea",
-      "to_club": "Ipswich",
-      "announced_at": "2026-06-12T17:41:00Z",
-      "source_url": "https://www.chelseafc.com/en/news/article/chris-atherton-joins-ipswich-town?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
-      "source_type": "official_club",
-      "official_club_domain": "chelseafc.com",
-      "movement_type": "transfer-out",
-      "premier_league_club": "Chelsea",
-      "premier_league_item_id": 4679949,
-      "verification_status": "confirmed_first_party",
-      "fpl_reconciliation_status": "pending_new_season_fpl",
-      "supporting_sources": [
-        {
-          "url": "https://www.chelseafc.com/en/news/article/chris-atherton-joins-ipswich-town?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
-          "source_type": "official_club"
-        }
-      ],
-      "supporting_source_urls": [
-        "https://www.chelseafc.com/en/news/article/chris-atherton-joins-ipswich-town?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
-      ],
-      "movement_direction": "out",
-      "fpl_relevance": "low",
-      "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2033,7 +2972,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2061,7 +3000,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2089,7 +3028,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2122,7 +3061,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": 481
     },
     {
@@ -2150,7 +3089,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2178,7 +3117,7 @@
       "movement_direction": "released",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": 3
     },
     {
@@ -2206,7 +3145,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2234,7 +3173,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 45,
+      "age_days": 50,
       "matched_fpl_element_id": null
     },
     {
@@ -2262,7 +3201,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2290,7 +3229,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2318,7 +3257,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2346,7 +3285,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2374,7 +3313,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2402,7 +3341,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2430,7 +3369,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2458,7 +3397,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2486,7 +3425,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2514,7 +3453,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2542,7 +3481,7 @@
       "movement_direction": "released",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": 260
     },
     {
@@ -2570,7 +3509,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2598,7 +3537,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2626,7 +3565,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2654,7 +3593,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2682,7 +3621,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 49,
+      "age_days": 54,
       "matched_fpl_element_id": null
     },
     {
@@ -2710,7 +3649,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 51,
+      "age_days": 56,
       "matched_fpl_element_id": 135
     },
     {
@@ -2738,7 +3677,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 57,
       "matched_fpl_element_id": 497
     },
     {
@@ -2766,7 +3705,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 57,
       "matched_fpl_element_id": null
     },
     {
@@ -2794,7 +3733,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 52,
+      "age_days": 57,
       "matched_fpl_element_id": null
     },
     {
@@ -2822,7 +3761,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2850,7 +3789,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2878,7 +3817,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2906,7 +3845,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2934,7 +3873,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2962,7 +3901,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -2990,7 +3929,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -3018,7 +3957,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 53,
+      "age_days": 58,
       "matched_fpl_element_id": null
     },
     {
@@ -3051,7 +3990,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 54,
+      "age_days": 59,
       "matched_fpl_element_id": null
     },
     {
@@ -3079,7 +4018,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 54,
+      "age_days": 59,
       "matched_fpl_element_id": null
     },
     {
@@ -3112,7 +4051,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 54,
+      "age_days": 59,
       "matched_fpl_element_id": 162
     },
     {
@@ -3140,7 +4079,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 54,
+      "age_days": 59,
       "matched_fpl_element_id": null
     },
     {
@@ -3168,7 +4107,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 55,
+      "age_days": 60,
       "matched_fpl_element_id": null
     },
     {
@@ -3196,7 +4135,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 61,
+      "age_days": 66,
       "matched_fpl_element_id": null
     },
     {
@@ -3224,7 +4163,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 61,
+      "age_days": 66,
       "matched_fpl_element_id": null
     },
     {
@@ -3252,7 +4191,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 65,
+      "age_days": 70,
       "matched_fpl_element_id": null
     },
     {
@@ -3280,7 +4219,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3308,7 +4247,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3336,7 +4275,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3364,7 +4303,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3392,8 +4331,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": 9
+    },
+    {
+      "player": "Odysseas Vlachodimos",
+      "from_club": "Newcastle",
+      "to_club": "Sevilla",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/odysseas-rejoins-sevilla-on-season-long-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "loan-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4677471,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/odysseas-rejoins-sevilla-on-season-long-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/odysseas-rejoins-sevilla-on-season-long-loan?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Nathan Ake",
@@ -3420,7 +4387,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3448,7 +4415,7 @@
       "movement_direction": "in",
       "fpl_relevance": "medium",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3476,7 +4443,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3504,7 +4471,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3532,7 +4499,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3560,7 +4527,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3588,7 +4555,91 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Kyle Joseph",
+      "from_club": "Hull City",
+      "to_club": "Middlesbrough",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/10/joseph-joins-middlesbrough/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4678917,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/10/joseph-joins-middlesbrough/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/10/joseph-joins-middlesbrough/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Kasey Palmer",
+      "from_club": "Hull City",
+      "to_club": "Luton Town",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/04/palmer-signs-for-luton-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4678018,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/04/palmer-signs-for-luton-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/04/palmer-signs-for-luton-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "James Debayo",
+      "from_club": "Hull City",
+      "to_club": "Swindon Town",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/02/debayo-joins-swindon-town-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4677680,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/02/debayo-joins-swindon-town-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/02/debayo-joins-swindon-town-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3616,7 +4667,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3644,7 +4695,35 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Ivor Pandur",
+      "from_club": "Hull City",
+      "to_club": "Rangers",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/june/30/pandur-signs-for-rangers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4677468,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/june/30/pandur-signs-for-rangers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/june/30/pandur-signs-for-rangers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3672,7 +4751,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3700,7 +4779,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3728,7 +4807,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3756,7 +4835,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3784,7 +4863,63 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 167,
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Akin Famewo",
+      "from_club": "Hull City",
+      "to_club": "Bolton",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/01/famewo-joins-bolton-wanderers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4677467,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/01/famewo-joins-bolton-wanderers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/01/famewo-joins-bolton-wanderers/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Aidon Shehu",
+      "from_club": "Hull City",
+      "to_club": "Panathinaikos",
+      "announced_at": "2026-02-10T14:07:00Z",
+      "source_url": "https://www.wearehullcity.co.uk/news/2026/july/01/shehu-joins-panathinaikos-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "wearehullcity.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Hull City",
+      "premier_league_item_id": 4677469,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.wearehullcity.co.uk/news/2026/july/01/shehu-joins-panathinaikos-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.wearehullcity.co.uk/news/2026/july/01/shehu-joins-panathinaikos-permanently/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 172,
       "matched_fpl_element_id": null
     },
     {
@@ -3812,7 +4947,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 174,
+      "age_days": 179,
       "matched_fpl_element_id": null
     },
     {
@@ -3840,7 +4975,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 174,
+      "age_days": 179,
       "matched_fpl_element_id": 24
     },
     {
@@ -3868,7 +5003,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 174,
+      "age_days": 179,
       "matched_fpl_element_id": null
     },
     {
@@ -3896,8 +5031,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 174,
+      "age_days": 179,
       "matched_fpl_element_id": 93
+    },
+    {
+      "player": "Jamie Allen",
+      "from_club": "Coventry City",
+      "to_club": "Released",
+      "announced_at": "2026-02-03T00:14:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/may/15/jamie-allen-to-leave-coventry-city-upon-expiry-of-his-contract/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "player-released",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4673711,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/may/15/jamie-allen-to-leave-coventry-city-upon-expiry-of-his-contract/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/may/15/jamie-allen-to-leave-coventry-city-upon-expiry-of-his-contract/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 179,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Jaidon Anthony",
@@ -3924,8 +5087,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 174,
+      "age_days": 179,
       "matched_fpl_element_id": 105
+    },
+    {
+      "player": "Callum Perry",
+      "from_club": "Coventry City",
+      "to_club": "Cambridge",
+      "announced_at": "2026-02-03T00:14:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/july/21/callum-perry-joins-cambridge-united-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4680545,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/july/21/callum-perry-joins-cambridge-united-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/july/21/callum-perry-joins-cambridge-united-on-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 179,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Seamus Coleman",
@@ -3952,7 +5143,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -3985,7 +5176,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": 43
     },
     {
@@ -4013,7 +5204,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4041,7 +5232,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4069,7 +5260,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4097,7 +5288,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4125,7 +5316,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4158,7 +5349,7 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": 40
     },
     {
@@ -4186,7 +5377,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4214,7 +5405,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4242,7 +5433,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4270,7 +5461,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4298,7 +5489,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4326,7 +5517,7 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": 362
     },
     {
@@ -4354,7 +5545,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4382,7 +5573,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4410,7 +5601,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4438,7 +5629,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4466,7 +5657,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4494,7 +5685,7 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 176,
+      "age_days": 181,
       "matched_fpl_element_id": null
     },
     {
@@ -4522,7 +5713,147 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 213,
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Travis Hernes",
+      "from_club": "Newcastle",
+      "to_club": "Groningen",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/travis-hernes-completes-permanent-move-to-fc-groningen?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4673680,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/travis-hernes-completes-permanent-move-to-fc-groningen?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/travis-hernes-completes-permanent-move-to-fc-groningen?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Max Thompson",
+      "from_club": "Newcastle",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4673682,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Matt Targett",
+      "from_club": "Newcastle",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4673688,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 556
+    },
+    {
+      "player": "Leon Ayinde",
+      "from_club": "Ipswich",
+      "to_club": "Doncaster",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/may/20/leon-ayinde-to-join-doncaster/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4673723,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/may/20/leon-ayinde-to-join-doncaster/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/may/20/leon-ayinde-to-join-doncaster/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Kieran Trippier",
+      "from_club": "Newcastle",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/kieran-trippier-and-newcastle-united-to-part-ways?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4671231,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/kieran-trippier-and-newcastle-united-to-part-ways?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/kieran-trippier-and-newcastle-united-to-part-ways?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
       "matched_fpl_element_id": null
     },
     {
@@ -4550,8 +5881,265 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 213,
+      "age_days": 218,
       "matched_fpl_element_id": null
+    },
+    {
+      "player": "John Ruddy",
+      "from_club": "Newcastle",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4673681,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Joe White",
+      "from_club": "Newcastle",
+      "to_club": "Crewe Alexandra",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/joe-white-joins-crewe-alexandra?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4681115,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/joe-white-joins-crewe-alexandra?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/joe-white-joins-crewe-alexandra?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Ewen Jaouen",
+      "from_club": "Reims",
+      "to_club": "Newcastle",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/ewen-jaouen-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4674227,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/ewen-jaouen-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/ewen-jaouen-signs-for-newcastle-united?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 444
+    },
+    {
+      "player": "Emil Krafth",
+      "from_club": "Newcastle",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/emil-krafth-to-depart-newcastle-united-this-summer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "player-released",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4658368,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/emil-krafth-to-depart-newcastle-united-this-summer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/emil-krafth-to-depart-newcastle-united-this-summer?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Emersonn",
+      "from_club": "Toulouse",
+      "to_club": "Ipswich",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/08/brazilian-striker-emersonn-signs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4678586,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/08/brazilian-striker-emersonn-signs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/july/08/brazilian-striker-emersonn-signs/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 316
+    },
+    {
+      "player": "Conor Chaplin",
+      "from_club": "Ipswich",
+      "to_club": "Released",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/may/15/conor-chaplin-to-depart-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "player-released",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4673724,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/may/15/conor-chaplin-to-depart-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/may/15/conor-chaplin-to-depart-town/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "released",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Chuba Akpom",
+      "from_club": "Ajax",
+      "to_club": "Ipswich",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/may/05/permanent-deal-for-chuba/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4673722,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/may/05/permanent-deal-for-chuba/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/may/05/permanent-deal-for-chuba/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 320
+    },
+    {
+      "player": "Chris Atherton",
+      "from_club": "Chelsea",
+      "to_club": "Ipswich",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/july/17/town-academy-sign-chris-atherton/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4679948,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.chelseafc.com/en/news/article/chris-atherton-joins-ipswich-town?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        },
+        {
+          "url": "https://www.itfc.co.uk/news/2026/july/17/town-academy-sign-chris-atherton/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.chelseafc.com/en/news/article/chris-atherton-joins-ipswich-town?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+        "https://www.itfc.co.uk/news/2026/july/17/town-academy-sign-chris-atherton/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "medium",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Cedric Kipre",
+      "from_club": "Reims",
+      "to_club": "Ipswich",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/may/05/c-dric-makes-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4673725,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/may/05/c-dric-makes-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/may/05/c-dric-makes-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 303
     },
     {
       "player": "Bernardo Silva",
@@ -4578,7 +6166,119 @@
       "movement_direction": "released",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 213,
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Bazoumana Toure",
+      "from_club": "Hoffenheim",
+      "to_club": "Newcastle",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-sign-bazoumana-toure?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4678089,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-sign-bazoumana-toure?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-sign-bazoumana-toure?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": 461
+    },
+    {
+      "player": "Arijanet Muric",
+      "from_club": "Ipswich",
+      "to_club": "Sassuolo",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.itfc.co.uk/news/2026/june/01/permanent-move-for-aro/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "itfc.co.uk",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Ipswich",
+      "premier_league_item_id": 4673690,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.itfc.co.uk/news/2026/june/01/permanent-move-for-aro/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.itfc.co.uk/news/2026/june/01/permanent-move-for-aro/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Anthony Gordon",
+      "from_club": "Newcastle",
+      "to_club": "Barcelona",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/anthony-gordon-signs-for-barcelona?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "transfer-out",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4672196,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/anthony-gordon-signs-for-barcelona?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/anthony-gordon-signs-for-barcelona?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
+      "matched_fpl_element_id": null
+    },
+    {
+      "player": "Aaron Ramsdale",
+      "from_club": "Southampton",
+      "to_club": "Newcastle",
+      "announced_at": "2025-12-26T12:51:00Z",
+      "source_url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "newcastleunited.com",
+      "movement_type": "end-of-loan",
+      "premier_league_club": "Newcastle",
+      "premier_league_item_id": 4673689,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.newcastleunited.com/en/news/newcastle-united-confirm-mens-first-team-retained-list?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 218,
       "matched_fpl_element_id": null
     },
     {
@@ -4606,7 +6306,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 223,
+      "age_days": 228,
       "matched_fpl_element_id": null
     },
     {
@@ -4634,8 +6334,36 @@
       "movement_direction": "in",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 223,
+      "age_days": 228,
       "matched_fpl_element_id": 272
+    },
+    {
+      "player": "Isaac Moore",
+      "from_club": "Coventry City",
+      "to_club": "Walsall",
+      "announced_at": "2025-12-16T12:18:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/july/07/isaac-moore-joins-walsall-on-season-long-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "loan-out",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4678415,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "pending_new_season_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/july/07/isaac-moore-joins-walsall-on-season-long-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/july/07/isaac-moore-joins-walsall-on-season-long-loan/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "out",
+      "fpl_relevance": "low",
+      "freshness": "older",
+      "age_days": 228,
+      "matched_fpl_element_id": null
     },
     {
       "player": "Frank Onyeka",
@@ -4662,7 +6390,35 @@
       "movement_direction": "out",
       "fpl_relevance": "high",
       "freshness": "older",
-      "age_days": 223,
+      "age_days": 228,
+      "matched_fpl_element_id": 104
+    },
+    {
+      "player": "Frank Onyeka",
+      "from_club": "Brentford",
+      "to_club": "Coventry City",
+      "announced_at": "2025-12-16T12:18:00Z",
+      "source_url": "https://www.ccfc.co.uk/news/2026/june/29/frank-onyeka-makes-sky-blues-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+      "source_type": "official_club",
+      "official_club_domain": "ccfc.co.uk",
+      "movement_type": "transfer-in",
+      "premier_league_club": "Coventry City",
+      "premier_league_item_id": 4677088,
+      "verification_status": "confirmed_first_party",
+      "fpl_reconciliation_status": "matched_current_fpl",
+      "supporting_sources": [
+        {
+          "url": "https://www.ccfc.co.uk/news/2026/june/29/frank-onyeka-makes-sky-blues-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch",
+          "source_type": "official_club"
+        }
+      ],
+      "supporting_source_urls": [
+        "https://www.ccfc.co.uk/news/2026/june/29/frank-onyeka-makes-sky-blues-move-permanent/?utm_source=premier-league&utm_medium=referral&utm_campaign=pl-referral&utm_term=transfer-watch"
+      ],
+      "movement_direction": "in",
+      "fpl_relevance": "high",
+      "freshness": "older",
+      "age_days": 228,
       "matched_fpl_element_id": 104
     },
     {
@@ -4690,7 +6446,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 223,
+      "age_days": 228,
       "matched_fpl_element_id": null
     },
     {
@@ -4718,7 +6474,7 @@
       "movement_direction": "out",
       "fpl_relevance": "low",
       "freshness": "older",
-      "age_days": 223,
+      "age_days": 228,
       "matched_fpl_element_id": null
     }
   ]

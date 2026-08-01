@@ -47,17 +47,9 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .transfers import is_trusted_https_url
+from .transfers import OFFICIAL_CLUB_DOMAINS, is_trusted_https_url
 
-
-_FIRST_PARTY_NEWS_DOMAINS = {
-    "premierleague.com", "arsenal.com", "avfc.co.uk", "afcb.co.uk",
-    "brentfordfc.com", "brightonandhovealbion.com", "burnleyfootballclub.com",
-    "chelseafc.com", "cpfc.co.uk", "evertonfc.com", "fulhamfc.com",
-    "leedsunited.com", "liverpoolfc.com", "mancity.com", "manutd.com",
-    "nufc.co.uk", "nottinghamforest.co.uk", "safc.com", "tottenhamhotspur.com",
-    "whufc.com", "wolves.co.uk",
-}
+_FIRST_PARTY_NEWS_DOMAINS = OFFICIAL_CLUB_DOMAINS | {"premierleague.com"}
 
 
 _CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"

@@ -1,6 +1,26 @@
 import unittest
 
-from fpl_intel.transfers import normalize_transfer
+from fpl_intel.transfers import OFFICIAL_CLUB_DOMAINS, normalize_transfer
+
+
+class OfficialClubDomainsTests(unittest.TestCase):
+    def test_covers_every_current_premier_league_club_domain(self):
+        expected = {
+            "arsenal.com", "avfc.co.uk", "afcb.co.uk", "brentfordfc.com",
+            "brightonandhovealbion.com", "ccfc.co.uk", "chelseafc.com",
+            "cpfc.co.uk", "evertonfc.com", "fulhamfc.com", "wearehullcity.co.uk",
+            "itfc.co.uk", "leedsunited.com", "liverpoolfc.com", "mancity.com",
+            "manutd.com", "newcastleunited.com", "nottinghamforest.co.uk",
+            "safc.com", "tottenhamhotspur.com",
+        }
+
+        self.assertEqual(OFFICIAL_CLUB_DOMAINS, expected)
+
+    def test_no_longer_trusts_clubs_outside_this_seasons_premier_league(self):
+        self.assertNotIn("burnleyfootballclub.com", OFFICIAL_CLUB_DOMAINS)
+        self.assertNotIn("whufc.com", OFFICIAL_CLUB_DOMAINS)
+        self.assertNotIn("wolves.co.uk", OFFICIAL_CLUB_DOMAINS)
+        self.assertNotIn("nufc.co.uk", OFFICIAL_CLUB_DOMAINS)
 
 
 class NormalizeTransferTests(unittest.TestCase):
