@@ -182,8 +182,11 @@ class DashboardRenderTests(unittest.TestCase):
         html = render_dashboard(state)
         style_block = html[html.index(":root{"):html.index("</style>")]
 
-        # Toggle control and its pre-paint theme script exist (issue #48).
+        # Toggle control (sun/moon icon, accessible label) and its pre-paint
+        # theme script exist (issue #48).
         self.assertIn('id="theme-toggle"', html)
+        self.assertIn("🌙", html)
+        self.assertIn('aria-label="Switch to light theme"', html)
         self.assertIn("localStorage.getItem('fpl-theme')", html)
         self.assertIn("prefers-color-scheme: light", html)
 
