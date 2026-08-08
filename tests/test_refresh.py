@@ -5,7 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from fpl_intel.generation import publish_generation, resolve_artifact
-from fpl_intel.refresh import _merge_transfer_candidates, _record_actual_collection_attempt, refresh_project
+from fpl_intel.refresh import (
+    _merge_transfer_candidates,
+    _record_actual_collection_attempt,
+    compute_manager_view,
+    refresh_project,
+)
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 
 
@@ -713,6 +718,73 @@ class RefreshProjectTests(unittest.TestCase):
             comparison = state["model_performance"]["team_performance"]["comparisons"][0]
             self.assertEqual(comparison["modeled_points"], 10.0)
             self.assertEqual(comparison["actual_points"], 6)
+
+
+class ComputeManagerViewTests(unittest.TestCase):
+    """The per-team half split out of _refresh_project_unlocked for issue #46."""
+
+    def test_computes_weekly_decision_for_a_request_supplied_team_id(self):
+        from tests.test_transfer_decisions import gw2_inputs
+
+        bootstrap, fixtures, manager = gw2_inputs()
+        raw_manager = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {
+                "active_chip": None,
+                "entry_history": {"event": 1, "bank": 0, "value": 1000},
+                "picks": [
+                    {
+                        "element": row["element_id"], "position": index + 1,
+                        "multiplier": 1 if index < 11 else 0,
+                        "is_captain": index == 0, "is_vice_captain": index == 1,
+                        "purchase_price": row["purchase_price"],
+                        "selling_price": row["selling_price"],
+                    }
+                    for index, row in enumerate(manager["squad"])
+                ],
+            },
+        }
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=raw_manager) as mock_collect:
+            result = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=364759,
+            )
+
+        mock_collect.assert_called_once_with(364759)
+        self.assertEqual(result["manager"]["team_id"], 364759)
+        self.assertEqual(result["manager"]["connection_status"], "connected")
+        self.assertEqual(result["weekly_decisions"]["status"], "active")
+        self.assertEqual(result["weekly_decisions"]["event"], 2)
+
+    def test_unknown_or_unreachable_team_id_returns_a_clean_result_instead_of_raising(self):
+        bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
+
+        with patch("fpl_intel.refresh.collect_public_manager", side_effect=OSError("not found")):
+            result = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=99999999,
+            )
+
+        self.assertEqual(result["manager"]["connection_status"], "lookup_failed")
+        self.assertEqual(result["manager"]["team_id"], 99999999)
+        self.assertEqual(result["manager"]["squad"], [])
+        self.assertEqual(result["weekly_decisions"]["status"], "team_not_found")
+        self.assertIn("reason", result["weekly_decisions"])
+
+    def test_does_not_mutate_or_depend_on_a_persisted_profile(self):
+        """This is the request-supplied-team-id path -- it must not read config/user-profile.json."""
+        bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
+
+        with patch("fpl_intel.refresh.collect_public_manager", side_effect=OSError("unreachable")) as mock_collect:
+            compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=42,
+            )
+
+        mock_collect.assert_called_once_with(42)
 
 
 if __name__ == "__main__":
