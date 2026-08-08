@@ -5,6 +5,8 @@ from datetime import datetime
 import re
 import unicodedata
 
+from .transfers import canonical_club
+
 
 # Some Latin letters have no NFKD decomposition into "base letter + combining
 # diacritic" -- they're distinct letterforms, not accented variants of an
@@ -48,6 +50,18 @@ def _direction(movement_type):
 
 def enrich_transfers(transfers, bootstrap, generated_at):
     """Add deterministic relevance, movement, freshness, and FPL-match fields."""
+    # Different clubs' own transfer-centre write-ups don't always spell an
+    # opposing club's name the same way (e.g. "Brighton" vs. "Brighton &
+    # Hove Albion") -- normalize from_club/to_club to the bootstrap feed's
+    # own team name whenever they resolve to a real current club, so every
+    # downstream consumer (summarize_clubs, the dashboard's club filter)
+    # sees one consistent name per club instead of splitting the same club
+    # across multiple spellings.
+    team_name_by_canonical = {
+        canonical_club(team.get("name")): team.get("name")
+        for team in bootstrap.get("teams", [])
+        if team.get("name")
+    }
     full_names = {}
     web_names = defaultdict(list)
     # Press/transfer-feed reporting commonly uses only a player's first
@@ -75,6 +89,8 @@ def enrich_transfers(transfers, bootstrap, generated_at):
     enriched = []
     for transfer in transfers:
         row = dict(transfer)
+        for side in ("from_club", "to_club"):
+            row[side] = team_name_by_canonical.get(canonical_club(row.get(side)), row.get(side))
         direction = _direction(row.get("movement_type"))
         player_token = _token(row.get("player"))
         match = full_names.get(player_token)
@@ -118,20 +134,56 @@ def enrich_transfers(transfers, bootstrap, generated_at):
     return enriched
 
 
-def summarize_clubs(transfers):
-    """Create compact, sortable summaries for Premier League clubs."""
+def summarize_clubs(transfers, bootstrap):
+    """Create compact, sortable summaries for Premier League clubs.
+
+    Counts a move's arrival against its destination club and its departure
+    against its origin club independently, using from_club/to_club rather
+    than the single premier_league_club/movement_direction pairing a move
+    happens to have kept after refresh.py's cross-source dedup. A move
+    reported by both the selling and buying club's own transfer-centre
+    feeds is merged into one record there, and that merge keeps only one
+    side's attribution (whichever raw record was processed last) -- so
+    relying on it here would silently undercount the club that lost the
+    attribution (see #35). from_club/to_club survive the merge on every
+    record regardless of which side "won," so both clubs get credit.
+    """
+    club_names = {
+        canonical_club(team.get("name")): team.get("id")
+        for team in bootstrap.get("teams", [])
+        if team.get("name")
+    }
     clubs = {}
-    for transfer in transfers:
-        club = transfer.get("premier_league_club") or "Unknown"
-        summary = clubs.setdefault(
-            club,
-            {"club": club, "arrivals": 0, "departures": 0, "relevant_moves": 0, "latest_at": ""},
+
+    def _entry(club):
+        return clubs.setdefault(
+            club, {"club": club, "arrivals": 0, "departures": 0, "relevant_moves": 0, "latest_at": ""}
         )
-        if transfer.get("movement_direction") == "in":
-            summary["arrivals"] += 1
-        elif transfer.get("movement_direction") in {"out", "released"}:
-            summary["departures"] += 1
-        if transfer.get("fpl_relevance") in {"high", "medium"}:
-            summary["relevant_moves"] += 1
-        summary["latest_at"] = max(summary["latest_at"], transfer.get("announced_at", ""))
+
+    for transfer in transfers:
+        relevant = transfer.get("fpl_relevance") in {"high", "medium"}
+        announced_at = transfer.get("announced_at", "")
+        from_club = transfer.get("from_club")
+        to_club = transfer.get("to_club")
+        touched_a_pl_club = False
+        if from_club and canonical_club(from_club) in club_names:
+            entry = _entry(from_club)
+            entry["departures"] += 1
+            entry["relevant_moves"] += relevant
+            entry["latest_at"] = max(entry["latest_at"], announced_at)
+            touched_a_pl_club = True
+        if to_club and canonical_club(to_club) in club_names:
+            entry = _entry(to_club)
+            entry["arrivals"] += 1
+            entry["relevant_moves"] += relevant
+            entry["latest_at"] = max(entry["latest_at"], announced_at)
+            touched_a_pl_club = True
+        if not touched_a_pl_club:
+            # Neither side resolved to a current PL club (e.g. a lower-
+            # league loan move) -- fall back to the reporting club so the
+            # move still shows up somewhere rather than being dropped.
+            entry = _entry(transfer.get("premier_league_club") or "Unknown")
+            entry["relevant_moves"] += relevant
+            entry["latest_at"] = max(entry["latest_at"], announced_at)
+
     return sorted(clubs.values(), key=lambda item: (-item["relevant_moves"], item["club"]))
