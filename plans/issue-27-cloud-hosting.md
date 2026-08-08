@@ -78,6 +78,8 @@ The user asked whether there should be a way to use the hosted site without goin
 
 ### Non-OAuth registered accounts: staying signed in all season without Google/GitHub (raised 2026-08-08)
 
+**Superseded (2026-08-08) — see [plans/issue-45-per-team-profile-storage.md](issue-45-per-team-profile-storage.md).** The profile-key/OAuth recommendation below was reconsidered while `/plan-issue`ing #44: a manager's FPL data is already public via FPL's own API (established by #46/#62), so a credential system wouldn't be protecting anything by existing — only a few low-stakes preferences saved on top of that public data need separating between visitors, and the visitor's own team ID can do that without a registration step. #44 was closed as superseded by #45, which now covers both storage and the (much lighter) continuity mechanism. Left below for the record of how the decision evolved.
+
 Second half of the same request, and distinct from the lookup path above: the user wants to *register* — settings remembered across visits, for the whole season — without being forced through Google/GitHub OAuth, and without handing over an email address just to do so. This is not the no-signup lookup path (L1); it's a real persistent account, just via a different mechanism than OAuth. Email should be collected only when a user opts into #55's deadline-reminder emails — a separate decision from "does this visitor have a registered account at all."
 
 This matters because OAuth (Google/GitHub) is *inherently* email-based — the entire mechanism is "the provider verifies you and hands back an email"; there is no way to use Google/GitHub sign-in and not receive one. So OAuth cannot be *the* answer to "a non-email registration path" — it can only ever be one option alongside a genuinely email-free one.
@@ -107,12 +109,11 @@ No blocking open questions remain. Next step is rescoping #44/#45/#46 to match t
 
 This plan intentionally stops short of implementation-ready detail for Phases 1-3 — each is substantial enough to deserve its own issue and its own `ship-issue` pass rather than being built as one large, hard-to-review change:
 
-1. **Refresh pipeline split (build first)**: shared generation (unchanged cadence) vs. per-user, request-time manager computation, scoped from the start to serve an unauthenticated visitor's directly-supplied team ID. This alone ships a usable, no-signup lookup experience.
-2. **Registration**: a profile-key account (default, no email) plus an optional OAuth account + signed session cookie in `server.py` — the registered-account layer on top of the no-signup lookup, not a login wall in front of it.
-3. **Storage**: SQLite-backed profile store, replacing the single `config/user-profile.json` / `_default_profile_action`; keyed by a hash of whichever credential (profile key or OAuth subject) the row was created with, with `email` as a nullable column populated only on explicit reminder opt-in.
-4. Only after 1-3 ship: pick Axis B compute (own hardware vs. Fly.io vs. raw VM vs. Railway) and stand up real hosting.
+1. **Refresh pipeline split (built)**: shared generation (unchanged cadence) vs. per-user, request-time manager computation, scoped from the start to serve an unauthenticated visitor's directly-supplied team ID. Shipped as #46 — a usable, no-signup lookup experience.
+2. **Per-team profile storage**: SQLite-backed `profiles` table keyed by `team_id` (not a credential — see the superseded note above), replacing the single `config/user-profile.json` / `_default_profile_action`, plus a plain HttpOnly cookie remembering which team ID a browser last saved, for same-browser continuity across the season. No registration step; `email` stays a nullable column populated only on explicit reminder opt-in.
+3. Only after 1-2 ship: pick Axis B compute (own hardware vs. Fly.io vs. raw VM vs. Railway) and stand up real hosting.
 
-Filed as issues #46 (1), #44 (2), #45 (3) — reordered from the original 1/2/3 issue numbering to match the confirmed build sequence above. #45 still depends on #44 (needs a credential to key rows on), but neither blocks #46 anymore.
+Filed as issues #46 (1, shipped) and #45 (2) — #44 (originally step 2's "registration") is closed as superseded by #45 once the credential layer turned out to be unnecessary.
 
 ## Interaction with #28 (security review)
 
