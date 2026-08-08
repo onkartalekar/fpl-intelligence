@@ -34,7 +34,7 @@ Two independent axes: **who can reach it** (A), and **where the always-on comput
 - **B5. Render.** Free tier **cannot attach a persistent disk at all** — confirmed this means `config/user-profile.json` and every generated `data/*.json` snapshot would not survive a restart or the 15-minute spin-down/redeploy cycle, i.e. the free tier structurally breaks this app's storage model, not just "inconvenient cold starts." Starter ($7/mo) is required just to get a disk.
 - **B6. Serverless (Cloud Run, Lambda).** Not recommended as a first choice, unchanged from the issue's original framing and reinforced by the dependency-count finding above: `fcntl` file locking and local JSON files don't survive between invocations, so this requires moving all state to a real datastore — the biggest rewrite of any option, and this app's first-ever third-party dependency, for a tool the issue itself repeatedly describes as low-traffic and single/few-user.
 
-## Recommendation
+## Recommendation (superseded — see "Decision so far" below)
 
 **Answer the audience question (Axis A) first — it determines almost everything else, including how much of #28 needs to be resolved before shipping anything.**
 
@@ -43,9 +43,28 @@ Two independent axes: **who can reach it** (A), and **where the always-on comput
 - **A3 (fully public, no login) is not recommended at this project's current scope.** It's the only path that forces both a real in-app auth system and likely a per-user storage rewrite — disproportionate for a tool the issue itself frames as low-traffic and single/few-user throughout. Worth revisiting only if the actual goal changes to "share broadly with strangers," which is a different project.
 - Whichever B (compute) is picked, it's a separate, lower-stakes decision from A — B1 for $0 if you have a spare always-on device, otherwise B3 (Hetzner/Lightsail) for the cheapest cloud option with bundled storage, ahead of B2/B4 (comparable cost, more moving parts with a separate volume) and well ahead of B5 (free tier structurally incompatible with this app) or B6 (disproportionate rewrite).
 
+## Decision so far (2026-08-08): each person gets their own team, to allow scaling to everyone
+
+The user confirmed the goal is real per-user profiles ("each person wants their own team, so that there is flexibility to scale this to everyone"), not one shared profile behind a login gate. That rules A1 (Tailscale) out — a private VPN still only protects the *network*, it does nothing about the app having exactly one manager profile — and means A2 (Cloudflare Access) can only be a partial answer, addressed below. It also surfaces a structural finding the original issue didn't anticipate:
+
+### What "per-user" actually requires — verified against the refresh pipeline
+
+`_refresh_project_unlocked()` in [refresh.py](../src/fpl_intel/refresh.py) does not treat "the shared FPL universe" and "this manager's team" as separable today — it reads the single `config/user-profile.json`, uses its `team_id` to call `collect_public_manager`/`fetch_manager_event_picks` against the *real FPL API for that one manager*, and bakes the result into the same `dashboard-state.json`/`dashboard.html` as the shared bootstrap/fixtures/transfers/model-performance data. One refresh call produces one complete generation for one manager. There is no per-request or per-visitor concept anywhere in the server.
+
+So real per-user support is a genuine second phase of work, not a hosting choice:
+
+- **Phase 1 — identity.** Something has to authenticate each person and hand the app a stable per-user identity. Candidates:
+  - **Cloudflare Access**, still free up to 50 users: login is Google/GitHub SSO or email OTP, and the origin app can read the authenticated email straight off the `Cf-Access-Authenticated-User-Email` request header — no password handling, no session code to write. Growth model is *allowlist*: you (or an admin) add each person's email/domain in the Cloudflare dashboard. Fine for tens to low hundreds of known people; awkward for a stranger to self-serve.
+  - **Self-serve OAuth ("Sign in with Google"/GitHub), built into the app.** More code (an OAuth callback + session cookie in `server.py`, still no passwords to store), but works for *any* FPL manager with a Google account with no manual allowlisting — the actual "scale to everyone" model if "everyone" means the open internet, not an invite list.
+- **Phase 2 — per-user profile storage.** `config/user-profile.json` becomes `config/profiles/<user-id>.json` (or a small SQLite file — still not a hosted database, just a schema instead of one flat file) keyed by whatever stable ID Phase 1's identity provider gives you (email is fine for either candidate above).
+- **Phase 3 — decouple the refresh pipeline.** Split `_refresh_project_unlocked()`: the shared half (bootstrap/fixtures/transfers/model-performance) keeps refreshing on the existing on-demand/manual cadence, unchanged, and produces one shared `dashboard-state.json` as it does today. The manager-specific half (`collect_public_manager`, `fetch_manager_event_picks`, the risk-profile-driven decision-center recommendations) moves to compute-at-request-time for whichever user is logged in, using the already-fetched shared data as input, rather than being baked into one static generation. This is the biggest engineering piece of the whole plan — bigger than anything in the original Axis B (hosting) comparison.
+- **Phase 4 — only if it outgrows flat files.** Per-user profile files scale fine into the hundreds of users (still just keyed file reads/writes, no new dependency). A real datastore only becomes worth the app's first-ever third-party dependency at higher concurrent-write volume than "a personal tool that scaled to a friend group" — cross that bridge if usage actually gets there, don't build for it upfront.
+
+Phases 1-3 need to happen regardless of which Axis B hosting choice is picked — they're app changes, not infrastructure changes. Axis B (Fly.io / raw VM / Railway / Render / own hardware) still stands as written above once the app itself supports multiple users; Render's B5 free tier is now decisively out regardless of that finding since it can't hold persistent per-user files at all.
+
 ## Open question for the user (blocking)
 
-**Who actually needs to reach this — just you, a specific small group, or anyone?** This single answer picks Axis A (A1 vs A2 vs A3) and, with it, most of the rest of this plan, including how much of #28 is a blocker versus a later hardening pass.
+**Is "everyone" a group you'll invite (grows to tens/hundreds of specific people you add), or truly open — any FPL manager who finds the link can sign up themselves?** This picks Phase 1's identity approach (Cloudflare Access's allowlist vs. building real self-serve OAuth into the app) and is the one remaining fact that determines the actual engineering scope of this phase.
 
 ## Interaction with #28 (security review)
 
