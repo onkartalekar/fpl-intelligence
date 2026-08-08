@@ -356,7 +356,7 @@ def _refresh_project_unlocked(
             "low": relevance_counts.get("low", 0),
             "actionable": relevance_counts.get("high", 0) + relevance_counts.get("medium", 0),
         },
-        "club_summaries": summarize_clubs(transfers),
+        "club_summaries": summarize_clubs(transfers, bootstrap),
         "changes_since_last_refresh": _changes_since_previous(
             previous_state, previous_bootstrap, transfers, bootstrap
         ),
