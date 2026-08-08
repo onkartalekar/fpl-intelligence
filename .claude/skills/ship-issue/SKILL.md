@@ -9,7 +9,7 @@ Input: a single GitHub issue number, e.g. `/ship-issue 42`. Nothing else should 
 
 ## 1. Resolve the issue
 - `gh issue view <N> --json number,title,body,labels,url,comments`
-- Read the body and comments fully. If the issue is a research/investigation question rather than a clear-cut bug, follow the [[investigate-and-issue]] pattern first and confirm the approach before writing code (open questions or multiple viable directions are worth surfacing to the user — don't guess which one they want).
+- Read the body and comments fully. If the issue is an open-ended research/design question with more than one viable direction rather than a clear-cut bug, switch to [[plan-issue]] instead and confirm the approach with the user before writing code — don't guess which direction they want. If it's a bug-shaped symptom that hasn't been root-caused yet, use [[investigate-and-issue]] first.
 
 ## 2. Set up an isolated worktree
 - Make sure `main` is current first: `git fetch origin && git checkout main && git reset --hard origin/main` (only if the working tree is clean — don't clobber uncommitted work without asking).
