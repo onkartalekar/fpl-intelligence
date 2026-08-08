@@ -976,6 +976,17 @@ Shipped 2026-08-01.
 
 ---
 
+## Considered and declined — dark-palette overhaul and general redesign (issue #48, 2026-08-08)
+
+While adding the light/dark theme toggle (issue #48), two adjacent candidates were considered and declined:
+
+- **Dark-palette overhaul.** A WCAG contrast audit of the 15 most-used foreground/background pairs found every pair passes AA and 11 of 15 pass AAA (worst: the deliberately de-emphasized `--low` token at 4.33:1). With no measurable defect, a palette redesign would be aesthetic churn with regression risk. The theme-toggle tokenization means any future palette change is a one-block edit, so nothing is foreclosed.
+- **General page redesign.** Declined as unscoped: no reference design, named problem, or prioritized views were identified. Incremental, friction-driven UI issues (the pattern of #22/#23/#39) remain the preferred path; a broad redesign can be revisited if concrete direction emerges.
+
+Full investigation, including the live mockup that found a variables-only toggle would break the UI, in `plans/issue-48-theme-redesign.md`.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep

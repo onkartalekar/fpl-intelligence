@@ -61,7 +61,11 @@ Finding 3 removes the objective case: the current palette passes AA everywhere a
 - **Decline (b)** — contrast audit shows nothing to fix; tokenization keeps the door open for free.
 - **Defer (c)** — needs direction from the user before it's actionable; not blocked on anything technical.
 
-## Drop-in text for IMPLEMENTATION_PLAN.md (if declines are confirmed)
+## Decision confirmed (2026-08-08)
+
+User confirmed this recommendation. (b) and (c) are recorded below and in `IMPLEMENTATION_PLAN.md`'s "Considered and declined" section. (a) — the toggle itself — is not implemented yet; issue #48 stays open for that build.
+
+## Drop-in text for IMPLEMENTATION_PLAN.md (recorded)
 
 ## Considered and declined — dark-palette overhaul and general redesign (issue #48, 2026-08-08)
 
