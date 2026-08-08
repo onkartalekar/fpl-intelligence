@@ -6,8 +6,28 @@ import re
 import unicodedata
 
 
+# Some Latin letters have no NFKD decomposition into "base letter + combining
+# diacritic" -- they're distinct letterforms, not accented variants of an
+# ASCII letter -- so NFKD-then-ascii-encode silently drops them instead of
+# transliterating them (e.g. "Nørgaard" loses the "o" entirely and becomes
+# "Nrgaard", not "Norgaard"). Substitute these first so the rest of the
+# pipeline sees a plausible ASCII form, matching how press/transfer-feed
+# reporting typically renders them.
+_NON_DECOMPOSABLE_LETTERS = str.maketrans({
+    "ø": "o", "Ø": "O",
+    "æ": "ae", "Æ": "AE",
+    "œ": "oe", "Œ": "OE",
+    "ð": "d", "Ð": "D",
+    "þ": "th", "Þ": "Th",
+    "đ": "d", "Đ": "D",
+    "ł": "l", "Ł": "L",
+    "ß": "ss",
+})
+
+
 def _token(value):
-    text = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode()
+    text = (value or "").translate(_NON_DECOMPOSABLE_LETTERS)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "", text.casefold())
 
 
@@ -30,22 +50,39 @@ def enrich_transfers(transfers, bootstrap, generated_at):
     """Add deterministic relevance, movement, freshness, and FPL-match fields."""
     full_names = {}
     web_names = defaultdict(list)
+    # Press/transfer-feed reporting commonly uses only a player's first
+    # surname (e.g. "Bruno Guimaraes"), while FPL's own record often carries
+    # additional family/maternal surnames (e.g. "Guimarães Rodriguez
+    # Moura") -- neither the full-name nor the web_name strategy above
+    # matches that shorter, still-unambiguous form, so index it too.
+    primary_surname_names = defaultdict(list)
     for player in bootstrap.get("elements", []):
-        full = _token(f"{player.get('first_name', '')} {player.get('second_name', '')}")
+        first = player.get("first_name", "")
+        second = player.get("second_name", "")
+        full = _token(f"{first} {second}")
         if full:
             full_names[full] = player
         web = _token(player.get("web_name", ""))
         if web:
             web_names[web].append(player)
+        primary_surname = second.split()[0] if second.split() else ""
+        if primary_surname and primary_surname != second:
+            short = _token(f"{first} {primary_surname}")
+            if short:
+                primary_surname_names[short].append(player)
 
     generated = _parse_time(generated_at)
     enriched = []
     for transfer in transfers:
         row = dict(transfer)
         direction = _direction(row.get("movement_type"))
-        match = full_names.get(_token(row.get("player")))
+        player_token = _token(row.get("player"))
+        match = full_names.get(player_token)
         if match is None:
-            candidates = web_names.get(_token(row.get("player")), [])
+            candidates = web_names.get(player_token, [])
+            match = candidates[0] if len(candidates) == 1 else None
+        if match is None:
+            candidates = primary_surname_names.get(player_token, [])
             match = candidates[0] if len(candidates) == 1 else None
 
         if match is not None:
