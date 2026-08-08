@@ -63,7 +63,16 @@ rather than the gitignored local file.
 
 ## Candidate trigger mechanisms
 
-### (a) launchd LaunchAgent on this Mac — recommended for now
+> **Direction change (2026-08-08):** after the first presentation of
+> this plan (which recommended (a) launchd locally), the user redirected:
+> *"think of this as a cloud native solution — don't worry about local
+> app, it is not needed locally anyway."* Local-machine triggers (a)/(b)
+> are therefore out by direction, not by technical failure; the analysis
+> below is kept for the record. The recommendation now centers on (d)
+> GitHub Actions as the cloud-native trigger available today, converging
+> on (e) the hosted deployment when #27 lands.
+
+### (a) launchd LaunchAgent on this Mac — declined by user direction
 
 A user-installed `~/Library/LaunchAgents/com.fpl-intel.reminder.plist`
 with `StartCalendarInterval` firing an hourly check script. The script:
@@ -100,41 +109,82 @@ dashboard). Also the only candidate that would actually breach the
 architecture (a timer inside the app). The issue body already
 identified this weakness; investigation confirms nothing rescues it.
 
-### (d) GitHub Actions scheduled workflow — viable alternative, not recommended as the default
+### (d) GitHub Actions scheduled workflow — recommended (the cloud-native trigger available today)
 
-A `schedule:` workflow (hourly cron in GitHub's cloud, free on public
-repos) checks the deadline, runs `scripts/refresh_dashboard.py`, and
-sends via SMTP credentials in Actions secrets. This is the only option
-short of #27 that is **immune to the laptop-asleep problem** — it fires
-from GitHub's infrastructure regardless of the user's machine state.
+A `schedule:` workflow (hourly cron in GitHub's cloud, free with
+unlimited minutes on public repos) checks the deadline, runs the
+existing headless refresh, and sends via SMTP credentials held in
+Actions secrets. It is fully cloud-native — nothing depends on any
+local machine being awake or even existing — and it runs the repo's
+Python code exactly as-is (stdlib-only, so no dependency install step
+beyond checking out the repo and picking a Python).
 
-Costs that make it the fallback rather than the default:
-- The repo is public, so workflow run logs are public. The refresh
-  pipeline prints diagnostics to stdout/stderr; every run's output
-  would need auditing/muting to avoid leaking profile-adjacent detail.
-- The manager profile (team id 364759, risk profile, recipient email)
-  and SMTP credentials all move into GitHub Actions secrets — personal
-  data leaves the machine and lives in a third party's secret store,
-  a meaningful step for what is today a fully-local personal tool.
-- GitHub's scheduled cron is best-effort (delays of several minutes to
-  occasionally an hour under load are documented behavior), and
-  scheduled workflows are auto-disabled after 60 days of repo
-  inactivity.
+Concrete design:
 
-If the sleep caveat of (a) proves unacceptable in practice, this is the
-right escape hatch — and because the check script itself is
-trigger-agnostic (see scope below), switching later means writing a
-~30-line workflow file, not reworking the feature.
+- **Trigger**: `on: schedule: cron: "0 * * * *"` (hourly) plus
+  `workflow_dispatch` for manual test sends. GitHub's cron is
+  best-effort — documented delays of minutes (occasionally longer)
+  under load — which an hourly cadence against a 3-hour lead absorbs
+  comfortably.
+- **Secrets** (encrypted; GitHub auto-masks their values in run logs):
+  - `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` /
+    `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` — the Gmail app
+    password setup below.
+  - `FPL_INTEL_REMINDER_EMAIL` — recipient.
+  - `FPL_INTEL_USER_PROFILE_JSON` — the full contents of the gitignored
+    `config/user-profile.json`, written to that path by the workflow
+    before the refresh so the recommendations are manager-specific
+    (team id, risk profile), exactly as they are locally.
+- **Public-repo log hygiene**: workflow run logs are publicly visible,
+  so the workflow redirects the refresh/send output to a file and
+  prints only a generic status line ("checked: outside window" /
+  "reminder sent for GW<N>"). Note the underlying exposure is modest —
+  an FPL team id is already publicly queryable via the FPL API — but
+  the recipient email and credentials must never be printed, and
+  secret-masking plus muted output covers that with margin.
+- **De-duplication without a persistent runner**: Actions runners are
+  ephemeral, so `data/reminder-log.json` can't live there. Two layers:
+  1. *Stateless window*: send only when
+     `lead_hours - 1 < (deadline - now)/1h <= lead_hours` — exactly one
+     hourly tick falls in that band, so duplicate sends can only happen
+     if GitHub fires the same tick twice (it doesn't).
+  2. *Belt-and-braces marker*: a repo Actions variable
+     (`REMINDER_LAST_EVENT_ID`, updated via `gh variable set` with the
+     workflow's `GITHUB_TOKEN` granted `actions: write`) checked before
+     sending. If the variable write turns out to need more permission
+     than `GITHUB_TOKEN` allows, layer 1 alone is sufficient and layer
+     2 is dropped — to be verified live at ship time, not assumed.
+  The stateless band has one honest failure mode: if GitHub *drops*
+  (not delays) the one in-band tick, that gameweek's reminder is
+  missed. Mitigation if wanted later: widen the band to 2 ticks and
+  rely on layer 2 for dedup.
+- **Known platform caveat**: scheduled workflows are auto-disabled
+  after 60 days without repo activity. This repo is very active;
+  if that ever changes, GitHub emails a warning before disabling.
 
-### (e) Tie to the cloud-hosting work (#27/#44–#46) — deferred, not blocked on
+### (d′) Other standalone cloud schedulers (Fly.io scheduled machine, small VM cron, Cloudflare Workers) — declined for now
 
-An always-on hosted deployment is the natural permanent home for a
-scheduler. But #44/#45/#46 are all open and substantial (OAuth, SQLite
-profile store, refresh-pipeline split), with no implementation started.
-Sequencing the reminder behind them means no reminders for the
-foreseeable future, for a feature the user wants now. Build the
-reminder script trigger-agnostic so the hosted deployment can invoke
-the identical script when #27 lands.
+Standing up dedicated compute just for an hourly check is premature
+while #27's Axis B compute choice is deliberately still open — it would
+pre-empt that decision for the smallest workload in the system.
+Cloudflare Workers additionally can't reasonably run the existing
+refresh pipeline (it's a full Python/stdlib program, not a
+Workers-shaped function). GitHub Actions gives the same always-on
+property with zero new infrastructure; when #27 picks real compute,
+(e) supersedes both.
+
+### (e) Tie to the cloud-hosting work (#27/#44–#46) — the eventual home, not blocked on
+
+An always-on hosted deployment is the natural permanent home for the
+scheduler, and with the cloud-native direction confirmed it is where
+this converges: once #27 picks compute, the host's own scheduler
+(e.g. a Fly.io scheduled machine or plain cron on the chosen box)
+invokes the identical trigger-agnostic script and the GitHub Actions
+workflow is deleted. But #44/#45/#46 are all open and substantial
+(OAuth, SQLite profile store, refresh-pipeline split) with no
+implementation started — sequencing the reminder behind them means no
+reminders for the foreseeable future. (d) delivers the cloud-native
+property now with zero new infrastructure and a clean migration path.
 
 ### (f) Season calendar file (.ics) — optional zero-scheduler complement, out of scope here
 
@@ -164,70 +214,85 @@ No axis on which it wins for this use case.
 
 **Credentials:** environment variables `FPL_INTEL_SMTP_HOST` /
 `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` /
-`FPL_INTEL_SMTP_PASSWORD`, matching the existing `FPL_INTEL_LLM_*`
-pattern exactly. launchd plists carry env vars natively
-(`EnvironmentVariables` dict), so the same mechanism serves both
-interactive and scheduled invocation. Never in a tracked file.
+`FPL_INTEL_SMTP_PASSWORD` / `FPL_INTEL_REMINDER_EMAIL`, matching the
+existing `FPL_INTEL_LLM_*` pattern exactly. In CI they are populated
+from GitHub Actions secrets; on the future #27 host, from the host's
+secret store. Never in a tracked file, never printed.
 
-## Proposed shape of the build (if direction (a) is confirmed)
+## Proposed shape of the build (if direction (d) is confirmed)
 
-1. **`scripts/send_deadline_reminder.py`** — the trigger-agnostic core.
-   Reads reminder config from `config/user-profile.json` (new optional
-   `"reminder"` section: `enabled`, `email`, `lead_hours` default 3);
-   loads or refreshes state (refresh first via the existing
-   `refresh_dashboard.py` machinery, fall back to cached
+1. **`scripts/send_deadline_reminder.py`** — the trigger-agnostic core,
+   identical no matter what timer invokes it (Actions today, the #27
+   host's scheduler later). Reads lead time from
+   `config/user-profile.json` (new optional `"reminder"` section:
+   `enabled`, `lead_hours` default 3) and recipient/SMTP settings from
+   the `FPL_INTEL_*` env vars; refreshes state first via the existing
+   `refresh_dashboard.py` machinery (falling back to cached
    `data/dashboard-state.json` with an explicit staleness line in the
-   email if the network refresh fails); checks
-   `now >= deadline - lead_hours` and `now < deadline`; consults a
-   dedup log; composes a plain-text email from `decision_center`
-   (transfer decisions when in-season, squad + captaincy for GW1 /
-   `waiting_for_gw2`); sends via `smtplib`; records the send.
-   Exit 0 with a "nothing to do" message outside the window — safe to
-   run as often as the timer likes.
-2. **Dedup log**: `data/reminder-log.json` (added to `.gitignore`
-   alongside the other generated per-user files), keyed by event id,
-   written with the existing `atomic_write_text`.
-3. **launchd template**: a tracked `config/com.fpl-intel.reminder.plist.example`
-   (hourly `StartCalendarInterval`, `EnvironmentVariables` placeholder)
-   plus a README section with the two setup commands, mirroring the
-   `.githooks` documentation pattern.
-4. **README/SPECIFICATION touch-up**: amend the "No scheduler" line to
-   record that the reminder script is the anticipated post-verification
-   scheduling exception, external to the app, opt-in.
-5. **Tests**: unit tests for window/dedup logic and email composition
-   in both decision states (mock SMTP; no network).
+   email if the network refresh fails); applies the send-window check;
+   composes a plain-text email from `decision_center` (transfer
+   decisions when in-season, squad + captaincy for GW1 /
+   `waiting_for_gw2`); sends via `smtplib`; exits 0 with a quiet
+   "outside window" message otherwise — safe to run as often as the
+   timer likes. A `--dry-run` flag prints the composed email instead of
+   sending, for the `workflow_dispatch` test path and local debugging.
+2. **`.github/workflows/deadline-reminder.yml`** — hourly `schedule` +
+   `workflow_dispatch`; writes `FPL_INTEL_USER_PROFILE_JSON` to
+   `config/user-profile.json`; runs the script with output muted per
+   the log-hygiene design above; layer-2 dedup marker if the
+   `GITHUB_TOKEN` permission proves sufficient when verified live.
+3. **README/SPECIFICATION touch-up**: amend the "No scheduler" line to
+   record that the reminder workflow is the anticipated
+   post-verification scheduling exception — external to the app,
+   opt-in, and slated to move onto the #27 host's scheduler.
+4. **Tests**: unit tests for the send-window arithmetic and email
+   composition in both decision states (mock SMTP; no network), plus a
+   live `workflow_dispatch --dry-run` run in CI as the ship-time
+   verification that the workflow, secrets wiring, and log hygiene all
+   actually work.
 
 ## Recommendation
 
-- **Build (a) launchd + (stdlib smtplib over Gmail SMTP)**, with the
-  core script deliberately trigger-agnostic.
-- **Decline (b) cron and (c) in-process thread** — drop-in text below.
-- **Hold (d) GitHub Actions in reserve** — adopt only if (a)'s
-  sleep-window caveat bites in practice; the script needs no changes.
-- **Defer (e)** — revisit when #27's phases land; same script runs there.
+- **Build (d): GitHub Actions hourly workflow + trigger-agnostic
+  `send_deadline_reminder.py` + stdlib `smtplib` over Gmail SMTP.**
+  Cloud-native today with zero new infrastructure; nothing local in the
+  loop.
+- **Decline (a) launchd and (b) cron** — local-machine triggers, ruled
+  out by the cloud-native direction (and (b) was dominated anyway).
+- **Decline (c) in-process thread** — wrong reliability profile and the
+  only option that breaches the app's externally-triggered-only
+  architecture.
+- **Decline (d′) dedicated cloud compute for now** — don't pre-empt
+  #27's open compute decision for the system's smallest workload.
+- **(e) is the migration target, not a blocker** — when #27 lands, the
+  host's scheduler invokes the same script and the workflow is deleted.
 - **(f) .ics backstop** — optional separate follow-up issue if wanted.
 
-The genuine user decision here is (a) local-with-sleep-caveat vs.
-(d) cloud-reliable-but-public-repo-tradeoffs as the *initial* trigger.
-Everything else (email mechanism, credentials, dedup, script shape) has
-a clear winner.
+## Decision so far
+
+- **Cloud-native trigger confirmed by the user (2026-08-08)**: build
+  this so no local machine is in the loop; the original launchd-local
+  recommendation is superseded. GitHub Actions (d) is the recommended
+  concrete mechanism pending the user's confirmation to implement.
 
 ## Drop-in text for IMPLEMENTATION_PLAN.md (if declines are confirmed)
 
-## Considered and declined — cron and in-process scheduling for the deadline reminder (issue #55, 2026-08-08)
+## Considered and declined — local and in-process triggers for the deadline reminder (issue #55, 2026-08-08)
 
-For the transfer-deadline email reminder, two trigger mechanisms were
-considered and declined in favor of a user-installed launchd
-LaunchAgent invoking a trigger-agnostic script. **cron**: on macOS,
-cron silently skips any run that falls while the machine is asleep
-(this Mac sleeps; `pmset -g` confirms), whereas launchd coalesces
-missed `StartCalendarInterval` runs and fires them on wake — for a
-deadline-relative reminder, "late on wake" strictly beats "never."
-**An in-process scheduler thread in `server.py`**: it would only be
-alive while the local dashboard service happens to be running — the
-inverse of the reliability a reminder needs — and it is the only
-option that would put a timer inside the app itself, breaching the
-externally-triggered-only architecture that keeps
-SPECIFICATION.md's scheduling posture intact. Reconsider only if the
-app becomes an always-on hosted service (issue #27), at which point
-the same reminder script runs under the host's scheduler instead.
+For the transfer-deadline email reminder, three trigger mechanisms
+were considered and declined in favor of a scheduled GitHub Actions
+workflow invoking a trigger-agnostic script. **launchd and cron on
+the user's machine**: ruled out by the explicit direction that the
+reminder be cloud-native with no local machine in the loop (a local
+timer also inherits the machine's sleep schedule — cron silently
+skips runs during sleep; launchd merely fires them late on wake).
+**An in-process scheduler thread in `server.py`**: only alive while
+the dashboard service happens to be running — the inverse of the
+reliability a reminder needs — and the only option that would put a
+timer inside the app itself, breaching the externally-triggered-only
+architecture behind SPECIFICATION.md's scheduling posture.
+**Dedicated cloud compute (VM/Fly machine) just for the reminder**:
+premature while issue #27's compute choice is deliberately open;
+GitHub Actions provides the always-on property with zero new
+infrastructure, and the reminder script migrates unchanged onto the
+#27 host's scheduler when that lands.
