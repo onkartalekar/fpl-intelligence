@@ -1,3 +1,4 @@
+import re
 import unittest
 
 from fpl_intel.dashboard import render_dashboard
@@ -167,6 +168,36 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="fixture-gameweek-next"', html)
         self.assertIn('id="fixture-gameweek-value"', html)
         self.assertIn('<select id="fixture-gameweek" hidden', html)
+
+    def test_renders_light_dark_theme_toggle(self):
+        state = {
+            "generated_at": "2026-07-18T12:00:00-04:00",
+            "timezone": "America/New_York",
+            "fpl": {"season_status": "prior_season_data", "ready_for_2026_27": False, "player_count": 0, "team_count": 20},
+            "players": [], "fixtures": [], "fixture_summary": {"status": "not_active"},
+            "manager": {"connection_status": "not_configured", "squad": []},
+            "transfers": [], "club_summaries": [], "sources": [],
+        }
+
+        html = render_dashboard(state)
+        style_block = html[html.index(":root{"):html.index("</style>")]
+
+        # Toggle control and its pre-paint theme script exist (issue #48).
+        self.assertIn('id="theme-toggle"', html)
+        self.assertIn("localStorage.getItem('fpl-theme')", html)
+        self.assertIn("prefers-color-scheme: light", html)
+
+        # A real light-theme override block exists, keyed off a data attribute.
+        self.assertIn(':root[data-theme="light"]{', style_block)
+
+        # No hardcoded hex/rgba color literals remain in the CSS body -- only
+        # inside the two :root variable-definition blocks (theming regression
+        # guard: any new color a future change adds must be a variable).
+        light_block_end = style_block.index("}", style_block.index(':root[data-theme="light"]{'))
+        light_block_end = style_block.index("}", light_block_end + 1)
+        css_body = style_block[light_block_end + 1:]
+        literal_colors = re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)", css_body)
+        self.assertEqual(literal_colors, [], f"raw color literals found outside :root: {literal_colors}")
 
     def test_renders_active_gw1_decision_center_without_stale_launch_copy(self):
         player = {
