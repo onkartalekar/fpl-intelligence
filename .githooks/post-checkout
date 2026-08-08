@@ -1,0 +1,12 @@
+#!/bin/sh
+# Keep the local dashboard.html in sync with dashboard.py after a branch
+# checkout, without a network call. Silent on success; surfaces the script's own
+# output (a friendly hint on first use, or a real error) otherwise. Never
+# blocks the git operation itself -- this is a convenience, not a gate.
+root="$(git rev-parse --show-toplevel)"
+output="$(python3 "$root/scripts/rebuild_dashboard.py" 2>&1)"
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo "$output"
+fi
+exit 0

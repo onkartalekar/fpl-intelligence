@@ -110,6 +110,27 @@ It writes:
 
 The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. No scheduler is configured, by explicit choice.
 
+## Keep dashboard.html in sync with dashboard.py
+
+`dashboard.html` is gitignored (see above) and is not regenerated
+automatically just because `src/fpl_intel/dashboard.py`'s template changes
+-- pulling a template/CSS/JS change onto `main` leaves the local
+`dashboard.html` stale until something rebuilds it.
+
+For a one-off rebuild without hitting any live API (fast, uses the last
+cached `data/dashboard-state.json`):
+
+```bash
+python3 scripts/rebuild_dashboard.py
+```
+
+To do this automatically after every merge and branch checkout, activate
+the repo's tracked git hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Projection model
 
 Player projections are a deterministic, component-level formula (goal/
