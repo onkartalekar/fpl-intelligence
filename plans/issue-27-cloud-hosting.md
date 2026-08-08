@@ -74,24 +74,45 @@ The user asked whether there should be a way to use the hosted site without goin
 
 **Security implication for #28.** A guest path has zero identity check on who is requesting — unlike the OAuth path, there is no email to hold accountable or rate-limit per-user. This sharpens (not just adds to) #28's existing "rate limiting / abuse protection on the refresh endpoint" item: for the guest path specifically, throttling has to be IP-or-request based rather than per-account, and #28 should treat this as a must-resolve-before-public-launch item for guest access specifically, not a nice-to-have hardening pass.
 
+**Resequencing confirmed (2026-08-08).** The user agreed: #46 (guest + per-request computation) ships first, ahead of #44/#45. The persistent-account path (identity + storage) becomes a layered enhancement built on top of an already-working guest experience, not a prerequisite for using the site at all.
+
+### Persistent accounts without requiring an email (raised 2026-08-08)
+
+Second half of the same request: the user wants persisted profiles (settings remembered across visits) to not *require* handing over an email address, and wants "other user registration means to keep user profiles separate, not just based on emails" considered. Email should be collected only when a user opts into #55's deadline-reminder emails — a separate decision from "does this visitor have a persistent profile at all."
+
+This matters because OAuth (Google/GitHub) is *inherently* email-based — the entire mechanism is "the provider verifies you and hands back an email"; there is no way to use Google/GitHub sign-in and not receive one. So OAuth cannot be *the* answer to "a non-email registration path" — it can only ever be one option alongside a genuinely email-free one.
+
+**Candidates for a non-email identity:**
+
+- **(r1) Server-issued profile key — recommended.** "Create a profile" generates a random high-entropy secret server-side (`secrets.token_urlsafe(24)`, stdlib-only), shown to the user exactly once with a clear "save this — it's the only way back into your profile" warning. The server never stores the raw key — only its SHA-256 hash (`hashlib`, also stdlib) — so a leaked database dump doesn't expose usable keys, the same principle as password storage but simpler: because the key is server-generated with ~144 bits of entropy rather than user-chosen, a plain fast hash is sufficient (no bcrypt/scrypt/argon2 needed to defend against guessing or rainbow tables the way a human-chosen password would require) — this stays within the zero-third-party-dependency property. A same-browser HttpOnly session cookie makes routine return visits frictionless; the raw key is only needed once at creation and again to restore access on a new device/browser or after clearing cookies. No email, no OAuth provider, no password ever collected from the user.
+  - Honest trade-off: if the key is lost, the profile is unrecoverable — by construction, since there's no email to reset via. That's the direct cost of not collecting an email, not a bug; a user who wants recovery can add an email later (see below).
+  - This is not a new pattern for the codebase — it's the same shape as the existing bearer-token check already protecting `/api/refresh` (`secrets.compare_digest`), just persisted per-row instead of a single shared constant.
+- **(r2) OAuth (Google/GitHub) — kept as an optional alternative, not the default.** Still useful for a user who doesn't mind linking an account and wants the convenience of "sign in" over "keep a code safe," and its email can double as a one-click prefill if that user later opts into reminders. But it's demoted from "the" identity system to one of two registration options.
+- **(r3) Self-chosen username + passphrase — declined.** Reopens exactly the risk the original OAuth choice was made to avoid (explicitly stated in #44's original scope: "no passwords are ever stored"): weak/reused human-chosen secrets, credential-stuffing exposure if this app's storage is ever breached. (r1) gets the same "no email, no OAuth" property with none of that risk, since the secret is machine-generated, not user-chosen — there is no scenario where (r3) beats (r1).
+- **(r4) Passkeys / WebAuthn — declined for now.** Genuinely no email, strong security, but implementing the relying-party protocol correctly is a real cryptographic surface not reasonably hand-rolled from stdlib alone, and pulling in a vetted WebAuthn library would be this app's first third-party dependency for what (r1) already solves with two stdlib calls. Worth revisiting only if (r1)'s "lost key = unrecoverable" trade-off proves unacceptable in practice.
+
+**Recommendation: (r1) as the default self-serve registration mechanism, (r2)/OAuth kept as an optional alternative, both available from day one of Phase 1.** Neither collects an email. Storage implication for #45: the profile table's key becomes a hash of either credential type (profile key or OAuth subject/email), not an email-only primary key — `email` moves to being a **nullable** column, populated only when a user explicitly opts into #55's reminder emails (independent of which registration mechanism they used to create the profile in the first place, including a prefill offer if they signed in via OAuth).
+
 ## Decisions confirmed (2026-08-08)
 
-- **Growth model: open self-serve signup**, not an invite list — Phase 1 is "Sign in with Google/GitHub" built into the app, not Cloudflare Access.
+- **Growth model: open self-serve signup**, not an invite list.
 - **Profile storage: a single SQLite file**, one row per user, on ordinary local disk — no hosted database, no new dependency, until it's demonstrably outgrown.
-- **Guest access confirmed as a required, additional path**: a stateless, no-login "enter a team ID and look" mode (g1 above) sits alongside the OAuth account path, not instead of it. #44 (OAuth) is scoped for the persistent-account path specifically; it is not a login wall guests must pass through.
+- **Guest access confirmed as a required, additional path**: a stateless, no-login "enter a team ID and look" mode (g1 above), needing none of Phase 1/2.
+- **Phase sequencing: #46 ships first**, ahead of #44/#45 — a working guest experience doesn't wait on the persistent-account work.
+- **Persistent-account registration does not require an email.** Default mechanism is a server-issued profile key (r1); OAuth (r2) remains available as an optional alternative, not the default. Email is collected only as an explicit, separate opt-in for #55's deadline reminders — never implied by creating a profile via either mechanism.
 
-No blocking open questions remain on identity/storage. One sequencing question is now open for the user to decide (see "Guest access," above): whether Phase 3 (#46) should be built/sequenced to serve the guest path independently of Phase 1/2 (#44/#45) landing first, or whether the original 1→2→3 order still stands and guest support simply rides along once all three ship. Next step, either way, is scoping Phases 1-3 as implementable issues (see "Next steps," below) and, separately, picking Axis B compute once the app itself supports multiple users.
+No blocking open questions remain. Next step is rescoping #44/#45/#46 to match this (see "Next steps," below) and, separately, picking Axis B compute once the app itself supports multiple users.
 
 ## Next steps
 
 This plan intentionally stops short of implementation-ready detail for Phases 1-3 — each is substantial enough to deserve its own issue and its own `ship-issue` pass rather than being built as one large, hard-to-review change:
 
-1. **Auth**: OAuth ("Sign in with Google") + signed session cookie in `server.py` — the persistent-account path, not a login wall in front of the whole site.
-2. **Storage**: SQLite-backed profile store, replacing the single `config/user-profile.json` / `_default_profile_action`.
-3. **Refresh pipeline split**: shared generation (unchanged cadence) vs. per-user, request-time manager computation — scoped to serve both a logged-in session (via 1/2) and an unauthenticated guest's directly-supplied team ID (see "Guest access," above).
+1. **Refresh pipeline split (build first)**: shared generation (unchanged cadence) vs. per-user, request-time manager computation, scoped from the start to serve an unauthenticated guest's directly-supplied team ID. This alone ships a usable, no-signup hosted experience.
+2. **Registration**: a server-issued profile key (r1, default, no email) plus optional OAuth sign-in (r2) + signed session cookie in `server.py` — the persistent-account layer on top of guest access, not a login wall in front of it.
+3. **Storage**: SQLite-backed profile store, replacing the single `config/user-profile.json` / `_default_profile_action`; keyed by a hash of whichever credential (profile key or OAuth subject) the row was created with, with `email` as a nullable column populated only on explicit reminder opt-in.
 4. Only after 1-3 ship: pick Axis B compute (own hardware vs. Fly.io vs. raw VM vs. Railway) and stand up real hosting.
 
-Filed as issues #44 (1), #45 (2), #46 (3). The original recommendation was to build them in that order — each is a real dependency of the next for the *authenticated* path (storage needs identity to key on; the refresh split needs somewhere to read/write per-user state) — but guest access (g1 above) only strictly depends on #46, so resequencing #46 ahead of #44/#45 is a legitimate option if shipping a usable guest experience sooner is the priority. Left as an open call for the user rather than decided here.
+Filed as issues #46 (1), #44 (2), #45 (3) — reordered from the original 1/2/3 issue numbering to match the confirmed build sequence above. #45 still depends on #44 (needs a credential to key rows on), but neither blocks #46 anymore.
 
 ## Interaction with #28 (security review)
 
