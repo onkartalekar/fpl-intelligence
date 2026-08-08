@@ -180,7 +180,7 @@ class DashboardRenderTests(unittest.TestCase):
         }
 
         html = render_dashboard(state)
-        style_block = html[html.index(":root{"):html.index("</style>")]
+        style_block = html[html.index(":root {"):html.index("</style>")]
 
         # Toggle control is an accessible slider switch (sun/moon icons,
         # sliding thumb) with its pre-paint theme script (issue #48).
@@ -194,13 +194,12 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("prefers-color-scheme: light", html)
 
         # A real light-theme override block exists, keyed off a data attribute.
-        self.assertIn(':root[data-theme="light"]{', style_block)
+        self.assertIn(':root[data-theme="light"] {', style_block)
 
         # No hardcoded hex/rgba color literals remain in the CSS body -- only
         # inside the two :root variable-definition blocks (theming regression
         # guard: any new color a future change adds must be a variable).
-        light_block_end = style_block.index("}", style_block.index(':root[data-theme="light"]{'))
-        light_block_end = style_block.index("}", light_block_end + 1)
+        light_block_end = style_block.index("}", style_block.index(':root[data-theme="light"] {'))
         css_body = style_block[light_block_end + 1:]
         literal_colors = re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)", css_body)
         self.assertEqual(literal_colors, [], f"raw color literals found outside :root: {literal_colors}")
@@ -327,8 +326,11 @@ class DashboardRenderTests(unittest.TestCase):
     def test_decision_center_grid_does_not_stretch_short_panels(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn(".decision-layout{display:grid;align-items:start;", html)
-        self.assertIn(".formation-pitch{", html)
+        self.assertRegex(
+            html,
+            r"\.decision-layout\s*\{\s*display:\s*grid;\s*align-items:\s*start;",
+        )
+        self.assertRegex(html, r"\.formation-pitch\s*\{")
 
     def test_decision_subnav_covers_every_section(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
@@ -346,17 +348,36 @@ class DashboardRenderTests(unittest.TestCase):
     def test_decision_scroll_targets_clear_sticky_subnav(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("scroll-margin-top:58px", html)
+        self.assertRegex(html, r"scroll-margin-top:\s*58px")
         self.assertIn("matchMedia('(prefers-reduced-motion: reduce)')", html)
         self.assertNotIn("renderDecisionLegacy", html)
 
     def test_mobile_inspector_order_is_scoped_to_transfers(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn(".transfer-layout .inspector{order:-1}", html)
-        self.assertNotIn(".inspector{position:static;order:-1}", html)
-        self.assertIn(".decision-subnav{flex-wrap:nowrap;overflow-x:auto", html)
-        self.assertIn("@media(max-width:980px){.decision-layout{grid-template-columns:1fr}", html)
+        self.assertRegex(html, r"\.transfer-layout \.inspector\s*\{\s*order:\s*-1;")
+
+        # The mobile-breakpoint bare `.inspector { position: static; }` rule
+        # must NOT also carry `order` -- that's scoped only to the more
+        # specific `.transfer-layout .inspector` selector above, not merged
+        # into every `.inspector` on mobile.
+        bare_inspector_bodies = [
+            match.group(1)
+            for match in re.finditer(r"(?m)^\s*\.inspector \{\n(.*?)\n\s*\}", html, re.DOTALL)
+        ]
+        mobile_bodies = [body for body in bare_inspector_bodies if "position: static" in body]
+        self.assertTrue(mobile_bodies, "no bare .inspector rule with position: static found")
+        for body in mobile_bodies:
+            self.assertNotIn("order", body)
+
+        self.assertRegex(
+            html,
+            r"\.decision-subnav\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto",
+        )
+        self.assertRegex(
+            html,
+            r"@media\(max-width:980px\)\s*\{\s*\.decision-layout\s*\{\s*grid-template-columns:\s*1fr;",
+        )
 
     def test_decision_center_surfaces_watchlist_and_rotation(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})

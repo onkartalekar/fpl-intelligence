@@ -34,6 +34,18 @@ The only cost is `render_dashboard()` reading two more files off disk at generat
 - **Build (b).** It fully addresses the friction that motivated #51, costs less to implement and review than (a), and -- unlike (a) -- has no impact on `server.py`'s security surface or the app's documented standalone-file behavior.
 - **Decline (a).** Live-verified as mechanically workable, but its real costs (new server routes/MIME handling, a new generation-version-skew risk class, breaking a documented portability property) buy nothing that (b) doesn't already deliver for less.
 
+## Decision confirmed and implemented (2026-08-08)
+
+User confirmed the recommendation. (b) is implemented on this branch:
+
+- CSS moved to `src/fpl_intel/dashboard.css`, reformatted from the original single-line minified form into real multi-line, indented CSS via a small verified round-trip transformation (recursive brace-based formatter, checked byte-for-byte semantically identical to the original modulo the CSS-inert optional trailing `;` before `}`).
+- JS logic moved to `src/fpl_intel/dashboard.js`, extracted **verbatim** (still single-line/minified) -- deliberately not reformatted in this pass. A hand-rolled JS pretty-printer is materially riskier than the CSS one (template literals, `${}` interpolation, no real JS parser available in stdlib to verify against), and the value of getting *a* real `.js` file with correct syntax highlighting doesn't require also reformatting its content. Follow-up work if this is wanted.
+- `render_dashboard()` reads both files at generation time (module-level, loaded once) and inlines them into `_TEMPLATE` via the same `.replace()` mechanism `__DASHBOARD_DATA__` already used -- `dashboard.html` stays exactly as self-contained as before.
+- Verified via a direct A/B render comparison against the pre-change `dashboard.py` on `origin/main` for the same input state: the two outputs are semantically byte-identical (confirmed via whitespace-and-trailing-semicolon-normalized diff), so this is a pure refactor with zero behavior change.
+- Four existing tests in `test_dashboard.py` asserted exact minified-CSS substrings (e.g. `.decision-layout{display:grid;align-items:start;`) and broke on the reformatting; updated to regex/structural assertions that check the same semantic properties without being coupled to exact whitespace.
+
+Full test suite: 221 tests, `OK`. Live-verified in the browser (dark default unchanged, light toggle, Fixtures gameweek nav all working, zero console errors).
+
 ## Drop-in text for IMPLEMENTATION_PLAN.md (if the decline is confirmed)
 
 ## Considered and declined -- serving CSS/JS as separate HTTP-served files (issue #51, 2026-08-08)
