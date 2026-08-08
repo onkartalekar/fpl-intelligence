@@ -221,7 +221,8 @@ __marimo__/
 .DS_Store
 
 # Editor / tool local state (not shared project config)
-.claude/
+.claude/*
+!.claude/skills/
 .obsidian/
 
 # App runtime lock files
