@@ -314,6 +314,116 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(self.calls, ["refresh"])
 
 
+class TeamLookupTests(unittest.TestCase):
+    """The unauthenticated no-signup lookup path added for issue #46."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z", "profile": {"team_id": None}}),
+            encoding="utf-8",
+        )
+        self.lookup_calls = []
+
+        def team_view_action(team_id):
+            self.lookup_calls.append(team_id)
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": "BrunoMans", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        self.team_view_action = team_view_action
+        self.server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            team_view_action=team_view_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_valid_team_id_splices_the_looked_up_manager_into_the_rendered_page(self):
+        html = urlopen(self.base_url + "/?team_id=364759", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [364759])
+        self.assertIn("BrunoMans", html)
+        self.assertIn('content="test-token"', html)
+        self.assertNotIn('content="__REFRESH_TOKEN__"', html)
+        self.assertNotIn("__DASHBOARD_DATA__", html)
+
+    def test_absent_team_id_serves_the_shared_cached_dashboard_unmodified(self):
+        html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_malformed_team_id_falls_back_to_the_shared_cached_dashboard(self):
+        html = urlopen(self.base_url + "/?team_id=not-a-number", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_out_of_range_team_id_falls_back_to_the_shared_cached_dashboard(self):
+        html = urlopen(self.base_url + "/?team_id=999999999", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_repeated_lookups_from_the_same_source_are_rate_limited(self):
+        first = urlopen(self.base_url + "/?team_id=364759", timeout=3)
+        self.assertEqual(first.status, 200)
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/?team_id=100001", timeout=3)
+
+        self.assertEqual(error.exception.code, 429)
+        self.assertEqual(self.lookup_calls, [364759])
+
+    def test_lookup_failure_is_reported_cleanly_instead_of_a_server_error(self):
+        failing_server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            team_view_action=lambda team_id: (_ for _ in ()).throw(RuntimeError("upstream down")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            html = urlopen(
+                f"http://127.0.0.1:{failing_server.server_port}/?team_id=364759", timeout=3
+            ).read().decode()
+
+            self.assertIn('"status": "error"', html)
+            self.assertNotIn("upstream down", html)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+    def test_missing_dashboard_state_returns_404_for_a_lookup(self):
+        (self.root / "data" / "dashboard-state.json").unlink()
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/?team_id=364759", timeout=3)
+
+        self.assertEqual(error.exception.code, 404)
+
+
 class ProfileEndpointTests(unittest.TestCase):
     VALID_PAYLOAD = {
         "team_id": 364759,

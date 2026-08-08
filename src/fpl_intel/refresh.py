@@ -386,3 +386,45 @@ def _refresh_project_unlocked(
 def refresh_project(root, **kwargs):
     with project_refresh_lock(root):
         return _refresh_project_unlocked(root, **kwargs)
+
+
+def compute_manager_view(bootstrap, fixtures, transfers, generated_at, team_id, horizon=5):
+    """Compute one team's manager summary and weekly decision, decoupled from the shared refresh.
+
+    This is the per-team half split out of `_refresh_project_unlocked` for issue #46: it takes
+    the shared refresh's already-fetched bootstrap/fixtures/transfers as input and computes a
+    single team's view at request time, so it can serve an unauthenticated visitor's directly
+    supplied team ID without waiting on (or persisting through) the periodic shared refresh.
+    `fixtures` is the same raw upstream fixtures payload `build_transfer_decisions` already
+    consumes for the shared refresh (see `_refresh_project_unlocked`'s `raw_fixtures`), not the
+    built fixture catalog.
+
+    A registered account's stored profile (issue #44/#45) is meant to become a second source
+    feeding this same function later -- this initial build only supports a request-supplied
+    `team_id`, and deliberately does not touch `_refresh_project_unlocked`'s own per-manager
+    block, which keeps its own more elaborate stale-fallback handling for the periodic refresh.
+
+    Network/lookup failures (unknown team ID, the official FPL API being unavailable) are
+    captured into a clean, non-raising result rather than propagated, since a bad request-supplied
+    team ID is an expected, frequent case here -- not the exceptional case it is for a configured
+    profile's own team ID.
+    """
+    try:
+        manager_raw = collect_public_manager(team_id)
+        manager_state = summarize_manager(manager_raw, bootstrap)
+        weekly_decisions = build_transfer_decisions(
+            bootstrap, fixtures, manager_state, generated_at=generated_at, horizon=horizon,
+            recent_transfers=transfers,
+        )
+    except Exception:
+        manager_state = {
+            "connection_status": "lookup_failed",
+            "team_id": team_id,
+            "squad": [],
+            "squad_publicly_available": False,
+        }
+        weekly_decisions = {
+            "status": "team_not_found",
+            "reason": "Team not found, or the official FPL API is temporarily unavailable.",
+        }
+    return {"manager": manager_state, "weekly_decisions": weekly_decisions}

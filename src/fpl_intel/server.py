@@ -1,5 +1,6 @@
 """Local-only HTTP service for the FPL dashboard and explicit refresh requests."""
 
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -9,10 +10,13 @@ import secrets
 import subprocess
 import sys
 import threading
+from urllib.parse import parse_qs, urlsplit
 import zoneinfo
 
+from .dashboard import render_dashboard
 from .generation import resolve_artifact
-from .refresh import RefreshAlreadyRunning
+from .rate_limit import CooldownLimiter
+from .refresh import RefreshAlreadyRunning, compute_manager_view
 
 
 _ALLOWED_RISK_PROFILES = {"conservative", "balanced", "aggressive"}
@@ -25,6 +29,52 @@ _ALLOWED_PROFILE_KEYS = {
 }
 _TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
 _PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
+_TEAM_ID_RE = re.compile(r"^[0-9]{1,8}$")
+_TEAM_LOOKUP_COOLDOWN_SECONDS = 15
+
+
+def _parse_team_id(query_string):
+    """Extract a valid `team_id` query parameter, or None if absent/malformed.
+
+    Malformed input (not the expected shape) is treated the same as absent -- a mistyped URL
+    falls back to the normal shared dashboard rather than surfacing a hard error, since this is
+    a query param a person may hand-edit in the address bar.
+    """
+    values = parse_qs(query_string).get("team_id")
+    if not values:
+        return None
+    raw = values[0]
+    if not _TEAM_ID_RE.match(raw):
+        return None
+    team_id = int(raw)
+    if not (1 <= team_id <= 99_999_999):
+        return None
+    return team_id
+
+
+def _default_team_view_action(root):
+    """Build the default per-request team-lookup action from the shared refresh's cached artifacts."""
+
+    def action(team_id):
+        bootstrap = json.loads(
+            resolve_artifact(root, "fpl-bootstrap-latest.json").read_text(encoding="utf-8")
+        )
+        raw_fixtures = json.loads(
+            resolve_artifact(root, "fpl-fixtures-latest.json").read_text(encoding="utf-8")
+        )
+        transfers_artifact = json.loads(
+            resolve_artifact(root, "official-transfers-latest.json").read_text(encoding="utf-8")
+        )
+        generated_at = datetime.now(timezone.utc).isoformat()
+        return compute_manager_view(
+            bootstrap,
+            raw_fixtures,
+            transfers_artifact.get("transfers", []),
+            generated_at,
+            team_id,
+        )
+
+    return action
 
 
 class ProfileValidationError(Exception):
@@ -198,7 +248,15 @@ def _default_refresh_action(root):
     return build_refresh_result(state)
 
 
-def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=None, profile_action=None):
+def create_server(
+    root,
+    host="127.0.0.1",
+    port=8877,
+    token=None,
+    refresh_action=None,
+    profile_action=None,
+    team_view_action=None,
+):
     """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
     root = Path(root).resolve()
     if host != "127.0.0.1":
@@ -206,6 +264,8 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
     token = token or secrets.token_urlsafe(32)
     action = refresh_action or (lambda: _default_refresh_action(root))
     profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
+    lookup_action = team_view_action or _default_team_view_action(root)
+    lookup_limiter = CooldownLimiter(cooldown_seconds=_TEAM_LOOKUP_COOLDOWN_SECONDS)
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -229,11 +289,20 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
             self._json(421, {"status": "error", "message": "Untrusted Host header"})
             return True
 
-        def do_GET(self):
-            if self._reject_untrusted_host():
-                return
-            path = self.path.split("?", 1)[0]
-            if path in {"/", "/dashboard.html"}:
+        def _send_html(self, html):
+            body = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _serve_dashboard(self, query_string):
+            team_id = _parse_team_id(query_string)
+            if team_id is None:
                 dashboard = resolve_artifact(root, "dashboard.html")
                 if not dashboard.exists():
                     self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
@@ -241,15 +310,41 @@ def create_server(root, host="127.0.0.1", port=8877, token=None, refresh_action=
                 html = dashboard.read_text(encoding="utf-8").replace(
                     'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
                 )
-                body = html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_html(html)
+                return
+            # A team_id query param means an unauthenticated, no-signup lookup (issue #46):
+            # compute this one team's view at request time and splice it into a copy of the
+            # shared state, without touching the persisted dashboard-state.json/dashboard.html.
+            if not lookup_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many team lookups. Try again shortly."})
+                return
+            state_path = resolve_artifact(root, "dashboard-state.json")
+            if not state_path.exists():
+                self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
+                return
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            try:
+                lookup_result = lookup_action(team_id)
+                state["manager"] = lookup_result["manager"]
+                decision_center = dict(state.get("decision_center") or {})
+                decision_center["weekly_decisions"] = lookup_result["weekly_decisions"]
+                state["decision_center"] = decision_center
+                state["lookup"] = {"active": True, "team_id": team_id, "status": "ok"}
+            except Exception as error:
+                print(f"Team lookup failed: {error!r}", file=sys.stderr)
+                state["lookup"] = {"active": True, "team_id": team_id, "status": "error"}
+            html = render_dashboard(state).replace(
+                'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
+            )
+            self._send_html(html)
+
+        def do_GET(self):
+            if self._reject_untrusted_host():
+                return
+            split_path = urlsplit(self.path)
+            path = split_path.path
+            if path in {"/", "/dashboard.html"}:
+                self._serve_dashboard(split_path.query)
                 return
             if path == "/api/status":
                 state_path = resolve_artifact(root, "dashboard-state.json")
