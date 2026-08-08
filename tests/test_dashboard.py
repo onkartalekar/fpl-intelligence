@@ -182,11 +182,14 @@ class DashboardRenderTests(unittest.TestCase):
         html = render_dashboard(state)
         style_block = html[html.index(":root{"):html.index("</style>")]
 
-        # Toggle control (sun/moon icon, accessible label) and its pre-paint
-        # theme script exist (issue #48).
+        # Toggle control is an accessible slider switch (sun/moon icons,
+        # sliding thumb) with its pre-paint theme script (issue #48).
         self.assertIn('id="theme-toggle"', html)
+        self.assertIn('role="switch"', html)
+        self.assertIn('aria-checked="false"', html)
+        self.assertIn("☀️", html)
         self.assertIn("🌙", html)
-        self.assertIn('aria-label="Switch to light theme"', html)
+        self.assertIn('class="theme-toggle-thumb"', html)
         self.assertIn("localStorage.getItem('fpl-theme')", html)
         self.assertIn("prefers-color-scheme: light", html)
 
