@@ -135,6 +135,14 @@ every criterion.
 Also worth a one-line touch-up whenever the npxG entry is next edited:
 its "FBref carries it too" claim is stale as of 2026-01-20.
 
+## Decision confirmed and recorded (2026-08-08)
+
+Decline confirmed. The text below has been added to
+`IMPLEMENTATION_PLAN.md`'s "Considered and declined" section
+(immediately after the npxG/xT/SCA/GCA entry), and that entry's stale
+"FBref carries it too" note has been corrected in place. Issue #13
+closes as a clean negative result; no code or model changes.
+
 ## If declined: text for IMPLEMENTATION_PLAN.md
 
 To be added alongside the existing "Considered and declined" entry:
