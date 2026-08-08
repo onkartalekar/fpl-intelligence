@@ -162,6 +162,12 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Official FPL fixtures", html)
         self.assertIn("Difficulty", html)
 
+        # Gameweek stepping is prev/next navigation, not a dropdown (issue #39).
+        self.assertIn('id="fixture-gameweek-prev"', html)
+        self.assertIn('id="fixture-gameweek-next"', html)
+        self.assertIn('id="fixture-gameweek-value"', html)
+        self.assertIn('<select id="fixture-gameweek" hidden', html)
+
     def test_renders_active_gw1_decision_center_without_stale_launch_copy(self):
         player = {
             "id": 411, "name": "Haaland", "club": "Man City", "position_short": "FWD",
