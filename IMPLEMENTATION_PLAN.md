@@ -827,7 +827,11 @@ guessing.
 - **npxG** (non-penalty xG) — Understat.com has published per-player npxG
   for the Premier League every season since 2014/15, free to view, via an
   undocumented internal JSON endpoint (`understatapi` is a community
-  scraper for it). FBref carries it too. Note FPL's own official
+  scraper for it). FBref carried it too until Stats Perform terminated
+  the feed and had all Opta-sourced advanced stats pulled from
+  FBref/Stathead on 2026-01-20 (see the Opta Analyst entry below) —
+  Understat's own npxG model is unaffected and remains the free-to-view
+  option. Note FPL's own official
   `expected_goals` field (already used by this model, via
   `data/history/`) is *not* penalty-adjusted, so this would be a genuinely
   new signal, not something derivable from data already on hand.
@@ -850,6 +854,50 @@ provenance category than every other input (official FPL API fields,
 redistributed as-is by `data/history/`'s vaastav mirror). Not silently
 dropped -- recorded here as a real option if the sourcing constraint is
 ever revisited.
+
+---
+
+## Considered and declined — Opta Analyst (theanalyst.com) as a data source (2026-07-27)
+
+**Context:** GitHub issue #13 asked whether Stats Perform's Opta
+Analyst site (theanalyst.com/competition/premier-league/stats) could
+supply advanced Opta metrics beyond the official FPL fields. Researched
+what the site actually exposes rather than guessing.
+
+**Findings:**
+- The stats page is a JS-rendered shell; its data loads from an
+  undocumented JSON endpoint
+  (`dataviz.theanalyst.com/project-data/soccer/{compSeasonUUID}/player-stats.json`)
+  found by reading the site's JS bundle. The feed is real and rich --
+  per-player npxG, xG-per-shot, shot conversion, chance creation,
+  carries, defending, goalkeeping -- but every row is a
+  **season-aggregate total**, with no per-gameweek or per-match
+  breakdown, and only the current season's UUID is exposed. That alone
+  makes it unusable for the backtest harness, which needs per-player
+  pre-origin-gameweek values across ~3 seasons.
+- Stats Perform's Terms of Use (covering theanalyst.com) limit material
+  to "personal, non-commercial use" and prohibit copying, reproduction,
+  and redistribution; theanalyst.com's robots.txt disallows the whole
+  site to automated agents (Scrapy, GPTBot, ClaudeBot, CCBot, etc.).
+  There is no documented API, bulk download, or free license -- the
+  licensed product is the paid Opta Data Feeds API.
+- The free licensed route that used to exist is gone: Stats Perform
+  terminated FBref's Opta feed and had all Opta-sourced advanced stats
+  removed from FBref/Stathead on 2026-01-20 (reflected in the npxG
+  entry above, updated same day this was researched). No free,
+  licensed Opta redistribution currently exists for the Premier League.
+
+**Decision: declined.** Fails the sourcing bar on two independent
+grounds: (1) provenance -- an undocumented endpoint on a ToS-restricted,
+robots-disallowed site owned by a company that actively pulled this
+same data from FBref is a strictly worse dependency than the
+FBref/Understat scraping already declined above; (2) backtestability --
+season-aggregate current-season data can never be evaluated against the
+project's out-of-sample MAE bar (SPECIFICATION.md's model-change rule),
+so criterion (d) is unreachable even before the legal question. If
+advanced non-FPL metrics are ever revisited, Understat npxG (recorded
+above; per-match history since 2014/15, its own model rather than Opta)
+dominates this option on every criterion.
 
 ---
 
