@@ -53,18 +53,30 @@ The user confirmed the goal is real per-user profiles ("each person wants their 
 
 So real per-user support is a genuine second phase of work, not a hosting choice:
 
-- **Phase 1 — identity.** Something has to authenticate each person and hand the app a stable per-user identity. Candidates:
-  - **Cloudflare Access**, still free up to 50 users: login is Google/GitHub SSO or email OTP, and the origin app can read the authenticated email straight off the `Cf-Access-Authenticated-User-Email` request header — no password handling, no session code to write. Growth model is *allowlist*: you (or an admin) add each person's email/domain in the Cloudflare dashboard. Fine for tens to low hundreds of known people; awkward for a stranger to self-serve.
-  - **Self-serve OAuth ("Sign in with Google"/GitHub), built into the app.** More code (an OAuth callback + session cookie in `server.py`, still no passwords to store), but works for *any* FPL manager with a Google account with no manual allowlisting — the actual "scale to everyone" model if "everyone" means the open internet, not an invite list.
-- **Phase 2 — per-user profile storage.** `config/user-profile.json` becomes `config/profiles/<user-id>.json` (or a small SQLite file — still not a hosted database, just a schema instead of one flat file) keyed by whatever stable ID Phase 1's identity provider gives you (email is fine for either candidate above).
+- **Phase 1 — identity: self-serve OAuth, confirmed.** The user chose open self-serve signup over an invite/allowlist model, which rules out Cloudflare Access as the identity layer (it's allowlist-based, not self-serve) and means "Sign in with Google" (or GitHub) gets built into the app: an OAuth callback + a signed, stateless session cookie in `server.py`. No passwords are ever stored — Google/GitHub does the actual authentication, the app just receives a verified email back. The session cookie itself needs no server-side storage (HMAC-signed JSON with an expiry, verified on each request) — this is orthogonal to Phase 2's profile storage question below.
+- **Phase 2 — per-user profile storage: where the data actually lives.**
+  - **Recommended: a single SQLite file** (`data/profiles.db` or similar), one row per user keyed by the email OAuth hands back. Python's stdlib includes `sqlite3` — this keeps the "zero third-party dependencies" property completely intact, while fixing two real problems flat files would hit at self-serve scale: (a) SQLite handles per-row locking properly, so concurrent writes from *different* users no longer contend on one global lock the way today's single `config/user-profile.json` + one `fcntl` lock does; (b) it's one file to back up/migrate instead of an unbounded number of small ones. Still lives on ordinary local disk — same persistent-volume requirement as today, on whichever Axis B compute is picked (still rules out Render's free tier and pure serverless, same constraint as before).
+  - **Not recommended yet: a hosted database** (Postgres via Supabase/Neon/RDS, etc.). This is the app's first real third-party dependency and a new piece of infrastructure to run and pay for. It's the right move *if* this later needs multiple app instances writing concurrently (horizontal scaling) or genuinely high write concurrency — neither applies to "a personal tool that grew via self-serve signup" at a scale one small box can serve. Worth revisiting only when SQLite's single-file-on-one-box model actually becomes the bottleneck, not upfront.
 - **Phase 3 — decouple the refresh pipeline.** Split `_refresh_project_unlocked()`: the shared half (bootstrap/fixtures/transfers/model-performance) keeps refreshing on the existing on-demand/manual cadence, unchanged, and produces one shared `dashboard-state.json` as it does today. The manager-specific half (`collect_public_manager`, `fetch_manager_event_picks`, the risk-profile-driven decision-center recommendations) moves to compute-at-request-time for whichever user is logged in, using the already-fetched shared data as input, rather than being baked into one static generation. This is the biggest engineering piece of the whole plan — bigger than anything in the original Axis B (hosting) comparison.
-- **Phase 4 — only if it outgrows flat files.** Per-user profile files scale fine into the hundreds of users (still just keyed file reads/writes, no new dependency). A real datastore only becomes worth the app's first-ever third-party dependency at higher concurrent-write volume than "a personal tool that scaled to a friend group" — cross that bridge if usage actually gets there, don't build for it upfront.
-
 Phases 1-3 need to happen regardless of which Axis B hosting choice is picked — they're app changes, not infrastructure changes. Axis B (Fly.io / raw VM / Railway / Render / own hardware) still stands as written above once the app itself supports multiple users; Render's B5 free tier is now decisively out regardless of that finding since it can't hold persistent per-user files at all.
 
-## Open question for the user (blocking)
+## Decisions confirmed (2026-08-08)
 
-**Is "everyone" a group you'll invite (grows to tens/hundreds of specific people you add), or truly open — any FPL manager who finds the link can sign up themselves?** This picks Phase 1's identity approach (Cloudflare Access's allowlist vs. building real self-serve OAuth into the app) and is the one remaining fact that determines the actual engineering scope of this phase.
+- **Growth model: open self-serve signup**, not an invite list — Phase 1 is "Sign in with Google/GitHub" built into the app, not Cloudflare Access.
+- **Profile storage: a single SQLite file**, one row per user, on ordinary local disk — no hosted database, no new dependency, until it's demonstrably outgrown.
+
+No blocking open questions remain. Next step is scoping Phases 1-3 as implementable issues (see "Next steps," below) and, separately, picking Axis B compute once the app itself supports multiple users.
+
+## Next steps
+
+This plan intentionally stops short of implementation-ready detail for Phases 1-3 — each is substantial enough to deserve its own issue and its own `ship-issue` pass rather than being built as one large, hard-to-review change:
+
+1. **Auth**: OAuth ("Sign in with Google") + signed session cookie in `server.py`.
+2. **Storage**: SQLite-backed profile store, replacing the single `config/user-profile.json` / `_default_profile_action`.
+3. **Refresh pipeline split**: shared generation (unchanged cadence) vs. per-user, request-time manager computation.
+4. Only after 1-3 ship: pick Axis B compute (own hardware vs. Fly.io vs. raw VM vs. Railway) and stand up real hosting.
+
+Recommend filing 1-3 as separate issues once ready to start building, in that order — each is a real dependency of the next (storage needs identity to key on; the refresh split needs somewhere to read/write per-user state).
 
 ## Interaction with #28 (security review)
 
