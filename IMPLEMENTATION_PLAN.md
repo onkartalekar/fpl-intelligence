@@ -1041,6 +1041,106 @@ While addressing the CSS/JS-embedded-in-Python friction from #51 (surfaced durin
 
 ---
 
+## Considered and declined — PL team manager playing style as a model input (issue #11, 2026-08-08)
+
+**Context:** issue #11 asked whether a club's manager/playing style (high-
+press vs. low-block, rotation policy, attacking vs. defensive setup) could
+improve projections or squad recommendations. No `merger`/tactics field
+exists in any data the project already uses, so every candidate was first
+judged on data availability, then validated against the out-of-sample MAE
+bar (SPECIFICATION.md's model-change rule) where testable. Full
+investigation, including the candidate-by-candidate analysis, in
+`plans/issue-11-manager-style-investigation.md`.
+
+- **(a) Team-level attack/defense rates — declined, re-litigation.** This
+  is Phase 1's Dixon-Coles-style team-strength model in different clothes
+  (MAE 2.44 vs. FDR-baseline 2.39, never adopted). Not re-tested; the
+  disabled infrastructure (`team_strength_min_rounds: 39`) remains
+  available if a genuinely new refinement is ever proposed.
+- **(b) Manager-change events as a discontinuity signal — deferred.** A
+  freely available, structured source exists (Wikipedia's "List of
+  Premier League managers" tenure table, CC BY-SA, ~20-30 in-season
+  changes across the three fit seasons), but intersecting those events
+  with the GW10-30/3-GW-horizon backtest windows leaves too small a
+  sample to clear the 0.01 MAE bar with any confidence, and a hand-
+  maintained dataset would be the project's first non-FPL, manually
+  curated input. Revisit only if a discontinuity check is separately
+  motivated.
+- **(c) Team rotation propensity from lineup turnover — tested,
+  declined.** `scripts/investigate_team_rotation.py` (mirrors
+  `scripts/investigate_ict_index.py`'s structure and rigor): a per-team,
+  season-to-date rotation index (mean starters changed between
+  consecutive fixtures, `MIN_PRE_ORIGIN_FIXTURE_PAIRS = 6`), joined onto
+  `backtest.season_comparisons()`'s existing modeled/actual/error via
+  each player's latest pre-origin team.
+
+  One data issue was found and corrected before trusting any result:
+  2022-23's `merged_gw.csv` has the `starts` column but it is entirely
+  unpopulated (0 recorded starters for every fixture) through GW15 — a
+  real PL XI is never empty, so those fixtures are dropped as a missing-
+  data artifact rather than treated as 0-rotation matches. Before this
+  fix, 2022-23's rotation index spanned an implausible 5.6-7.0 (vs.
+  1.4-4.0 for the other two seasons) and the corrupted early-origin
+  training data produced a spurious "adopt" reading (+0.033 held-out MAE
+  improvement); after excluding those fixtures, all three seasons land
+  in a plausible 1.0-4.0 range and the result reverses to a clean
+  decline.
+
+  **Correlation screen** (n=32,935 player/origin/horizon comparisons
+  pooled across all three fit seasons; sanity-baseline `modeled_points`
+  vs `actual_points` r=0.630 — higher than Phase 6's 0.433 because this
+  join is team-level, not gated on 180+ player minutes like the ICT
+  script's, so it keeps more easy near-zero/near-zero fringe-player
+  pairs; the unfiltered `season_comparisons()` population itself is
+  r=0.616, confirming the gap is the join criterion, not a bug):
+
+  | Comparison | Pearson r |
+  |---|---|
+  | `modeled_points` vs `actual_points` (sanity baseline) | 0.630 |
+  | Pre-origin rotation index vs forward `actual_points` | -0.026 |
+  | Pre-origin rotation index vs `modeled_points` | -0.053 |
+  | Pre-origin rotation index vs model **error** (`actual` − `modeled`), pooled | 0.014 (2022-23: 0.016, 2023-24: 0.021, 2024-25: -0.020) |
+  | Same, non-nailed cohort only (pre-origin start share in [0.25, 0.75], n=8,008) | -0.017 |
+
+  Every correlation is near-zero and inconsistent in sign across seasons
+  — including in the non-nailed cohort where the over-projection
+  hypothesis predicted the effect should concentrate. Rotation index
+  does not meaningfully predict a player's own points either, so this
+  isn't a case of a real signal the model already captures (the ICT
+  pattern) — it simply doesn't relate to outcomes at this level of
+  aggregation.
+
+  **Out-of-sample MAE check** (fit GW10-20, held out GW21-30, two
+  pre-registered variants): full population fit (n=15,855) found
+  weight=0.0229; held out (n=17,080), baseline MAE 2.4614 → corrected
+  MAE 2.4630, improvement **-0.0017** (worse). Non-nailed cohort fit
+  (n=3,656) found weight=-0.2755; held out (n=4,352), baseline MAE
+  3.9602 → corrected MAE 3.9528, improvement **+0.0074** — directionally
+  right but below the 0.01 bar.
+
+  Per-team rotation indexes ranked as expected: Chelsea, Man City, and
+  Liverpool (heavy cup/European-competition rotation) rank in the top
+  three or four in at least one of the three seasons.
+
+  **Decision: declined.** Neither variant clears the 0.01 held-out MAE
+  bar. Script left in `scripts/` as reusable infrastructure per the
+  project's convention (alongside `investigate_ict_index.py`).
+- **(d) Direct classification of a manager's actual tactical style —
+  declined.** No free, structured, season-consistent source exists
+  across all 20 PL managers for the three fit seasons (official PL
+  trend articles are unstructured editorial prose about the current
+  season only; Opta Analyst sits on the same ToS/robots.txt-restricted
+  endpoint already declined for issue #13; Wikipedia manager biographies
+  have real qualitative prose but no structured table). The only
+  alternative — hand-curated subjective style tags with no cited source
+  — would be the project's first non-source-backed input. Not pursued.
+
+**Net result:** all four operationalizations of issue #11 are declined or
+deferred with no viable near-term path; issue #11 closes as a clean
+negative.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep
