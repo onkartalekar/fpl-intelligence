@@ -17,6 +17,7 @@ import zoneinfo
 from . import profiles
 from .dashboard import render_dashboard
 from .generation import resolve_artifact
+from .model_performance import build_team_model_performance
 from .rate_limit import CooldownLimiter
 from .refresh import RefreshAlreadyRunning, compute_manager_view
 
@@ -138,6 +139,25 @@ def _default_team_view_action(root):
 
 def _profiles_db_path(root):
     return Path(root) / "data" / "profiles.db"
+
+
+def _default_model_performance_action(root):
+    """Build the default per-team model-performance reader, for splicing into a served page.
+
+    Reads the shared, per-team-keyed `model-performance.json` (issue #64) and scores just the
+    resolved team's slice at request time -- mirrors `_default_team_view_action`'s role for
+    `state["manager"]`/weekly decisions.
+    """
+
+    def action(team_id):
+        performance_path = resolve_artifact(root, "model-performance.json")
+        store = (
+            json.loads(performance_path.read_text(encoding="utf-8"))
+            if performance_path.exists() else {}
+        )
+        return build_team_model_performance(store, team_id)
+
+    return action
 
 
 def _default_visitor_profile_action(root):
@@ -410,6 +430,7 @@ def create_server(
     team_view_action=None,
     profile_read_action=None,
     lookup_opt_out_action=None,
+    model_performance_action=None,
 ):
     """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
     root = Path(root).resolve()
@@ -423,6 +444,7 @@ def create_server(
     lookup_opt_out_write_action = lookup_opt_out_action or (
         lambda payload: _default_lookup_opt_out_action(root, payload)
     )
+    performance_action = model_performance_action or _default_model_performance_action(root)
     lookup_limiter = CooldownLimiter(cooldown_seconds=_TEAM_LOOKUP_COOLDOWN_SECONDS)
     profile_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
     lookup_opt_out_limiter = CooldownLimiter(cooldown_seconds=_LOOKUP_OPT_OUT_COOLDOWN_SECONDS)
@@ -523,6 +545,12 @@ def create_server(
                     weekly = decision_center.get("weekly_decisions")
                     if isinstance(weekly, dict) and weekly.get("profiles"):
                         weekly["default_profile"] = risk
+                # Issue #64: this team's team_performance/player_performance, computed fresh from
+                # the shared model-performance.json at request time -- same splice pattern as
+                # state["manager"]/state["profile"] above, not precomputed for every saved profile.
+                model_performance = dict(state.get("model_performance") or {})
+                model_performance.update(performance_action(team_id))
+                state["model_performance"] = model_performance
             except Exception as error:
                 print(f"Team lookup failed: {error!r}", file=sys.stderr)
                 if is_explicit_lookup:

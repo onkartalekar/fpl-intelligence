@@ -598,6 +598,155 @@ class CookieResolvedTeamTests(unittest.TestCase):
         self.assertIn('"risk_profile": "aggressive"', html)
 
 
+class ModelPerformanceSpliceTests(unittest.TestCase):
+    """Issue #64: team_performance/player_performance computed and spliced at request time."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({
+                "generated_at": "2026-07-18T12:00:00Z",
+                "model_performance": {"status": "waiting_for_results", "comparisons": []},
+            }),
+            encoding="utf-8",
+        )
+        self.performance_calls = []
+
+        def team_view_action(team_id):
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": f"Team {team_id}", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        def model_performance_action(team_id):
+            self.performance_calls.append(team_id)
+            return {
+                "team_performance": {
+                    "status": "active",
+                    "comparisons": [{"event": 1, "modeled_points": float(team_id)}],
+                },
+                "player_performance": {"status": "waiting_for_results", "comparisons": []},
+            }
+
+        self.model_performance_action = model_performance_action
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_splices_the_resolved_teams_model_performance(self):
+        html = urlopen(self.base_url + "/?team_id=111", timeout=3).read().decode()
+
+        self.assertEqual(self.performance_calls, [111])
+        self.assertIn('"modeled_points": 111.0', html)
+
+    def test_two_different_teams_get_distinct_model_performance_slices(self):
+        # Two independent servers (rather than two sequential requests to one) so the per-IP
+        # lookup cooldown limiter doesn't block the second request -- that's issue #46's own
+        # concern, not what this test is verifying.
+        first_calls = []
+        second_calls = []
+
+        def model_performance_action_for(calls):
+            def action(team_id):
+                calls.append(team_id)
+                return {
+                    "team_performance": {
+                        "status": "active",
+                        "comparisons": [{"event": 1, "modeled_points": float(team_id)}],
+                    },
+                    "player_performance": {"status": "waiting_for_results", "comparisons": []},
+                }
+            return action
+
+        def team_view_action(team_id):
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        server_a = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action_for(first_calls),
+        )
+        server_b = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action_for(second_calls),
+        )
+        thread_a = threading.Thread(target=server_a.serve_forever, daemon=True)
+        thread_b = threading.Thread(target=server_b.serve_forever, daemon=True)
+        thread_a.start()
+        thread_b.start()
+        try:
+            first = urlopen(
+                f"http://127.0.0.1:{server_a.server_port}/?team_id=111", timeout=3
+            ).read().decode()
+            second = urlopen(
+                f"http://127.0.0.1:{server_b.server_port}/?team_id=222", timeout=3
+            ).read().decode()
+
+            self.assertEqual(first_calls, [111])
+            self.assertEqual(second_calls, [222])
+            self.assertIn('"modeled_points": 111.0', first)
+            self.assertNotIn('"modeled_points": 222.0', first)
+            self.assertIn('"modeled_points": 222.0', second)
+            self.assertNotIn('"modeled_points": 111.0', second)
+        finally:
+            server_a.shutdown()
+            server_a.server_close()
+            thread_a.join(timeout=2)
+            server_b.shutdown()
+            server_b.server_close()
+            thread_b.join(timeout=2)
+
+    def test_absent_team_id_serves_the_cached_dashboard_without_computing_performance(self):
+        html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+
+        self.assertEqual(self.performance_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_model_performance_failure_is_reported_cleanly_instead_of_a_server_error(self):
+        failing_server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=lambda team_id: {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            },
+            model_performance_action=lambda team_id: (_ for _ in ()).throw(RuntimeError("store corrupt")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            html = urlopen(
+                f"http://127.0.0.1:{failing_server.server_port}/?team_id=364759", timeout=3
+            ).read().decode()
+
+            self.assertIn('"status": "error"', html)
+            self.assertNotIn("store corrupt", html)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+
 class ProfileEndpointTests(unittest.TestCase):
     VALID_PAYLOAD = {
         "team_id": 364759,
