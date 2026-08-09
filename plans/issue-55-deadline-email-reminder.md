@@ -1,10 +1,60 @@
 # Email a transfer-deadline reminder with recommendations (issue #55)
 
-Researched 2026-08-08. Issue: send an email a configurable number of
-hours before each gameweek's transfer deadline (default ~3h) containing
-the current transfer recommendations, so a "sometimes available" manager
-(exactly what `config/user-profile.json` records:
-`"deadline_availability": "sometimes"`) doesn't miss the window.
+Researched 2026-08-08, re-planned 2026-08-08 (later same day). Issue:
+send an email a configurable number of hours before each gameweek's
+transfer deadline (default ~3h) containing the current transfer
+recommendations, so a "sometimes available" manager doesn't miss the
+window.
+
+## Re-plan note (2026-08-08)
+
+The first pass of this plan (below) was written against the
+then-current single-team `config/user-profile.json` model. Since then,
+issues #61/#62/#64 landed a per-team SQLite profile store
+(`src/fpl_intel/profiles.py`, `data/profiles.db`, gitignored/local-only)
+and — critically — issue #46's `refresh.compute_manager_view(bootstrap,
+fixtures, transfers, generated_at, team_id, ...)` now computes any
+team's personalized `weekly_decisions` at request time, decoupled from
+the single shared `dashboard-state.json` refresh. That function is a
+strict upgrade over the original plan's approach (invoking
+`scripts/refresh_dashboard.py` for one hardcoded team): the reminder
+script can now fetch bootstrap/fixtures/transfers **once** per run and
+call `compute_manager_view` per recipient team, so supporting several
+teams in one workflow run is nearly free.
+
+Two things this upgrade does **not** change, checked explicitly so this
+doesn't over-claim multi-tenancy it isn't building:
+- `profiles.py` already reserves an `email` column with a docstring
+  pointing at this exact issue ("populated only by #55's explicit
+  reminder opt-in") — but there is no public write path to it yet (no
+  self-serve signup UI/endpoint exists, and none is proposed here: every
+  current mutating endpoint, e.g. `/api/profile` and `/api/draft-squad`,
+  is unauthenticated-but-rate-limited on a publicly-known team ID, which
+  is an acceptable trust model for team-scoped *preference* data but
+  not for "cause a real inbox to receive recurring email," a
+  fundamentally different abuse surface gated by the *email address*,
+  not the team ID). Building that self-serve flow (plus the double
+  opt-in / confirmation-link step it would need to avoid becoming a
+  spam vector) is out of scope for this issue and is better sequenced
+  after #27/#28 settle the hosting and security posture. This build
+  stays admin/secrets-configured, matching the original plan's
+  single-operator scope (this is currently a personal tool for one
+  user), just widened to a *list* of teams instead of exactly one.
+- `data/profiles.db` is local-only and gitignored; a GitHub Actions
+  runner still cannot read it (this was already true of
+  `config/user-profile.json` in the original plan — nothing regresses
+  here, the recipient list was always going to be a manually-mirrored
+  secret, not a live read of local state).
+
+**Net change to the build:** replace the single `FPL_INTEL_USER_PROFILE_JSON`
+secret (one team's full profile-JSON contents) with `FPL_INTEL_REMINDER_TEAMS`
+(a JSON list, one object per recipient team:
+`{"team_id": ..., "email": ..., "lead_hours": 3}`, `lead_hours` optional,
+defaulting to 3). The script fetches bootstrap/fixtures/transfers once,
+then loops the list calling `compute_manager_view` per team — this is
+the only structural change; every trigger-mechanism, dedup, and
+log-hygiene finding below is unaffected by the schema change and still
+holds.
 
 ## Context
 
@@ -28,10 +78,11 @@ purely a new delivery channel plus a trigger:
   script can call the same entry point to guarantee the emailed
   recommendations are current as of send time, not as of whenever the
   user last clicked Refresh.
-- **Config precedent**: reminder settings (recipient, lead-time hours,
-  enabled flag) fit naturally in gitignored `config/user-profile.json`;
-  secrets follow the existing env-var pattern (`FPL_INTEL_LLM_*` in
-  `news_signals.py`).
+- **Config precedent**: reminder settings (recipient team(s), lead-time
+  hours) are admin-configured via a GitHub Actions secret (see re-plan
+  note above), not the gitignored per-team `data/profiles.db` or the
+  single-team `config/user-profile.json`; SMTP secrets follow the
+  existing env-var pattern (`FPL_INTEL_LLM_*` in `news_signals.py`).
 
 ## Structural findings before evaluating candidates
 
@@ -130,11 +181,13 @@ Concrete design:
   - `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` /
     `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` — the Gmail app
     password setup below.
-  - `FPL_INTEL_REMINDER_EMAIL` — recipient.
-  - `FPL_INTEL_USER_PROFILE_JSON` — the full contents of the gitignored
-    `config/user-profile.json`, written to that path by the workflow
-    before the refresh so the recommendations are manager-specific
-    (team id, risk profile), exactly as they are locally.
+  - `FPL_INTEL_REMINDER_TEAMS` — JSON list of recipients, e.g.
+    `[{"team_id": 123456, "email": "onkar.talekar@gmail.com",
+    "lead_hours": 3}]`. Replaces the original single-team
+    `FPL_INTEL_USER_PROFILE_JSON` design (see re-plan note above): each
+    entry is resolved independently via `compute_manager_view`, so the
+    same workflow run covers every configured team from one shared
+    bootstrap/fixtures/transfers fetch.
 - **Public-repo log hygiene**: workflow run logs are publicly visible,
   so the workflow redirects the refresh/send output to a file and
   prints only a generic status line ("checked: outside window" /
@@ -223,24 +276,30 @@ secret store. Never in a tracked file, never printed.
 
 1. **`scripts/send_deadline_reminder.py`** — the trigger-agnostic core,
    identical no matter what timer invokes it (Actions today, the #27
-   host's scheduler later). Reads lead time from
-   `config/user-profile.json` (new optional `"reminder"` section:
-   `enabled`, `lead_hours` default 3) and recipient/SMTP settings from
-   the `FPL_INTEL_*` env vars; refreshes state first via the existing
-   `refresh_dashboard.py` machinery (falling back to cached
-   `data/dashboard-state.json` with an explicit staleness line in the
-   email if the network refresh fails); applies the send-window check;
-   composes a plain-text email from `decision_center` (transfer
-   decisions when in-season, squad + captaincy for GW1 /
-   `waiting_for_gw2`); sends via `smtplib`; exits 0 with a quiet
-   "outside window" message otherwise — safe to run as often as the
-   timer likes. A `--dry-run` flag prints the composed email instead of
-   sending, for the `workflow_dispatch` test path and local debugging.
+   host's scheduler later). Parses `FPL_INTEL_REMINDER_TEAMS` (JSON
+   list, `lead_hours` per entry defaulting to 3) and SMTP settings from
+   the `FPL_INTEL_*` env vars; determines the next unfinished
+   gameweek's deadline from a fresh `fetch_bootstrap()` (falling back to
+   cached `data/fpl-bootstrap-latest.json` with an explicit staleness
+   line in the email if the network fetch fails); applies the
+   send-window check once per gameweek deadline (not per team, so all
+   configured teams for the same in-window deadline share one
+   bootstrap/fixtures/transfers fetch); for each team in-window, calls
+   `refresh.compute_manager_view(...)` — falling back to
+   `decision_center`'s `recommended_squad`/`captaincy` for the GW1 /
+   `waiting_for_gw2` state, same as `weekly_decisions.status` already
+   distinguishes elsewhere — composes one plain-text email per team, and
+   sends via `smtplib`; exits 0 with a quiet "outside window" message
+   otherwise — safe to run as often as the timer likes. A `--dry-run`
+   flag prints the composed email(s) instead of sending, for the
+   `workflow_dispatch` test path and local debugging.
 2. **`.github/workflows/deadline-reminder.yml`** — hourly `schedule` +
-   `workflow_dispatch`; writes `FPL_INTEL_USER_PROFILE_JSON` to
-   `config/user-profile.json`; runs the script with output muted per
-   the log-hygiene design above; layer-2 dedup marker if the
-   `GITHUB_TOKEN` permission proves sufficient when verified live.
+   `workflow_dispatch`; passes `FPL_INTEL_REMINDER_TEAMS` and the SMTP
+   secrets straight through as env vars (no local file to write —
+   `data/profiles.db` is never touched by the workflow); runs the
+   script with output muted per the log-hygiene design above; layer-2
+   dedup marker if the `GITHUB_TOKEN` permission proves sufficient when
+   verified live.
 3. **README/SPECIFICATION touch-up**: amend the "No scheduler" line to
    record that the reminder workflow is the anticipated
    post-verification scheduling exception — external to the app,
