@@ -168,7 +168,20 @@ Revisiting the issue's original checklist against the A3 + Railway choice:
 - **Egress access**: confirm during setup that Railway's network allows outbound calls to the FPL and Premier League sources (expected to be fine — no evidence of restricted egress on any plan tier, but not yet verified against this specific app's calls).
 - **Secrets management**: SMTP credentials for reminder emails already read from env vars (`FPL_INTEL_SERVER_SMTP_*` in `reminder_confirmation.py`) — already Railway-env-var-ready, no change needed there. The refresh token needs the same treatment (see above) — currently generated randomly per-process with no env var path in.
 - **Host/Origin allowlist**: `_has_trusted_host` and the Origin check in `do_POST` (`server.py:794`, `938`) move from hardcoded `127.0.0.1:{port}` to the Railway-issued hostname (env-var-driven, so it isn't hardcoded into source and can change if a custom domain is added later).
-- **Monitoring/logging**: Railway's built-in deploy/runtime logs cover minimal visibility for this scope; nothing further needed at this size.
+- **Monitoring/logging**: see "Observability and monitoring," below — thin treatment expanded after a follow-up question.
+
+### Observability and monitoring (2026-08-09)
+
+**What the app already does, verified from `server.py`:** every request handler catches its own unexpected errors (`except Exception as error: print(f"...{error!r}", file=sys.stderr)` — six call sites, e.g. `server.py:986` for refresh failures) and `BaseHTTPRequestHandler`'s overridden `log_message` (`server.py:1150-1151`) prints one access-log line per request to stdout. Today both streams land in the terminal the operator is already watching — this is exactly the "visible local terminal" the issue's original checklist named as being lost once hosted.
+
+**What Railway gives for free, no code change:** it captures a process's stdout/stderr automatically, so the existing `print()` calls keep working as-is — Railway's log viewer gets full-text and attribute search over them, plus per-service CPU/memory/network metrics and deploy history, out of the box. **Hobby-tier log retention is 7 days** (Pro is 30) — fine for "notice something broke this week," not a substitute for durable incident history, but proportionate for a low-traffic personal tool. Also available: webhook integrations Railway can fire on deploy/crash events, and OpenTelemetry-compatible log ingestion if a real external sink is ever wanted later.
+
+**Two real gaps worth closing now, both cheap:**
+
+1. **The existing error logging drops the traceback.** `{error!r}` prints only the exception's one-line repr, never `traceback.format_exc()` — so even today, a failure only tells you *that* something broke, not *where*. That's a bigger loss once you can't just rerun the failing request locally with a debugger attached. Cheap, mechanical fix: swap those six `print(..., file=sys.stderr)` calls for `traceback.format_exc()` (or Python's stdlib `logging` module with `logging.exception(...)`, which does this automatically) — no new dependency, and it makes Railway's captured logs actually useful for debugging an incident instead of just confirming one happened.
+2. **Railway's dashboard is passive — nothing pings you.** It surfaces crash-loop/deploy-failure state if you go look, but won't notice a subtler failure mode: the process stays up and serving cached data while the *refresh* has been silently failing (e.g. FPL's API changed shape, or egress got blocked) — nothing crashes, so there's nothing for Railway's own restart/alerting to react to. The existing `GET /api/status` endpoint (`server.py:912-924`) already reports exactly the signal needed to catch this: `{"status": "ok", "refreshing": ..., "generated_at": ..., "fpl_status": ...}`. A free external uptime monitor (e.g. UptimeRobot's free tier) polling that endpoint every few minutes, alerting by email if it stops responding *or* if `generated_at` goes stale past some threshold (a day, say), closes this gap for zero app-code change and zero added cost — it's a config-only addition on top of an endpoint that already exists.
+
+**Not recommended at this scale:** a dedicated observability platform (Sentry, Datadog, a self-hosted OpenTelemetry stack). Real third-party dependency and/or cost, disproportionate for a tool the issue itself repeatedly frames as low-traffic/single-few-user, and Railway's built-in logs + metrics + an external uptime ping already cover the realistic failure modes (crash, deploy failure, silent refresh staleness). Worth revisiting only if usage or team size actually grows past what one operator can watch casually.
 
 ### Concrete code changes (implementation-ready sketch, not yet built)
 
@@ -178,6 +191,8 @@ Revisiting the issue's original checklist against the A3 + Railway choice:
 4. Remove `<meta name="refresh-token">` from `dashboard.py` and the "Refresh now" button plus `refreshToken()`/`runRefresh()`/related wiring from `dashboard.js`; the four now-open endpoints stop sending `X-Refresh-Token` entirely.
 5. New/updated entrypoint (replacing or extending `scripts/start_dashboard.py` for the hosted case) that reads host/port/token from env vars instead of always generating a fresh token and always binding to `127.0.0.1`.
 6. A `Procfile`/Railway start command, and a volume mount at `data/`.
+7. Swap the six `print(f"...{error!r}", file=sys.stderr)` error-handling call sites for `traceback.format_exc()` (or `logging.exception`) so Railway's captured logs retain enough to debug an incident, not just confirm one happened.
+8. Config-only, no app code: point an external uptime monitor (e.g. UptimeRobot free tier) at `GET /api/status`, alerting on non-200 or on `generated_at` going stale past a threshold.
 
 Each of these is small in isolation; together they're a real, self-contained implementation pass — a good candidate for its own `ship-issue` scope rather than folding into this plan doc.
 
@@ -195,3 +210,7 @@ Pricing re-verified 2026-08-09 for the final Railway-vs-Fly.io comparison:
 - [Railway Docs: Pricing Plans](https://docs.railway.com/pricing/plans)
 - [Fly.io Resource Pricing](https://fly.io/docs/about/pricing/)
 - [Fly.io Cost Management](https://fly.io/docs/about/cost-management/)
+
+Observability, checked 2026-08-09:
+- [Railway Docs: Observability Dashboard](https://docs.railway.com/observability)
+- [Railway Docs: Logs](https://docs.railway.com/observability/logs)
