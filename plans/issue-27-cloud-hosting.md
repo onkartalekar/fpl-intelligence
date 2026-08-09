@@ -110,16 +110,91 @@ No blocking open questions remain. Next step is rescoping #44/#45/#46 to match t
 This plan intentionally stops short of implementation-ready detail for Phases 1-3 — each is substantial enough to deserve its own issue and its own `ship-issue` pass rather than being built as one large, hard-to-review change:
 
 1. **Refresh pipeline split (built)**: shared generation (unchanged cadence) vs. per-user, request-time manager computation, scoped from the start to serve an unauthenticated visitor's directly-supplied team ID. Shipped as #46 — a usable, no-signup lookup experience.
-2. **Per-team profile storage**: SQLite-backed `profiles` table keyed by `team_id` (not a credential — see the superseded note above), replacing the single `config/user-profile.json` / `_default_profile_action`, plus a plain HttpOnly cookie remembering which team ID a browser last saved, for same-browser continuity across the season. No registration step; `email` stays a nullable column populated only on explicit reminder opt-in.
-3. Only after 1-2 ship: pick Axis B compute (own hardware vs. Fly.io vs. raw VM vs. Railway) and stand up real hosting.
+2. **Per-team profile storage (built)**: SQLite-backed `profiles` table keyed by `team_id` (not a credential — see the superseded note above), replacing the single `config/user-profile.json` / `_default_profile_action`, plus a plain HttpOnly cookie remembering which team ID a browser last saved, for same-browser continuity across the season. No registration step; `email` stays a nullable column populated only on explicit reminder opt-in. Shipped as #45.
+3. **Axis B compute — resolved 2026-08-09, see "Hosting strategy: final decision" above**: Railway, fully public (A3), with the token-gate split and env-driven host/Origin allowlist described there. Not yet implemented — see that section's "Concrete code changes" for the implementation-ready sketch.
 
-Filed as issues #46 (1, shipped) and #45 (2) — #44 (originally step 2's "registration") is closed as superseded by #45 once the credential layer turned out to be unnecessary.
+Filed as issues #46 (1, shipped) and #45 (2, shipped) — #44 (originally step 2's "registration") is closed as superseded by #45 once the credential layer turned out to be unnecessary.
 
 ## Interaction with #28 (security review)
 
 - A1/A2 resolve #28's "sharpest finding" (unauthenticated token in the GET response) **without any change to `server.py`'s auth model** — the network/edge boundary does the job the OS-level localhost boundary does today, just at a different scope.
 - Regardless of A/B choice, `server.py`'s Host/Origin allowlist (`_has_trusted_host`, the Origin check in `do_POST`) must move from hardcoded `127.0.0.1:{port}` to whatever the real reachable hostname becomes (tailnet name for A1, tunnel hostname for A2) — this was already flagged in #28 as needing to move in lockstep with #27's decision, not just get re-confirmed.
 - #28's remaining "needs work" items (no time-based rate limit on `/api/refresh` beyond the concurrency-of-1 lock, no per-connection timeout on `ThreadingHTTPServer`) are cheap, generically-good hardening independent of which A/B is chosen, and worth doing regardless — just not necessarily a hard blocker under A1/A2 the way they would be under A3.
+
+**Superseded by "Hosting strategy: final decision (2026-08-09)" below** — the audience choice landed on A3, which this section (written before #44/#45/#46 shipped) had argued against on the grounds that A3 would force a real per-user auth rewrite. That premise no longer holds: #45 shipped a per-team model with open reads and low-stakes, rate-limited (not credential-gated) writes, so A3 is now reachable with a small, targeted fix rather than a rewrite — see below.
+
+## Hosting strategy: final decision (2026-08-09)
+
+Interviewed the user directly on the four decisions this plan had left open (audience gate, refresh-trigger model, compute platform, domain). Answers, plus one structural finding surfaced while grounding the refresh-trigger question in the actual code:
+
+### Audience (Axis A): A3 confirmed — fully public, no gate
+
+The user confirmed the goal matches what #45/#46 already shipped: no login, no VPN, no edge-auth gate. This is a direct consequence of #45's own reasoning (a manager's FPL data is already public via FPL's API, so gating reads or routine writes behind a login protects nothing that isn't already open) rather than a new decision — hosting should simply stop fighting an audience model the app itself was already built for. **A1 (Tailscale) and A2 (Cloudflare Access) are both dropped for this deployment** — either would re-impose a gate the app's own security model deliberately doesn't need, and A2 specifically would block the no-signup lookup path (#46) for anyone who isn't logged in, which contradicts what that feature is for.
+
+### The token gate: one shared secret was doing two jobs (finding, 2026-08-09)
+
+Grounding the "how should refresh work once public" question in `server.py` surfaced something the plan hadn't caught: `do_POST` (`server.py:934-951`) gates **all five** POST endpoints — `/api/refresh`, `/api/profile`, `/api/draft-squad`, `/api/lookup-opt-out`, `/api/reminder-opt-in` — behind one shared `X-Refresh-Token`, checked once before routing to any of them. That token is embedded in every served page (`<meta name="refresh-token">` in `dashboard.py`, read by `dashboard.js`'s `refreshToken()`), which is fine on localhost — the only reader is the one local user — but has two problems once public:
+
+1. **It contradicts #45's own decided model.** #45 explicitly designed `/api/profile`, `/api/draft-squad`, `/api/reminder-opt-in`, and `/api/lookup-opt-out` (the last via its own separate PIN check) to be open, rate-limited writes, not credential-gated ones — "writes to a team ID's saved preferences are allowed regardless of whether the request's cookie matches" (`plans/issue-45-per-team-profile-storage.md`). The shared token silently re-imposes a credential gate #45 decided against, on four of the five endpoints it doesn't belong on.
+2. **It provides no real protection for `/api/refresh` once public, only the appearance of one.** Because the same token ships in every page's HTML, and every page is now reachable by anyone, `view-source` hands any visitor the exact value needed to call `/api/refresh` themselves — the "protection" is circular. This is the concrete mechanism behind #28's "sharpest finding," not just a theoretical concern.
+
+This resolves the "keep on-demand, tighten the token" choice into something more specific than tightening one value — it's splitting one overloaded gate into two:
+
+- **Drop the token requirement entirely from `/api/profile`, `/api/draft-squad`, `/api/reminder-opt-in`, `/api/lookup-opt-out`.** Their existing per-endpoint `CooldownLimiter`s (`server.py:756-772`) already provide the rate-limiting #45's model calls for; `/api/lookup-opt-out` keeps its own PIN check independently. This isn't a new decision, just finishing #45's already-decided model in the one place the code didn't yet match it.
+- **Keep `/api/refresh` behind a real secret, but stop shipping that secret to the browser.** Remove `<meta name="refresh-token">` and the public "Refresh now" button/JS from the served dashboard entirely. `/api/refresh` becomes an operator-only action — triggered by `curl`/a small script using a token read from an environment variable, never rendered into any page. This is the literal "keep on-demand, not cron, but tighten it" the user asked for, now scoped to the one endpoint that actually needs it.
+- Today the token is randomly generated per-process (`create_server`'s `token = token or secrets.token_urlsafe(32)`, `scripts/start_dashboard.py` never surfaces it outside the page) — that has to change to an operator-supplied value from an env var so it's usable out-of-band.
+
+This fix is required for the A3 (fully public) decision to actually be safe, so it belongs to this issue rather than waiting on #28 — but it directly resolves #28's sharpest finding as a side effect, worth noting there when #28 is next touched.
+
+### Compute (Axis B): Railway, over Fly.io
+
+The user chose a managed platform over a self-managed raw VM or existing hardware. Between the two managed candidates already priced in this plan, re-verified 2026-08-09:
+
+- **Railway — recommended.** Hobby plan is a flat **$5/mo, credit-inclusive** (the $5 covers CPU/RAM/egress usage up to that amount; volumes are billed separately at $0.15/GB/mo). For this app's actual footprint — a single lightweight stdlib process, a small SQLite file, and modest JSON snapshots, serving low personal-scale traffic — the included $5 usage credit plausibly covers everything, making realistic cost close to the $5 base. Supports persistent volumes and provides a free `*.up.railway.app` subdomain with automatic TLS out of the box.
+- **Fly.io — credible fallback, not the pick.** Realistic single-app cost (1 CPU/1GB + 10GB volume + dedicated IPv4) is **$10-20/mo**, 2-4x Railway's for a comparable setup, because a dedicated IPv4 ($2/mo) and bandwidth aren't optional line items in practice. Worth revisiting only if Railway's volume/pricing model proves immature in actual use (the concern flagged when this plan first compared them).
+
+### Domain: provider subdomain for now
+
+The user doesn't want to register a domain yet. Railway's free `*.up.railway.app` subdomain satisfies "reachable without running locally" with automatic TLS and no extra cost; registering a custom domain later is a same-day change (point DNS at Railway) whenever wanted, not a decision that needs to be made now.
+
+### What this means for the infrastructure requirements list
+
+Revisiting the issue's original checklist against the A3 + Railway choice:
+
+- **Compute model / process supervision**: Railway runs the existing single stdlib process as-is (no rewrite to serverless); it supervises restarts natively — no separate systemd unit or Dockerfile logic needed beyond a start command.
+- **Persistent storage**: a Railway volume mounted at `data/` (holding `profiles.db` and the generated JSON snapshots) — the app's file-based writes are unchanged, satisfying #45's "must be disk-backed, not ephemeral" requirement directly.
+- **TLS/networking**: Railway terminates TLS automatically for its subdomain — no Caddy/nginx work needed under this compute choice, unlike the raw-VM path this plan priced earlier.
+- **Concurrency/state races**: keep this to a single Railway instance/replica — both the `fcntl`-based refresh lock and #45's SQLite storage are explicitly single-instance-only; do not turn on horizontal scaling for this app.
+- **Egress access**: confirm during setup that Railway's network allows outbound calls to the FPL and Premier League sources (expected to be fine — no evidence of restricted egress on any plan tier, but not yet verified against this specific app's calls).
+- **Secrets management**: SMTP credentials for reminder emails already read from env vars (`FPL_INTEL_SERVER_SMTP_*` in `reminder_confirmation.py`) — already Railway-env-var-ready, no change needed there. The refresh token needs the same treatment (see above) — currently generated randomly per-process with no env var path in.
+- **Host/Origin allowlist**: `_has_trusted_host` and the Origin check in `do_POST` (`server.py:794`, `938`) move from hardcoded `127.0.0.1:{port}` to the Railway-issued hostname (env-var-driven, so it isn't hardcoded into source and can change if a custom domain is added later).
+- **Monitoring/logging**: see "Observability and monitoring," below — thin treatment expanded after a follow-up question.
+
+### Observability and monitoring (2026-08-09)
+
+**What the app already does, verified from `server.py`:** every request handler catches its own unexpected errors (`except Exception as error: print(f"...{error!r}", file=sys.stderr)` — six call sites, e.g. `server.py:986` for refresh failures) and `BaseHTTPRequestHandler`'s overridden `log_message` (`server.py:1150-1151`) prints one access-log line per request to stdout. Today both streams land in the terminal the operator is already watching — this is exactly the "visible local terminal" the issue's original checklist named as being lost once hosted.
+
+**What Railway gives for free, no code change:** it captures a process's stdout/stderr automatically, so the existing `print()` calls keep working as-is — Railway's log viewer gets full-text and attribute search over them, plus per-service CPU/memory/network metrics and deploy history, out of the box. **Hobby-tier log retention is 7 days** (Pro is 30) — fine for "notice something broke this week," not a substitute for durable incident history, but proportionate for a low-traffic personal tool. Also available: webhook integrations Railway can fire on deploy/crash events, and OpenTelemetry-compatible log ingestion if a real external sink is ever wanted later.
+
+**Two real gaps worth closing now, both cheap:**
+
+1. **The existing error logging drops the traceback.** `{error!r}` prints only the exception's one-line repr, never `traceback.format_exc()` — so even today, a failure only tells you *that* something broke, not *where*. That's a bigger loss once you can't just rerun the failing request locally with a debugger attached. Cheap, mechanical fix: swap those six `print(..., file=sys.stderr)` calls for `traceback.format_exc()` (or Python's stdlib `logging` module with `logging.exception(...)`, which does this automatically) — no new dependency, and it makes Railway's captured logs actually useful for debugging an incident instead of just confirming one happened.
+2. **Railway's dashboard is passive — nothing pings you.** It surfaces crash-loop/deploy-failure state if you go look, but won't notice a subtler failure mode: the process stays up and serving cached data while the *refresh* has been silently failing (e.g. FPL's API changed shape, or egress got blocked) — nothing crashes, so there's nothing for Railway's own restart/alerting to react to. The existing `GET /api/status` endpoint (`server.py:912-924`) already reports exactly the signal needed to catch this: `{"status": "ok", "refreshing": ..., "generated_at": ..., "fpl_status": ...}`. A free external uptime monitor (e.g. UptimeRobot's free tier) polling that endpoint every few minutes, alerting by email if it stops responding *or* if `generated_at` goes stale past some threshold (a day, say), closes this gap for zero app-code change and zero added cost — it's a config-only addition on top of an endpoint that already exists.
+
+**Not recommended at this scale:** a dedicated observability platform (Sentry, Datadog, a self-hosted OpenTelemetry stack). Real third-party dependency and/or cost, disproportionate for a tool the issue itself repeatedly frames as low-traffic/single-few-user, and Railway's built-in logs + metrics + an external uptime ping already cover the realistic failure modes (crash, deploy failure, silent refresh staleness). Worth revisiting only if usage or team size actually grows past what one operator can watch casually.
+
+### Concrete code changes (implementation-ready sketch, not yet built)
+
+1. `create_server` (`server.py:727`): drop the `host != "127.0.0.1"` hard restriction; accept host/port from environment (Railway injects `PORT`), defaulting to today's localhost behavior for local dev/tests.
+2. `_has_trusted_host` / the Origin check in `do_POST`: replace the hardcoded `127.0.0.1:{port}` comparison with an allowed-hosts value from an env var, defaulting to `127.0.0.1:{port}` locally.
+3. Split the token gate: remove the `X-Refresh-Token` check for `/api/profile`, `/api/draft-squad`, `/api/reminder-opt-in`, `/api/lookup-opt-out`; keep it only for `/api/refresh`, sourced from an env var (e.g. `FPL_INTEL_REFRESH_TOKEN`) rather than `secrets.token_urlsafe(32)` generated per-process.
+4. Remove `<meta name="refresh-token">` from `dashboard.py` and the "Refresh now" button plus `refreshToken()`/`runRefresh()`/related wiring from `dashboard.js`; the four now-open endpoints stop sending `X-Refresh-Token` entirely.
+5. New/updated entrypoint (replacing or extending `scripts/start_dashboard.py` for the hosted case) that reads host/port/token from env vars instead of always generating a fresh token and always binding to `127.0.0.1`.
+6. A `Procfile`/Railway start command, and a volume mount at `data/`.
+7. Swap the six `print(f"...{error!r}", file=sys.stderr)` error-handling call sites for `traceback.format_exc()` (or `logging.exception`) so Railway's captured logs retain enough to debug an incident, not just confirm one happened.
+8. Config-only, no app code: point an external uptime monitor (e.g. UptimeRobot free tier) at `GET /api/status`, alerting on non-200 or on `generated_at` going stale past a threshold.
+
+Each of these is small in isolation; together they're a real, self-contained implementation pass — a good candidate for its own `ship-issue` scope rather than folding into this plan doc.
 
 ## Sources
 
@@ -130,3 +205,12 @@ Pricing verified 2026-08-08 (issue's original research was dated July 2026; Fly.
 - [Cloudflare Tunnel + Access, self-hosted app authentication](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
 - [Hetzner Cloud pricing after the April/June 2026 increase](https://www.bitdoze.com/hetzner-cloud-cost-optimized-plans/)
 - [AWS Lightsail pricing 2026](https://www.cloudzero.com/blog/amazon-lightsail-pricing/)
+
+Pricing re-verified 2026-08-09 for the final Railway-vs-Fly.io comparison:
+- [Railway Docs: Pricing Plans](https://docs.railway.com/pricing/plans)
+- [Fly.io Resource Pricing](https://fly.io/docs/about/pricing/)
+- [Fly.io Cost Management](https://fly.io/docs/about/cost-management/)
+
+Observability, checked 2026-08-09:
+- [Railway Docs: Observability Dashboard](https://docs.railway.com/observability)
+- [Railway Docs: Logs](https://docs.railway.com/observability/logs)
