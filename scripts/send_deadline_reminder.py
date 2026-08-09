@@ -195,6 +195,20 @@ def _compose_gw1_section(decision_center):
         lines.append("Top captaincy options:")
         for player in captaincy[:5]:
             lines.append(f"  - {player.get('name')}")
+    profile_recommendations = decision_center.get("profile_recommendations") or []
+    if profile_recommendations:
+        lines.append("")
+        lines.append("All risk profiles at a glance:")
+        for profile in profile_recommendations:
+            profile_squad = profile.get("squad") or {}
+            profile_captain = profile_squad.get("captain") or {}
+            label = profile.get("label") or profile.get("id")
+            profile_points = profile_squad.get("projected_event_points_including_captain")
+            lines.append(
+                f"  {label}: Captain: {profile_captain.get('name', 'n/a')}  |  "
+                f"Formation: {profile_squad.get('formation', 'n/a')}  |  "
+                f"Points: {profile_points if profile_points is not None else 'n/a'}"
+            )
     return lines
 
 
@@ -251,6 +265,20 @@ def _compose_active_section(weekly):
             "(This is feedback on your self-declared preseason draft squad, not an official "
             "in-season transfer.)"
         )
+    if profiles:
+        lines.append("")
+        lines.append("All risk profiles at a glance:")
+        for row in profiles:
+            row_recommendation = row.get("recommendation") or {}
+            row_label = row.get("label") or row.get("id")
+            row_action = str(row_recommendation.get("action") or "").replace("_", " ")
+            row_captain = row_recommendation.get("captain") or {}
+            row_points = row_recommendation.get("projected_event_points_including_captain")
+            lines.append(
+                f"  {row_label}: {row_action}  |  Captain: {row_captain.get('name', 'n/a')}  |  "
+                f"Points: {row_points if row_points is not None else 'n/a'}  |  "
+                f"Cost: {row_recommendation.get('point_cost', 0)}"
+            )
     return lines
 
 
