@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     confirmed_free_transfers INTEGER,
     confirmed_free_transfers_event INTEGER,
     email TEXT,
+    opted_out INTEGER,
+    pin_hash TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -28,8 +30,15 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 _COLUMNS = (
     "team_id, timezone, risk_profile, confirmed_free_transfers, "
-    "confirmed_free_transfers_event, email, created_at, updated_at"
+    "confirmed_free_transfers_event, email, opted_out, pin_hash, created_at, updated_at"
 )
+
+# Defaults used only when a team's very first row is created by the lookup opt-out endpoint
+# (issue #62) rather than by a normal `/api/profile` save -- mirrors
+# `server.py`'s `_DEFAULT_VISITOR_PROFILE`, since a manager may toggle opt-out before ever
+# saving their own timezone/risk-profile preferences.
+_DEFAULT_TIMEZONE = "America/New_York"
+_DEFAULT_RISK_PROFILE = "balanced"
 
 
 def _connect(db_path):
@@ -52,8 +61,10 @@ def _row_to_dict(row):
         "confirmed_free_transfers": row[3],
         "confirmed_free_transfers_event": row[4],
         "email": row[5],
-        "created_at": row[6],
-        "updated_at": row[7],
+        "opted_out": bool(row[6]) if row[6] is not None else None,
+        "pin_hash": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
     }
 
 
@@ -116,6 +127,69 @@ def save_profile(
                 (
                     team_id, timezone, risk_profile, confirmed_free_transfers,
                     confirmed_free_transfers_event, email, created_at, now,
+                ),
+            )
+    return load_profile(db_path, team_id)
+
+
+def load_pin_hash(db_path, team_id):
+    """Return the stored `pin_hash` for team_id, or None if no PIN has ever been claimed
+    (including when team_id has no row at all yet). Used by issue #62's opt-out endpoint to
+    decide between a first-claim ("no PIN exists yet, any PIN meeting the shape rule sets it")
+    and a re-claim (submitted PIN must match) without needing a full profile read.
+    """
+    with closing(_connect(db_path)) as connection:
+        row = connection.execute(
+            "SELECT pin_hash FROM profiles WHERE team_id = ?", (team_id,)
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_lookup_opt_out(db_path, team_id, opted_out, pin_hash, now):
+    """Create or update team_id's `opted_out` flag and `pin_hash` (issue #62).
+
+    Deliberately independent of `save_profile`'s five live-manager-preference fields -- a
+    team's first opt-out toggle can happen before that team has ever saved a profile at all,
+    in which case a row is created here using the same defaults
+    `server._default_visitor_profile_action` would otherwise synthesize on read. Only
+    `opted_out`/`pin_hash`/`updated_at` are overwritten on an existing row; every other column
+    (including `email`, never touched outside its own #55 opt-in) is preserved untouched.
+    """
+    with closing(_connect(db_path)) as connection:
+        with connection:
+            existing = connection.execute(
+                "SELECT created_at, timezone, risk_profile, confirmed_free_transfers, "
+                "confirmed_free_transfers_event, email FROM profiles WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()
+            if existing:
+                (
+                    created_at, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email,
+                ) = existing
+            else:
+                created_at = now
+                timezone_value = _DEFAULT_TIMEZONE
+                risk_profile = _DEFAULT_RISK_PROFILE
+                confirmed_free_transfers = None
+                confirmed_free_transfers_event = None
+                email = None
+            connection.execute(
+                """
+                INSERT INTO profiles
+                    (team_id, timezone, risk_profile, confirmed_free_transfers,
+                     confirmed_free_transfers_event, email, opted_out, pin_hash,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    opted_out = excluded.opted_out,
+                    pin_hash = excluded.pin_hash,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    team_id, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email, 1 if opted_out else 0, pin_hash,
+                    created_at, now,
                 ),
             )
     return load_profile(db_path, team_id)
