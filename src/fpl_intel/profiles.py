@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS profiles (
     opted_out INTEGER,
     pin_hash TEXT,
     goal TEXT,
+    reminder_status TEXT,
+    reminder_lead_hours INTEGER,
+    reminder_pending_email TEXT,
+    reminder_confirmation_token_hash TEXT,
+    reminder_confirmation_expires_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -38,6 +43,8 @@ CREATE TABLE IF NOT EXISTS profiles (
 _COLUMNS = (
     "team_id, timezone, risk_profile, confirmed_free_transfers, "
     "confirmed_free_transfers_event, email, draft_squad, opted_out, pin_hash, goal, "
+    "reminder_status, reminder_lead_hours, reminder_pending_email, "
+    "reminder_confirmation_token_hash, reminder_confirmation_expires_at, "
     "created_at, updated_at"
 )
 
@@ -83,8 +90,18 @@ def _row_to_dict(row):
         # (`save_draft_squad`, `set_lookup_opt_out`), so every caller of `load_profile` always
         # sees a resolved goal without needing its own `or "top_50k"` fallback.
         "goal": row[9] or _DEFAULT_GOAL,
-        "created_at": row[10],
-        "updated_at": row[11],
+        # Issue #79: `reminder_status` is deliberately left as NULL/None (never defaulted, unlike
+        # `goal` above) -- None means "never decided", a real, distinct state from any of
+        # 'pending'/'enabled'/'declined', driving the tri-state attention-banner nudge in
+        # `dashboard.js`. `reminder_lead_hours`/`reminder_pending_email`/the token columns are
+        # similarly left as whatever is actually stored, with no read-time substitution.
+        "reminder_status": row[10],
+        "reminder_lead_hours": row[11],
+        "reminder_pending_email": row[12],
+        "reminder_confirmation_token_hash": row[13],
+        "reminder_confirmation_expires_at": row[14],
+        "created_at": row[15],
+        "updated_at": row[16],
     }
 
 
@@ -279,6 +296,155 @@ def set_lookup_opt_out(db_path, team_id, opted_out, pin_hash, now):
                     team_id, timezone_value, risk_profile, confirmed_free_transfers,
                     confirmed_free_transfers_event, email, 1 if opted_out else 0, pin_hash,
                     created_at, now,
+                ),
+            )
+    return load_profile(db_path, team_id)
+
+
+def set_reminder_pending(db_path, team_id, pending_email, lead_hours, token_hash, expires_at, now):
+    """Record an in-flight reminder-enable request (issue #79).
+
+    Called only after the caller (`server.py`) has already sent the confirmation email
+    successfully -- SMTP send happens before this write, never after, so a pending row here
+    always corresponds to an email that was actually dispatched. Sets `reminder_status` to
+    `'pending'` and stores everything `confirm_reminder` later needs to validate and promote
+    the request. `email` itself is deliberately untouched: it only ever holds a *confirmed*
+    address, never this unconfirmed one. Mirrors `set_lookup_opt_out`'s create-or-preserve
+    pattern -- a team's first reminder request can happen before that team has ever saved a
+    profile at all.
+    """
+    with closing(_connect(db_path)) as connection:
+        with connection:
+            existing = connection.execute(
+                "SELECT created_at, timezone, risk_profile, confirmed_free_transfers, "
+                "confirmed_free_transfers_event, email FROM profiles WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()
+            if existing:
+                (
+                    created_at, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email,
+                ) = existing
+            else:
+                created_at = now
+                timezone_value = _DEFAULT_TIMEZONE
+                risk_profile = _DEFAULT_RISK_PROFILE
+                confirmed_free_transfers = None
+                confirmed_free_transfers_event = None
+                email = None
+            connection.execute(
+                """
+                INSERT INTO profiles
+                    (team_id, timezone, risk_profile, confirmed_free_transfers,
+                     confirmed_free_transfers_event, email, reminder_status, reminder_lead_hours,
+                     reminder_pending_email, reminder_confirmation_token_hash,
+                     reminder_confirmation_expires_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    reminder_status = 'pending',
+                    reminder_lead_hours = excluded.reminder_lead_hours,
+                    reminder_pending_email = excluded.reminder_pending_email,
+                    reminder_confirmation_token_hash = excluded.reminder_confirmation_token_hash,
+                    reminder_confirmation_expires_at = excluded.reminder_confirmation_expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    team_id, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email, lead_hours, pending_email,
+                    token_hash, expires_at, created_at, now,
+                ),
+            )
+    return load_profile(db_path, team_id)
+
+
+def confirm_reminder(db_path, team_id, now):
+    """Promote a pending reminder confirmation to enabled (issue #79).
+
+    Copies `reminder_pending_email` into `email`, sets `reminder_status='enabled'`, and clears
+    the pending/token/expiry columns. Called only after `server.py` has already validated the
+    raw token from the confirmation link against `reminder_confirmation_token_hash` with
+    `secrets.compare_digest` and checked `reminder_confirmation_expires_at`. Returns None (and
+    writes nothing) if `team_id` has no row, or has no pending confirmation to promote -- a
+    stale or already-used link is inert, not an error state this function needs to distinguish
+    further; the caller decides what to tell the visitor.
+    """
+    with closing(_connect(db_path)) as connection:
+        with connection:
+            existing = connection.execute(
+                "SELECT reminder_pending_email FROM profiles WHERE team_id = ?", (team_id,)
+            ).fetchone()
+            if existing is None or existing[0] is None:
+                return None
+            connection.execute(
+                """
+                UPDATE profiles SET
+                    email = reminder_pending_email,
+                    reminder_status = 'enabled',
+                    reminder_pending_email = NULL,
+                    reminder_confirmation_token_hash = NULL,
+                    reminder_confirmation_expires_at = NULL,
+                    updated_at = ?
+                WHERE team_id = ?
+                """,
+                (now, team_id),
+            )
+    return load_profile(db_path, team_id)
+
+
+def set_reminder_decision(db_path, team_id, status, now, clear_email=False):
+    """Create or update team_id's `reminder_status` to a terminal decision (issue #79).
+
+    Used for both an explicit "no thanks" (`status='declined'`, never having been enabled) and
+    a "disable" of a previously enabled reminder -- the same underlying write, distinguished
+    only by `clear_email`: disabling additionally clears the confirmed `email`, so a later
+    re-enable always re-proves ownership of whatever address is submitted next rather than
+    silently inheriting trust from the old one, matching the plan's stated design. Always
+    clears any in-flight pending-confirmation fields regardless of `clear_email` -- a
+    decline/disable supersedes any outstanding confirmation link. `reminder_lead_hours` is
+    deliberately left untouched either way (not included in the SET clause below), so a
+    remembered lead-time choice survives to prefill a future re-enable. Mirrors
+    `set_lookup_opt_out`'s create-or-preserve pattern.
+    """
+    with closing(_connect(db_path)) as connection:
+        with connection:
+            existing = connection.execute(
+                "SELECT created_at, timezone, risk_profile, confirmed_free_transfers, "
+                "confirmed_free_transfers_event, email FROM profiles WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()
+            if existing:
+                (
+                    created_at, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email,
+                ) = existing
+            else:
+                created_at = now
+                timezone_value = _DEFAULT_TIMEZONE
+                risk_profile = _DEFAULT_RISK_PROFILE
+                confirmed_free_transfers = None
+                confirmed_free_transfers_event = None
+                email = None
+            if clear_email:
+                email = None
+            connection.execute(
+                """
+                INSERT INTO profiles
+                    (team_id, timezone, risk_profile, confirmed_free_transfers,
+                     confirmed_free_transfers_event, email, reminder_status,
+                     reminder_pending_email, reminder_confirmation_token_hash,
+                     reminder_confirmation_expires_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    email = excluded.email,
+                    reminder_status = excluded.reminder_status,
+                    reminder_pending_email = NULL,
+                    reminder_confirmation_token_hash = NULL,
+                    reminder_confirmation_expires_at = NULL,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    team_id, timezone_value, risk_profile, confirmed_free_transfers,
+                    confirmed_free_transfers_event, email, status, created_at, now,
                 ),
             )
     return load_profile(db_path, team_id)
