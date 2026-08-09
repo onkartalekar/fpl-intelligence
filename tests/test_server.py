@@ -10,7 +10,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fpl_intel.profiles import load_profile
+from fpl_intel.profiles import load_profile, set_lookup_opt_out
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import RefreshAlreadyRunning, project_refresh_lock
 from fpl_intel.server import _default_refresh_action, build_refresh_result, create_server
@@ -427,6 +427,81 @@ class TeamLookupTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 404)
 
 
+class LookupOptOutGateTests(unittest.TestCase):
+    """Issue #62: an opted-out team blocks the explicit ?team_id= lookup before any live call."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z", "profile": {"team_id": None}}),
+            encoding="utf-8",
+        )
+        self.db_path = self.root / "data" / "profiles.db"
+        self.lookup_calls = []
+
+        def team_view_action(team_id):
+            self.lookup_calls.append(team_id)
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": "BrunoMans", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        self.team_view_action = team_view_action
+        self.server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            team_view_action=team_view_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_opted_out_team_blocks_the_lookup_without_calling_the_live_action(self):
+        set_lookup_opt_out(
+            self.db_path, team_id=364759, opted_out=True, pin_hash="some-hash",
+            now="2026-08-08T00:00:00Z",
+        )
+
+        html = urlopen(self.base_url + "/?team_id=364759", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [])
+        self.assertIn('"status": "opted_out"', html)
+        self.assertIn('"team_id": 364759', html)
+        self.assertNotIn("BrunoMans", html)
+
+    def test_non_opted_out_team_still_looks_up_normally(self):
+        set_lookup_opt_out(
+            self.db_path, team_id=364759, opted_out=False, pin_hash="some-hash",
+            now="2026-08-08T00:00:00Z",
+        )
+
+        html = urlopen(self.base_url + "/?team_id=364759", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [364759])
+        self.assertIn('"status": "ok"', html)
+        self.assertIn("BrunoMans", html)
+
+    def test_team_with_no_saved_profile_still_looks_up_normally(self):
+        html = urlopen(self.base_url + "/?team_id=999999", timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [999999])
+        self.assertIn('"status": "ok"', html)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 
@@ -465,6 +540,7 @@ class CookieResolvedTeamTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+        self.db_path = self.root / "data" / "profiles.db"
 
     def tearDown(self):
         self.server.shutdown()
@@ -475,6 +551,20 @@ class CookieResolvedTeamTests(unittest.TestCase):
     def _get_with_cookie(self, path, cookie_value):
         request = Request(self.base_url + path, headers={"Cookie": f"fpl_team_id={cookie_value}"})
         return urlopen(request, timeout=3)
+
+    def test_opted_out_flag_does_not_affect_the_cookie_driven_own_team_path(self):
+        """Issue #62: opting out only gates the explicit ?team_id= lookup of someone else's
+        team, never a visitor's own remembered team resolved from their cookie."""
+        set_lookup_opt_out(
+            self.db_path, team_id=42, opted_out=True, pin_hash="some-hash",
+            now="2026-08-08T00:00:00Z",
+        )
+
+        html = self._get_with_cookie("/", "42").read().decode()
+
+        self.assertEqual(self.lookup_calls, [42])
+        self.assertIn("Cookie Team", html)
+        self.assertNotIn('"lookup":', html.replace(" ", ""))
 
     def test_cookie_resolves_the_team_when_no_query_param_is_present(self):
         html = self._get_with_cookie("/", "42").read().decode()
@@ -508,6 +598,155 @@ class CookieResolvedTeamTests(unittest.TestCase):
 
         self.assertEqual(self.profile_read_calls, [42])
         self.assertIn('"risk_profile": "aggressive"', html)
+
+
+class ModelPerformanceSpliceTests(unittest.TestCase):
+    """Issue #64: team_performance/player_performance computed and spliced at request time."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({
+                "generated_at": "2026-07-18T12:00:00Z",
+                "model_performance": {"status": "waiting_for_results", "comparisons": []},
+            }),
+            encoding="utf-8",
+        )
+        self.performance_calls = []
+
+        def team_view_action(team_id):
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": f"Team {team_id}", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        def model_performance_action(team_id):
+            self.performance_calls.append(team_id)
+            return {
+                "team_performance": {
+                    "status": "active",
+                    "comparisons": [{"event": 1, "modeled_points": float(team_id)}],
+                },
+                "player_performance": {"status": "waiting_for_results", "comparisons": []},
+            }
+
+        self.model_performance_action = model_performance_action
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_splices_the_resolved_teams_model_performance(self):
+        html = urlopen(self.base_url + "/?team_id=111", timeout=3).read().decode()
+
+        self.assertEqual(self.performance_calls, [111])
+        self.assertIn('"modeled_points": 111.0', html)
+
+    def test_two_different_teams_get_distinct_model_performance_slices(self):
+        # Two independent servers (rather than two sequential requests to one) so the per-IP
+        # lookup cooldown limiter doesn't block the second request -- that's issue #46's own
+        # concern, not what this test is verifying.
+        first_calls = []
+        second_calls = []
+
+        def model_performance_action_for(calls):
+            def action(team_id):
+                calls.append(team_id)
+                return {
+                    "team_performance": {
+                        "status": "active",
+                        "comparisons": [{"event": 1, "modeled_points": float(team_id)}],
+                    },
+                    "player_performance": {"status": "waiting_for_results", "comparisons": []},
+                }
+            return action
+
+        def team_view_action(team_id):
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        server_a = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action_for(first_calls),
+        )
+        server_b = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            model_performance_action=model_performance_action_for(second_calls),
+        )
+        thread_a = threading.Thread(target=server_a.serve_forever, daemon=True)
+        thread_b = threading.Thread(target=server_b.serve_forever, daemon=True)
+        thread_a.start()
+        thread_b.start()
+        try:
+            first = urlopen(
+                f"http://127.0.0.1:{server_a.server_port}/?team_id=111", timeout=3
+            ).read().decode()
+            second = urlopen(
+                f"http://127.0.0.1:{server_b.server_port}/?team_id=222", timeout=3
+            ).read().decode()
+
+            self.assertEqual(first_calls, [111])
+            self.assertEqual(second_calls, [222])
+            self.assertIn('"modeled_points": 111.0', first)
+            self.assertNotIn('"modeled_points": 222.0', first)
+            self.assertIn('"modeled_points": 222.0', second)
+            self.assertNotIn('"modeled_points": 111.0', second)
+        finally:
+            server_a.shutdown()
+            server_a.server_close()
+            thread_a.join(timeout=2)
+            server_b.shutdown()
+            server_b.server_close()
+            thread_b.join(timeout=2)
+
+    def test_absent_team_id_serves_the_cached_dashboard_without_computing_performance(self):
+        html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+
+        self.assertEqual(self.performance_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_model_performance_failure_is_reported_cleanly_instead_of_a_server_error(self):
+        failing_server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=lambda team_id: {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            },
+            model_performance_action=lambda team_id: (_ for _ in ()).throw(RuntimeError("store corrupt")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            html = urlopen(
+                f"http://127.0.0.1:{failing_server.server_port}/?team_id=364759", timeout=3
+            ).read().decode()
+
+            self.assertIn('"status": "error"', html)
+            self.assertNotIn("store corrupt", html)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
 
 
 class ProfileEndpointTests(unittest.TestCase):
@@ -818,6 +1057,209 @@ class ProfileEndpointTests(unittest.TestCase):
             thread.join(timeout=2)
 
 
+class LookupOptOutEndpointTests(unittest.TestCase):
+    """Issue #62: POST /api/lookup-opt-out and its first-claim PIN semantics."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+        self.db_path = self.root / "data" / "profiles.db"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _post_opt_out(self, payload, headers=None, base_url=None, raw_body=None):
+        request_headers = {"Content-Type": "application/json"}
+        if headers:
+            request_headers.update(headers)
+        data = raw_body if raw_body is not None else json.dumps(payload).encode("utf-8")
+        return Request(
+            (base_url or self.base_url) + "/api/lookup-opt-out",
+            data=data,
+            method="POST",
+            headers=request_headers,
+        )
+
+    def test_first_claim_sets_the_flag_and_stores_a_hashed_pin(self):
+        request = self._post_opt_out(
+            {"team_id": 364759, "opted_out": True, "pin": "abc123"},
+            headers={"X-Refresh-Token": "test-token"},
+        )
+
+        response = urlopen(request, timeout=3)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "team_id": 364759, "opted_out": True})
+        saved = load_profile(self.db_path, 364759)
+        self.assertTrue(saved["opted_out"])
+        self.assertIsNotNone(saved["pin_hash"])
+        self.assertNotEqual(saved["pin_hash"], "abc123")  # never the raw PIN
+
+    def test_reclaiming_with_the_wrong_pin_is_rejected_and_leaves_the_flag_unchanged(self):
+        first_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        first_thread = threading.Thread(target=first_server.serve_forever, daemon=True)
+        first_thread.start()
+        try:
+            urlopen(
+                self._post_opt_out(
+                    {"team_id": 364759, "opted_out": True, "pin": "abc123"},
+                    headers={"X-Refresh-Token": "test-token"},
+                    base_url=f"http://127.0.0.1:{first_server.server_port}",
+                ),
+                timeout=3,
+            )
+        finally:
+            first_server.shutdown()
+            first_server.server_close()
+            first_thread.join(timeout=2)
+
+        # A fresh server for its own independent rate limiter -- otherwise this second request
+        # would be indistinguishable from a rapid resubmission by the same legitimate caller.
+        second_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        second_thread = threading.Thread(target=second_server.serve_forever, daemon=True)
+        second_thread.start()
+        try:
+            request = self._post_opt_out(
+                {"team_id": 364759, "opted_out": False, "pin": "wrongpin"},
+                headers={"X-Refresh-Token": "test-token"},
+                base_url=f"http://127.0.0.1:{second_server.server_port}",
+            )
+            with self.assertRaises(HTTPError) as error:
+                urlopen(request, timeout=3)
+            payload = json.loads(error.exception.read())
+
+            self.assertEqual(error.exception.code, 403)
+            self.assertEqual(payload["message"], "Incorrect PIN")
+        finally:
+            second_server.shutdown()
+            second_server.server_close()
+            second_thread.join(timeout=2)
+
+        # The flag stays exactly as the first, legitimate request left it.
+        self.assertTrue(load_profile(self.db_path, 364759)["opted_out"])
+
+    def test_reclaiming_with_the_correct_pin_allows_toggling(self):
+        first_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        first_thread = threading.Thread(target=first_server.serve_forever, daemon=True)
+        first_thread.start()
+        try:
+            urlopen(
+                self._post_opt_out(
+                    {"team_id": 364759, "opted_out": True, "pin": "abc123"},
+                    headers={"X-Refresh-Token": "test-token"},
+                    base_url=f"http://127.0.0.1:{first_server.server_port}",
+                ),
+                timeout=3,
+            )
+        finally:
+            first_server.shutdown()
+            first_server.server_close()
+            first_thread.join(timeout=2)
+
+        second_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        second_thread = threading.Thread(target=second_server.serve_forever, daemon=True)
+        second_thread.start()
+        try:
+            response = urlopen(
+                self._post_opt_out(
+                    {"team_id": 364759, "opted_out": False, "pin": "abc123"},
+                    headers={"X-Refresh-Token": "test-token"},
+                    base_url=f"http://127.0.0.1:{second_server.server_port}",
+                ),
+                timeout=3,
+            )
+            payload = json.loads(response.read())
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["opted_out"], False)
+        finally:
+            second_server.shutdown()
+            second_server.server_close()
+            second_thread.join(timeout=2)
+
+        self.assertFalse(load_profile(self.db_path, 364759)["opted_out"])
+
+    def test_rejects_missing_token(self):
+        request = self._post_opt_out({"team_id": 364759, "opted_out": True, "pin": "abc123"})
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=3)
+
+        self.assertEqual(error.exception.code, 403)
+        self.assertIsNone(load_profile(self.db_path, 364759))
+
+    def test_rejects_a_pin_that_is_too_short(self):
+        request = self._post_opt_out(
+            {"team_id": 364759, "opted_out": True, "pin": "123"},
+            headers={"X-Refresh-Token": "test-token"},
+        )
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+        self.assertIsNone(load_profile(self.db_path, 364759))
+
+    def test_rejects_non_boolean_opted_out(self):
+        request = self._post_opt_out(
+            {"team_id": 364759, "opted_out": "yes", "pin": "abc123"},
+            headers={"X-Refresh-Token": "test-token"},
+        )
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+
+    def test_rejects_unknown_keys(self):
+        request = self._post_opt_out(
+            {"team_id": 364759, "opted_out": True, "pin": "abc123", "extra": "x"},
+            headers={"X-Refresh-Token": "test-token"},
+        )
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+
+    def test_repeated_attempts_from_the_same_source_are_rate_limited(self):
+        first = urlopen(
+            self._post_opt_out(
+                {"team_id": 364759, "opted_out": True, "pin": "abc123"},
+                headers={"X-Refresh-Token": "test-token"},
+            ),
+            timeout=3,
+        )
+        self.assertEqual(first.status, 200)
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(
+                self._post_opt_out(
+                    {"team_id": 100001, "opted_out": True, "pin": "abc123"},
+                    headers={"X-Refresh-Token": "test-token"},
+                ),
+                timeout=3,
+            )
+
+        self.assertEqual(error.exception.code, 429)
+
+
 class DraftSquadEndpointTests(unittest.TestCase):
     """Issue #61: declaring a preseason draft squad through /api/draft-squad."""
 
@@ -1027,6 +1469,7 @@ class DraftSquadEndpointTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
 
 
 if __name__ == "__main__":

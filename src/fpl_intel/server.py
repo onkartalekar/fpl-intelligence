@@ -1,6 +1,7 @@
 """Local-only HTTP service for the FPL dashboard and explicit refresh requests."""
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from http import cookies as http_cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -16,6 +17,7 @@ import zoneinfo
 from . import profiles
 from .dashboard import render_dashboard
 from .generation import resolve_artifact
+from .model_performance import build_team_model_performance
 from .rate_limit import CooldownLimiter
 from .refresh import RefreshAlreadyRunning, compute_manager_view
 from .transfer_decisions import validate_draft_squad
@@ -35,6 +37,17 @@ _TEAM_ID_REQUIRED_MESSAGE = "A team ID is required to save settings"
 _TEAM_ID_RE = re.compile(r"^[0-9]{1,8}$")
 _TEAM_LOOKUP_COOLDOWN_SECONDS = 15
 _PROFILE_WRITE_COOLDOWN_SECONDS = 5
+# Deliberately stricter than the ordinary profile-write cooldown above -- this endpoint is the
+# one PIN-guessing surface in the app (issue #62), so a would-be attacker gets far fewer
+# attempts per unit time from a single source than an ordinary profile save allows.
+_LOOKUP_OPT_OUT_COOLDOWN_SECONDS = 30
+_ALLOWED_LOOKUP_OPT_OUT_KEYS = {"team_id", "opted_out", "pin"}
+# 6+ alphanumeric characters -- longer than a typical numeric PIN specifically because there's
+# no email/account to fall back on for recovery or to raise the cost of guessing (issue #62's
+# plan is explicit that this is proportionate, not strong crypto).
+_LOOKUP_OPT_OUT_PIN_RE = re.compile(r"^[A-Za-z0-9]{6,24}$")
+_LOOKUP_OPT_OUT_VALIDATION_MESSAGE = "Invalid opt-out payload"
+_LOOKUP_OPT_OUT_PIN_MESSAGE = "Incorrect PIN"
 _TEAM_COOKIE_NAME = "fpl_team_id"
 _TEAM_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 300  # ~300 days, comfortably spans a season
 _DEFAULT_VISITOR_PROFILE = {
@@ -129,6 +142,25 @@ def _default_team_view_action(root):
 
 def _profiles_db_path(root):
     return Path(root) / "data" / "profiles.db"
+
+
+def _default_model_performance_action(root):
+    """Build the default per-team model-performance reader, for splicing into a served page.
+
+    Reads the shared, per-team-keyed `model-performance.json` (issue #64) and scores just the
+    resolved team's slice at request time -- mirrors `_default_team_view_action`'s role for
+    `state["manager"]`/weekly decisions.
+    """
+
+    def action(team_id):
+        performance_path = resolve_artifact(root, "model-performance.json")
+        store = (
+            json.loads(performance_path.read_text(encoding="utf-8"))
+            if performance_path.exists() else {}
+        )
+        return build_team_model_performance(store, team_id)
+
+    return action
 
 
 def _default_visitor_profile_action(root):
@@ -333,6 +365,88 @@ def _default_draft_squad_action(root, payload):
     return {"team_id": team_id, "draft_squad": player_ids}
 
 
+class LookupOptOutValidationError(Exception):
+    """Raised when a submitted /api/lookup-opt-out payload fails validation."""
+
+
+class LookupOptOutPinError(Exception):
+    """Raised when a submitted PIN doesn't match the one already claimed for a team ID."""
+
+
+def _validate_lookup_opt_out_payload(payload):
+    """Validate and normalize a /api/lookup-opt-out request body.
+
+    Returns a cleaned dict with exactly `team_id`/`opted_out`/`pin`, or raises
+    LookupOptOutValidationError with a fixed, input-free message -- same shape-only-error
+    posture as `_validate_profile_payload`, and deliberately never distinguishes "team ID
+    doesn't exist" from any other rejection reason at this stage.
+    """
+    if not isinstance(payload, dict):
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+    if set(payload.keys()) != _ALLOWED_LOOKUP_OPT_OUT_KEYS:
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+
+    team_id = payload.get("team_id")
+    if isinstance(team_id, bool):
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+    if isinstance(team_id, int):
+        team_id_value = team_id
+    elif isinstance(team_id, str) and team_id.isdigit():
+        team_id_value = int(team_id)
+    else:
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+    if not (1 <= team_id_value <= 99_999_999):
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+
+    opted_out = payload.get("opted_out")
+    if not isinstance(opted_out, bool):
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+
+    pin = payload.get("pin")
+    if not isinstance(pin, str) or not _LOOKUP_OPT_OUT_PIN_RE.match(pin):
+        raise LookupOptOutValidationError(_LOOKUP_OPT_OUT_VALIDATION_MESSAGE)
+
+    return {"team_id": team_id_value, "opted_out": opted_out, "pin": pin}
+
+
+def _hash_pin(pin):
+    return sha256(pin.encode("utf-8")).hexdigest()
+
+
+def _default_lookup_opt_out_action(root, payload):
+    """Validate and apply a /api/lookup-opt-out request (issue #62).
+
+    First-claim PIN semantics: no `pin_hash` yet stored for `team_id` (including when the
+    team has no row at all) means any PIN meeting the shape rule claims it, in the same
+    request that sets `opted_out`. Once a PIN is claimed, every later request -- whether
+    turning opt-out on or back off -- must submit the same PIN, checked with
+    `secrets.compare_digest` (same pattern already used for the refresh token) so timing
+    can't leak a partial match. On mismatch, the rejection message is fixed and input-free:
+    it never confirms or denies whether a PIN already exists for a given team ID, so this
+    endpoint itself can't be used to probe which teams have opted out.
+    """
+    cleaned = _validate_lookup_opt_out_payload(payload)
+    db_path = _profiles_db_path(root)
+    existing_hash = profiles.load_pin_hash(db_path, cleaned["team_id"])
+    submitted_hash = _hash_pin(cleaned["pin"])
+    if existing_hash is None:
+        stored_hash = submitted_hash
+    elif secrets.compare_digest(existing_hash, submitted_hash):
+        stored_hash = existing_hash
+    else:
+        raise LookupOptOutPinError(_LOOKUP_OPT_OUT_PIN_MESSAGE)
+
+    profiles.set_lookup_opt_out(
+        db_path,
+        team_id=cleaned["team_id"],
+        opted_out=cleaned["opted_out"],
+        pin_hash=stored_hash,
+        now=datetime.now(timezone.utc).isoformat(),
+    )
+
+    return {"team_id": cleaned["team_id"], "opted_out": cleaned["opted_out"]}
+
+
 def build_refresh_result(state):
     """Summarize a completed manual refresh for the browser UI."""
     health = state.get("source_health") or {}
@@ -393,6 +507,8 @@ def create_server(
     team_view_action=None,
     profile_read_action=None,
     draft_squad_action=None,
+    lookup_opt_out_action=None,
+    model_performance_action=None,
 ):
     """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
     root = Path(root).resolve()
@@ -404,12 +520,17 @@ def create_server(
     lookup_action = team_view_action or _default_team_view_action(root)
     visitor_profile_action = profile_read_action or _default_visitor_profile_action(root)
     draft_squad_write_action = draft_squad_action or (lambda payload: _default_draft_squad_action(root, payload))
+    lookup_opt_out_write_action = lookup_opt_out_action or (
+        lambda payload: _default_lookup_opt_out_action(root, payload)
+    )
+    performance_action = model_performance_action or _default_model_performance_action(root)
     lookup_limiter = CooldownLimiter(cooldown_seconds=_TEAM_LOOKUP_COOLDOWN_SECONDS)
     profile_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
     # A separate limiter instance (not the shared profile one) so saving a profile and declaring
     # a draft squad don't compete for the same cooldown window -- a manager plausibly does both
     # back-to-back while setting up before Gameweek 1.
     draft_squad_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
+    lookup_opt_out_limiter = CooldownLimiter(cooldown_seconds=_LOOKUP_OPT_OUT_COOLDOWN_SECONDS)
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -476,6 +597,20 @@ def create_server(
                 self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                 return
             state = json.loads(state_path.read_text(encoding="utf-8"))
+            # Issue #62: a manager can opt their team out of showing derived recommendations to
+            # anyone who looks it up by ID. Checked only for the explicit query-param lookup path
+            # (never the visitor's own cookie-driven view) and before `lookup_action` -- a local
+            # `profiles.load_profile` read, not the live-FPL-API-hitting call it would otherwise
+            # trigger, per issue #28's already-flagged unthrottled-lookup-cost risk.
+            if is_explicit_lookup:
+                saved_profile = profiles.load_profile(_profiles_db_path(root), team_id)
+                if saved_profile and saved_profile.get("opted_out"):
+                    state["lookup"] = {"active": True, "team_id": team_id, "status": "opted_out"}
+                    html = render_dashboard(state).replace(
+                        'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
+                    )
+                    self._send_html(html)
+                    return
             try:
                 lookup_result = lookup_action(team_id)
                 state["manager"] = lookup_result["manager"]
@@ -493,6 +628,12 @@ def create_server(
                     weekly = decision_center.get("weekly_decisions")
                     if isinstance(weekly, dict) and weekly.get("profiles"):
                         weekly["default_profile"] = risk
+                # Issue #64: this team's team_performance/player_performance, computed fresh from
+                # the shared model-performance.json at request time -- same splice pattern as
+                # state["manager"]/state["profile"] above, not precomputed for every saved profile.
+                model_performance = dict(state.get("model_performance") or {})
+                model_performance.update(performance_action(team_id))
+                state["model_performance"] = model_performance
             except Exception as error:
                 print(f"Team lookup failed: {error!r}", file=sys.stderr)
                 if is_explicit_lookup:
@@ -538,7 +679,9 @@ def create_server(
                 self._json(403, {"status": "error", "message": "Untrusted Origin header"})
                 return
             path = self.path.split("?", 1)[0]
-            if path not in {"/api/refresh", "/api/profile", "/api/draft-squad"}:
+            if path not in {
+                "/api/refresh", "/api/profile", "/api/draft-squad", "/api/lookup-opt-out",
+            }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
             if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
@@ -561,8 +704,10 @@ def create_server(
                 self._handle_refresh()
             elif path == "/api/profile":
                 self._handle_profile(body)
-            else:
+            elif path == "/api/draft-squad":
                 self._handle_draft_squad(body)
+            else:
+                self._handle_lookup_opt_out(body)
 
         def _handle_refresh(self):
             if not refresh_lock.acquire(blocking=False):
@@ -638,6 +783,32 @@ def create_server(
             except Exception as error:
                 print(f"Draft squad update failed: {error!r}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Draft squad update failed"})
+
+        def _handle_lookup_opt_out(self, body):
+            # Rate-limited tighter than /api/profile's own write cooldown (issue #62) -- this
+            # endpoint is the app's one PIN-guessing surface, so a source gets far fewer
+            # attempts per unit time here than an ordinary profile save allows.
+            if not lookup_opt_out_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many opt-out attempts. Try again shortly."})
+                return
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": _LOOKUP_OPT_OUT_VALIDATION_MESSAGE})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": _LOOKUP_OPT_OUT_VALIDATION_MESSAGE})
+                return
+            try:
+                result = lookup_opt_out_write_action(payload)
+                self._json(200, {"status": "ok", **result})
+            except LookupOptOutPinError as error:
+                self._json(403, {"status": "error", "message": str(error)})
+            except LookupOptOutValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+            except Exception as error:
+                print(f"Lookup opt-out update failed: {error!r}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Lookup opt-out update failed"})
 
         def log_message(self, message, *args):
             print(f"[{self.log_date_time_string()}] {message % args}")

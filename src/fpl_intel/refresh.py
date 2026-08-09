@@ -22,9 +22,11 @@ from .manager_data import collect_public_manager, fetch_manager_event_picks, sum
 from .model_performance import (
     archive_forecast,
     build_performance_report,
+    migrate_manager_picks,
     normalize_live_event,
     normalize_manager_picks,
 )
+from . import profiles
 from .recommendations import build_gw_recommendations
 from .transfer_decisions import build_draft_decisions, build_transfer_decisions
 from .relevance import enrich_transfers, summarize_clubs
@@ -33,6 +35,20 @@ from .transfers import canonical_club, normalize_transfer
 
 class RefreshAlreadyRunning(RuntimeError):
     """Another process currently owns the project refresh lock."""
+
+
+# Issue #64 (C1): every team with a saved #45 profile now gets its `manager_picks` collected on
+# the refresh cadence, not just one hardcoded team -- but capped per refresh run so duration stays
+# bounded regardless of how many teams have saved a profile (relevant to #28's finding that
+# `/api/refresh` has no time-based rate limit yet). Only teams that still have at least one
+# finished-gameweek pick missing count against the cap; teams already caught up cost nothing.
+# Uncapped teams simply get picked up again on the next refresh -- no persisted "resume point" is
+# needed since already-collected picks are skipped, so nothing is repeated.
+_MANAGER_PICKS_TEAM_CAP = 25
+
+
+def _profiles_db_path(root):
+    return Path(root) / "data" / "profiles.db"
 
 
 def _load_json(path):
@@ -161,6 +177,7 @@ def _refresh_project_unlocked(
     root = Path(root)
     profile = _load_json_or(root / "config" / "user-profile.json", {})
     timezone_name = profile.get("manager", {}).get("timezone") or "America/New_York"
+    config_team_id = profile.get("manager", {}).get("team_id")
     previous_state = _load_current_json(root, "dashboard-state.json", {})
     source_errors = dict(source_errors or {})
     if source_errors.get("transfers"):
@@ -180,6 +197,7 @@ def _refresh_project_unlocked(
         "model-performance.json",
         {"forecasts": [], "actual_events": {}},
     )
+    migrate_manager_picks(performance_store, config_team_id)
     previous_decision = previous_state.get("decision_center", {})
     previous_event = next(
         (
@@ -219,7 +237,29 @@ def _refresh_project_unlocked(
     actual_collection_errors = []
     provided_live = event_live_payloads or {}
     provided_manager_picks = manager_picks_payloads or {}
-    team_id = profile.get("manager", {}).get("team_id")
+    team_id = config_team_id
+    finished_event_ids = [
+        int(event["id"]) for event in bootstrap.get("events", []) if event.get("finished")
+    ]
+    # Read-only view for now -- deliberately not `setdefault`, so a refresh with no configured or
+    # saved team leaves `manager_picks` absent from the store entirely, same as before issue #64.
+    manager_picks_store = performance_store.get("manager_picks", {})
+    # Issue #64: manager_picks collection is no longer just config_team_id's job -- every team
+    # with a saved #45 profile gets the same season-long tracking, capped per run (see
+    # _MANAGER_PICKS_TEAM_CAP). config_team_id keeps its historical role too, folded in as "one
+    # more team ID that happens to have picks collected" rather than a special case.
+    saved_team_ids = profiles.list_team_ids(_profiles_db_path(root))
+    candidate_team_ids = list(dict.fromkeys(
+        ([config_team_id] if config_team_id else []) + list(saved_team_ids)
+    ))
+    teams_needing_picks = [
+        candidate_team_id for candidate_team_id in candidate_team_ids
+        if any(
+            str(event_id) not in manager_picks_store.get(str(candidate_team_id), {})
+            for event_id in finished_event_ids
+        )
+    ]
+    manager_picks_team_ids = teams_needing_picks[:_MANAGER_PICKS_TEAM_CAP]
     for event in bootstrap.get("events", []):
         if not event.get("finished"):
             continue
@@ -237,16 +277,25 @@ def _refresh_project_unlocked(
             if payload is not None:
                 performance_store["actual_events"][key] = normalize_live_event(payload)
                 _record_actual_collection_attempt(performance_store, event_id, generated_at)
-        if team_id and key not in performance_store.setdefault("manager_picks", {}):
-            picks_payload = provided_manager_picks.get(event_id) or provided_manager_picks.get(key)
+        for picks_team_id in manager_picks_team_ids:
+            team_key = str(picks_team_id)
+            team_picks = performance_store.setdefault("manager_picks", {}).setdefault(team_key, {})
+            if key in team_picks:
+                continue
+            team_provided = provided_manager_picks.get(picks_team_id) or provided_manager_picks.get(team_key) or {}
+            picks_payload = team_provided.get(event_id) if isinstance(team_provided, dict) else None
+            if picks_payload is None and isinstance(team_provided, dict):
+                picks_payload = team_provided.get(key)
             if picks_payload is None and bootstrap_payload is None:
                 try:
-                    picks_payload = fetch_manager_event_picks(team_id, event_id)
+                    picks_payload = fetch_manager_event_picks(picks_team_id, event_id)
                 except Exception:
-                    actual_collection_errors.append(f"GW{event_id}: manager picks collection failed")
+                    actual_collection_errors.append(
+                        f"GW{event_id}: manager picks collection failed for team {picks_team_id}"
+                    )
                     picks_payload = None
             if picks_payload is not None:
-                performance_store["manager_picks"][key] = normalize_manager_picks(picks_payload)
+                team_picks[key] = normalize_manager_picks(picks_payload)
     manager_raw = None
     manager_state = {"connection_status": "not_configured", "squad": []}
     if team_id:
