@@ -20,6 +20,7 @@ from .generation import resolve_artifact
 from .model_performance import build_team_model_performance
 from .rate_limit import CooldownLimiter
 from .refresh import RefreshAlreadyRunning, compute_manager_view
+from .transfer_decisions import validate_draft_squad
 
 
 _ALLOWED_RISK_PROFILES = {"conservative", "balanced", "aggressive"}
@@ -54,6 +55,7 @@ _DEFAULT_VISITOR_PROFILE = {
     "confirmed_free_transfers": None,
     "confirmed_free_transfers_event": None,
     "risk_profile": "balanced",
+    "draft_squad": None,
 }
 
 
@@ -132,6 +134,7 @@ def _default_team_view_action(root):
             team_id,
             confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
             confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
+            draft_squad_ids=saved["draft_squad"] if saved else None,
         )
 
     return action
@@ -173,6 +176,7 @@ def _default_visitor_profile_action(root):
             "confirmed_free_transfers": saved["confirmed_free_transfers"],
             "confirmed_free_transfers_event": saved["confirmed_free_transfers_event"],
             "risk_profile": saved["risk_profile"],
+            "draft_squad": saved["draft_squad"],
         }
 
     return action
@@ -286,6 +290,79 @@ def _default_profile_action(root, payload):
     )
 
     return cleaned
+
+
+class DraftSquadValidationError(Exception):
+    """Raised when a submitted draft-squad payload fails validation."""
+
+
+_DRAFT_SQUAD_SIZE = 15
+_DRAFT_SQUAD_VALIDATION_MESSAGE = "Invalid draft squad payload"
+
+
+def _validate_draft_squad_shape(payload):
+    """Validate the request shape of a /api/draft-squad payload -- not FPL legality.
+
+    Returns `(team_id, player_ids)`, where `player_ids` is either a 15-element list of ints
+    (a declared draft) or None (an explicit clear of a previously saved draft). FPL-specific
+    legality (formation quotas, club limit, budget) is checked separately by
+    `transfer_decisions.validate_draft_squad`, which needs the current bootstrap and is checked
+    by the caller -- this function only validates the shape a client could plausibly send.
+    """
+    if not isinstance(payload, dict) or not set(payload.keys()) <= {"team_id", "player_ids"}:
+        raise DraftSquadValidationError(_DRAFT_SQUAD_VALIDATION_MESSAGE)
+
+    team_id = payload.get("team_id")
+    if isinstance(team_id, bool):
+        raise DraftSquadValidationError(_DRAFT_SQUAD_VALIDATION_MESSAGE)
+    if isinstance(team_id, int):
+        team_id_value = team_id
+    elif isinstance(team_id, str) and team_id.isdigit():
+        team_id_value = int(team_id)
+    else:
+        raise DraftSquadValidationError(_DRAFT_SQUAD_VALIDATION_MESSAGE)
+    if not (1 <= team_id_value <= 99_999_999):
+        raise DraftSquadValidationError(_DRAFT_SQUAD_VALIDATION_MESSAGE)
+
+    player_ids = payload.get("player_ids")
+    if player_ids is None:
+        return team_id_value, None
+    if not isinstance(player_ids, list) or len(player_ids) != _DRAFT_SQUAD_SIZE:
+        raise DraftSquadValidationError(f"A draft squad needs exactly {_DRAFT_SQUAD_SIZE} players")
+    cleaned_ids = []
+    for value in player_ids:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise DraftSquadValidationError(_DRAFT_SQUAD_VALIDATION_MESSAGE)
+        cleaned_ids.append(value)
+    return team_id_value, cleaned_ids
+
+
+def _default_draft_squad_action(root, payload):
+    """Validate and persist a per-team draft-squad declaration to the SQLite store (issue #61).
+
+    Shape validation happens first (cheap, no I/O); FPL-legality validation
+    (`transfer_decisions.validate_draft_squad`) runs against the shared refresh's cached
+    bootstrap next, so a malformed or illegal draft is rejected with a clear reason before
+    anything is written.
+    """
+    team_id, player_ids = _validate_draft_squad_shape(payload)
+    if player_ids is not None:
+        bootstrap = json.loads(
+            resolve_artifact(root, "fpl-bootstrap-latest.json").read_text(encoding="utf-8")
+        )
+        try:
+            validate_draft_squad(bootstrap, player_ids)
+        except ValueError as error:
+            raise DraftSquadValidationError(str(error)) from error
+
+    profiles.save_draft_squad(
+        _profiles_db_path(root),
+        team_id=team_id,
+        draft_squad_ids=player_ids,
+        now=datetime.now(timezone.utc).isoformat(),
+    )
+
+    return {"team_id": team_id, "draft_squad": player_ids}
 
 
 class LookupOptOutValidationError(Exception):
@@ -429,6 +506,7 @@ def create_server(
     profile_action=None,
     team_view_action=None,
     profile_read_action=None,
+    draft_squad_action=None,
     lookup_opt_out_action=None,
     model_performance_action=None,
 ):
@@ -441,12 +519,17 @@ def create_server(
     profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
     lookup_action = team_view_action or _default_team_view_action(root)
     visitor_profile_action = profile_read_action or _default_visitor_profile_action(root)
+    draft_squad_write_action = draft_squad_action or (lambda payload: _default_draft_squad_action(root, payload))
     lookup_opt_out_write_action = lookup_opt_out_action or (
         lambda payload: _default_lookup_opt_out_action(root, payload)
     )
     performance_action = model_performance_action or _default_model_performance_action(root)
     lookup_limiter = CooldownLimiter(cooldown_seconds=_TEAM_LOOKUP_COOLDOWN_SECONDS)
     profile_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
+    # A separate limiter instance (not the shared profile one) so saving a profile and declaring
+    # a draft squad don't compete for the same cooldown window -- a manager plausibly does both
+    # back-to-back while setting up before Gameweek 1.
+    draft_squad_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
     lookup_opt_out_limiter = CooldownLimiter(cooldown_seconds=_LOOKUP_OPT_OUT_COOLDOWN_SECONDS)
     refresh_lock = threading.Lock()
 
@@ -596,7 +679,9 @@ def create_server(
                 self._json(403, {"status": "error", "message": "Untrusted Origin header"})
                 return
             path = self.path.split("?", 1)[0]
-            if path not in {"/api/refresh", "/api/profile", "/api/lookup-opt-out"}:
+            if path not in {
+                "/api/refresh", "/api/profile", "/api/draft-squad", "/api/lookup-opt-out",
+            }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
             if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
@@ -619,6 +704,8 @@ def create_server(
                 self._handle_refresh()
             elif path == "/api/profile":
                 self._handle_profile(body)
+            elif path == "/api/draft-squad":
+                self._handle_draft_squad(body)
             else:
                 self._handle_lookup_opt_out(body)
 
@@ -668,6 +755,34 @@ def create_server(
             except Exception as error:
                 print(f"Profile update failed: {error!r}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Profile update failed"})
+
+        def _handle_draft_squad(self, body):
+            # Same write-safety model as _handle_profile (issue #45's security model, tier 2):
+            # SQLite's own transaction handles concurrent-write safety, a per-source cooldown
+            # guards against automated abuse of the open write endpoint.
+            if not draft_squad_write_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many draft squad saves. Try again shortly."})
+                return
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": "Invalid draft squad payload"})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": "Invalid draft squad payload"})
+                return
+            try:
+                cleaned = draft_squad_write_action(payload)
+                self._json(
+                    200,
+                    {"status": "ok", **cleaned},
+                    extra_headers={"Set-Cookie": _team_cookie_header(cleaned["team_id"])},
+                )
+            except DraftSquadValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+            except Exception as error:
+                print(f"Draft squad update failed: {error!r}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Draft squad update failed"})
 
         def _handle_lookup_opt_out(self, body):
             # Rate-limited tighter than /api/profile's own write cooldown (issue #62) -- this

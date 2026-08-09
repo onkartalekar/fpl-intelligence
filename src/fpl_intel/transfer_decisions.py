@@ -122,6 +122,73 @@ def _public_squad(manager, projection_by_id):
     return squad
 
 
+def _draft_squad(draft_squad_ids, projection_by_id):
+    """Build the enriched squad rows for a self-declared draft (issue #61).
+
+    A draft-adapted `_public_squad`: a declared draft has no purchase history from FPL's API
+    (nothing has actually been bought), so both `purchase_price` and `selling_price` are set to
+    each player's *current* price -- there is no profit/loss to account for yet.
+    """
+    squad = []
+    for player_id in draft_squad_ids:
+        player = projection_by_id.get(player_id)
+        if not player:
+            continue
+        row = dict(player)
+        row["purchase_price"] = player["price"]
+        row["selling_price"] = player["price"]
+        squad.append(row)
+    return squad
+
+
+def validate_draft_squad(bootstrap, draft_squad_ids):
+    """Validate a self-declared draft squad's element IDs against real, current FPL data.
+
+    Raises ValueError with a user-facing message if the squad isn't a legal FPL squad (wrong
+    player count, duplicate or unknown players, formation/club-limit violation, or over budget)
+    -- the same rules a real FPL squad must satisfy. Deliberately cheap: reads raw bootstrap
+    elements directly rather than running full projections, since this only needs to check
+    legality, not model points (`build_draft_decisions` does that separately, only once the
+    squad is already known to be legal).
+    """
+    quotas = _quotas(bootstrap)
+    total = sum(quotas.values())
+    if not isinstance(draft_squad_ids, list) or len(draft_squad_ids) != total:
+        raise ValueError(f"A draft squad needs exactly {total} players")
+    if len(set(draft_squad_ids)) != total:
+        raise ValueError("A draft squad cannot include the same player twice")
+    elements_by_id = {
+        int(row["id"]): row for row in bootstrap.get("elements", []) if row.get("id") is not None
+    }
+    missing = [player_id for player_id in draft_squad_ids if player_id not in elements_by_id]
+    if missing:
+        raise ValueError("One or more selected players are not in the current player catalog")
+    rows = []
+    for player_id in draft_squad_ids:
+        element = elements_by_id[player_id]
+        position = _POSITION_CODES.get(int(element.get("element_type") or 0))
+        if position is None:
+            raise ValueError("One or more selected players have an unrecognized position")
+        rows.append({
+            "position_short": position,
+            "club": element.get("team"),
+            "price": _number(element.get("now_cost")) / 10,
+        })
+    positions = Counter(row["position_short"] for row in rows)
+    if any(positions.get(position, 0) != count for position, count in quotas.items()):
+        quota_text = ", ".join(f"{count} {position}" for position, count in quotas.items())
+        raise ValueError(f"A draft squad needs exactly {quota_text}")
+    settings = bootstrap.get("game_settings", {})
+    club_limit = int(settings.get("squad_team_limit") or 3)
+    clubs = Counter(row["club"] for row in rows)
+    if clubs and max(clubs.values()) > club_limit:
+        raise ValueError(f"No more than {club_limit} players from the same club are allowed")
+    budget = _number(settings.get("squad_total_spend"), 1000) / 10
+    spend = sum(row["price"] for row in rows)
+    if spend > budget + 1e-9:
+        raise ValueError(f"Draft squad costs £{spend:.1f}m, over the £{budget:.1f}m budget")
+
+
 def _move_record(out_player, in_player):
     return {
         "out": {"id": out_player["id"], "name": out_player["name"], "club": out_player["club"], "selling_price": out_player["selling_price"]},
@@ -794,6 +861,115 @@ def build_transfer_decisions(
             "chips_per_half": True,
         },
         "chip_inventory": inventory,
+        "default_profile": "balanced",
+        "profiles": profiles,
+    }
+
+
+def build_draft_decisions(
+    bootstrap, fixtures, draft_squad_ids, generated_at, horizon=5, recent_transfers=None,
+):
+    """Personalized feedback on a manager's self-declared preseason draft squad (issue #61).
+
+    Sibling to `build_transfer_decisions`, for the window before Gameweek 1's deadline where
+    FPL's public API has no real picks to personalize against for anyone -- a manager can
+    instead declare a draft squad through the dashboard's own UI and get feedback on it here.
+
+    Reuses the same `_candidate_moves`/`_best_double` single/double-transfer search
+    `build_transfer_decisions` uses for a real GW2+ entry, with free-transfer point costs
+    disabled: nothing has been "spent" yet preseason, so a visitor can freely reshuffle their
+    declared squad with no cost. `_scenario`'s point-cost math is `max(0, transfer_count -
+    free_transfers) * 4` -- passing a free-transfer count at least as large as the squad size
+    zeroes it out for every possible transfer count, without a second cost-accounting path.
+    """
+    event = _next_event_id(bootstrap)
+    try:
+        validate_draft_squad(bootstrap, draft_squad_ids)
+    except ValueError as error:
+        return {"status": "draft_squad_invalid", "event": event, "reason": str(error)}
+    quotas = _quotas(bootstrap)
+    settings = bootstrap.get("game_settings", {})
+    club_limit = int(settings.get("squad_team_limit") or 3)
+    budget = _number(settings.get("squad_total_spend"), 1000) / 10
+    projections = project_players(
+        bootstrap, fixtures, horizon=horizon, start_event=event,
+        recent_transfers=recent_transfers, as_of=generated_at,
+    )
+    projection_by_id = {row["id"]: row for row in projections}
+    squad = _draft_squad(draft_squad_ids, projection_by_id)
+    if len(squad) != len(draft_squad_ids):
+        return {
+            "status": "draft_squad_invalid",
+            "event": event,
+            "reason": "One or more drafted players could not be matched to the current player catalog.",
+        }
+    bank = round(budget - sum(row["price"] for row in squad), 1)
+    eligible = [row for row in projections if row["can_select"] and row["xp_5"] > 0]
+    # No free-transfer budget exists before a squad has ever been submitted -- every candidate
+    # move is reported with no point cost, so pass an unlimited free-transfer allowance into the
+    # existing scenario accounting rather than adding a second, cost-free code path.
+    unlimited_free_transfers = len(squad)
+    profiles = []
+    for profile in ("conservative", "balanced", "aggressive"):
+        roll_candidate = {"squad": squad, "cash": bank, "transfers": []}
+        singles = _candidate_moves(squad, eligible, bank, quotas, club_limit, profile)
+        if not singles:
+            return {"status": "scenario_unavailable", "event": event, "reason": "No legal single-transfer scenario could be constructed."}
+        double = _best_double(singles, eligible, quotas, club_limit, profile)
+        if double is None:
+            return {"status": "scenario_unavailable", "event": event, "reason": "No legal double-transfer scenario could be constructed."}
+        scenarios = [
+            _scenario("roll", roll_candidate, squad, profile, unlimited_free_transfers, unlimited_free_transfers),
+            _scenario("single_transfer", singles[0], squad, profile, unlimited_free_transfers, unlimited_free_transfers),
+            _scenario("double_transfer", double, squad, profile, unlimited_free_transfers, unlimited_free_transfers),
+        ]
+        recommendation = dict(max(scenarios, key=lambda row: row["net_gain_5gw"]))
+        if recommendation["action"] == "roll":
+            recommendation["reason"] = (
+                "No suggested swap projects more five-gameweek points than your declared squad as-is."
+            )
+        else:
+            recommendation["reason"] = (
+                f"{recommendation['action'].replace('_', ' ').capitalize()} projects the strongest five-gameweek "
+                "improvement over your declared squad, with no cost before Gameweek 1."
+            )
+        chip_recommendation = {
+            "action": "hold",
+            "chip": None,
+            "label": "Chips unavailable before Gameweek 1",
+            "marginal_value": 0.0,
+            "no_chip_projected_points": recommendation["projected_event_points_including_captain"],
+            "reason": "Chip decisions are evaluated for your real Gameweek 1 entry once the season starts.",
+            "alternatives": [],
+        }
+        profiles.append({
+            "id": profile,
+            **_PROFILE_DEFINITIONS[profile],
+            "recommendation": recommendation,
+            "scenarios": scenarios,
+            "chip_recommendation": chip_recommendation,
+        })
+    return {
+        "status": "active",
+        "event": event,
+        "generated_at": generated_at,
+        "draft": True,
+        "bank": bank,
+        "state_warning": (
+            "This is feedback on your self-declared draft squad, not FPL's official picks -- FPL "
+            "hides public picks until Gameweek 1's deadline passes. No transfer costs apply before "
+            "the season starts; reshuffle your draft as many times as you like."
+        ),
+        "official_rules": {
+            "source": _RULES_URL,
+            "reviewed_at": generated_at,
+            "free_transfer_per_gameweek": 1,
+            "maximum_free_transfers": int(settings.get("max_extra_free_transfers") or 4) + 1,
+            "extra_transfer_cost": 4,
+            "transfers_cap": int(settings.get("transfers_cap") or 20),
+            "chips_per_half": True,
+        },
+        "chip_inventory": [],
         "default_profile": "balanced",
         "profiles": profiles,
     }
