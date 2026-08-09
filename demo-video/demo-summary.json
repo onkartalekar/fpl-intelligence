@@ -1,17 +1,43 @@
 {
-  "conservative": {
-    "action": "double_transfer",
-    "edge": 0.76,
-    "ft": 2
+  "video": {
+    "file": "fpl-intelligence-demo.mp4",
+    "duration_seconds": 156.0,
+    "resolution": "1280x720",
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "narrated": true
   },
-  "balanced": {
-    "action": "double_transfer",
-    "edge": 0.81,
-    "ft": 2
-  },
-  "aggressive": {
-    "action": "double_transfer",
-    "edge": 0.63,
-    "ft": 2
+  "coverage": [
+    "Preseason overview and attention hierarchy",
+    "My Team public lookup and published squad",
+    "Preseason legal draft-squad builder",
+    "Local manager profile settings",
+    "Conservative, Balanced, and Aggressive strategy profiles",
+    "Personalized weekly transfer and chip decision",
+    "Five-gameweek planner and conditional branches",
+    "Post-decision XI, bench, and captaincy",
+    "Player Explorer search and filters",
+    "Fixture gameweek navigation and club filtering",
+    "First-party transfer evidence and inspector",
+    "Model Performance forecast accountability",
+    "ML minutes challenger running separately in shadow mode",
+    "Opt-in transfer-deadline reminder emails via GitHub Actions",
+    "Model Status sources, policy, and account boundary",
+    "Light and dark themes, accessibility, and manual refresh"
+  ],
+  "scenario": {
+    "free_transfers": 2,
+    "conservative": {
+      "action": "double_transfer",
+      "edge": 0.76
+    },
+    "balanced": {
+      "action": "double_transfer",
+      "edge": 0.81
+    },
+    "aggressive": {
+      "action": "double_transfer",
+      "edge": 0.63
+    }
   }
 }
