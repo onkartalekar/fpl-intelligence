@@ -231,6 +231,11 @@ __marimo__/
 # Per-user FPL profile (copy config/user-profile.example.json to create yours)
 config/user-profile.json
 
+# Per-team saved preferences (issue #45) -- SQLite, plus its WAL/SHM sidecar files
+data/profiles.db
+data/profiles.db-wal
+data/profiles.db-shm
+
 # Generated per-user dashboard state (run scripts/refresh_dashboard.py to create these)
 dashboard.html
 data/dashboard-state.json

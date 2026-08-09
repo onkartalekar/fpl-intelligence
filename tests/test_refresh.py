@@ -786,6 +786,78 @@ class ComputeManagerViewTests(unittest.TestCase):
 
         mock_collect.assert_called_once_with(42)
 
+    def test_applies_a_saved_confirmed_free_transfers_override_before_computing_the_decision(self):
+        """Issue #45: a per-team saved override, mirroring the config-file-driven equivalent."""
+        from tests.test_transfer_decisions import gw2_inputs
+
+        bootstrap, fixtures, manager = gw2_inputs()
+        raw_manager = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {
+                "active_chip": None,
+                "entry_history": {"event": 1, "bank": 0, "value": 1000},
+                "picks": [
+                    {
+                        "element": row["element_id"], "position": index + 1,
+                        "multiplier": 1 if index < 11 else 0,
+                        "is_captain": index == 0, "is_vice_captain": index == 1,
+                        "purchase_price": row["purchase_price"],
+                        "selling_price": row["selling_price"],
+                    }
+                    for index, row in enumerate(manager["squad"])
+                ],
+            },
+        }
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=raw_manager):
+            result = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=364759,
+                confirmed_free_transfers=3, confirmed_free_transfers_event=2,
+            )
+
+        self.assertEqual(result["weekly_decisions"]["free_transfers"], 3)
+        self.assertEqual(result["weekly_decisions"]["free_transfer_source"], "confirmed_local")
+
+    def test_confirmed_free_transfers_override_is_ignored_by_default(self):
+        """Omitting the override keeps today's estimate-from-public-history behavior."""
+        from tests.test_transfer_decisions import gw2_inputs
+
+        bootstrap, fixtures, manager = gw2_inputs()
+        raw_manager = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {
+                "active_chip": None,
+                "entry_history": {"event": 1, "bank": 0, "value": 1000},
+                "picks": [
+                    {
+                        "element": row["element_id"], "position": index + 1,
+                        "multiplier": 1 if index < 11 else 0,
+                        "is_captain": index == 0, "is_vice_captain": index == 1,
+                        "purchase_price": row["purchase_price"],
+                        "selling_price": row["selling_price"],
+                    }
+                    for index, row in enumerate(manager["squad"])
+                ],
+            },
+        }
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=raw_manager):
+            result = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=364759,
+            )
+
+        self.assertEqual(result["weekly_decisions"]["free_transfer_source"], "estimated_public_history")
+
 
 if __name__ == "__main__":
     unittest.main()

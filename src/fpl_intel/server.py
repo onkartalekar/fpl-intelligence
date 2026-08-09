@@ -1,9 +1,9 @@
 """Local-only HTTP service for the FPL dashboard and explicit refresh requests."""
 
 from datetime import datetime, timezone
+from http import cookies as http_cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import os
 from pathlib import Path
 import re
 import secrets
@@ -13,6 +13,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 import zoneinfo
 
+from . import profiles
 from .dashboard import render_dashboard
 from .generation import resolve_artifact
 from .rate_limit import CooldownLimiter
@@ -29,8 +30,28 @@ _ALLOWED_PROFILE_KEYS = {
 }
 _TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
 _PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
+_TEAM_ID_REQUIRED_MESSAGE = "A team ID is required to save settings"
 _TEAM_ID_RE = re.compile(r"^[0-9]{1,8}$")
 _TEAM_LOOKUP_COOLDOWN_SECONDS = 15
+_PROFILE_WRITE_COOLDOWN_SECONDS = 5
+_TEAM_COOKIE_NAME = "fpl_team_id"
+_TEAM_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 300  # ~300 days, comfortably spans a season
+_DEFAULT_VISITOR_PROFILE = {
+    "timezone": "America/New_York",
+    "confirmed_free_transfers": None,
+    "confirmed_free_transfers_event": None,
+    "risk_profile": "balanced",
+}
+
+
+def _coerce_team_id(raw):
+    """Validate a raw team-ID string (from a query param or cookie), or None if invalid."""
+    if raw is None or not _TEAM_ID_RE.match(raw):
+        return None
+    team_id = int(raw)
+    if not (1 <= team_id <= 99_999_999):
+        return None
+    return team_id
 
 
 def _parse_team_id(query_string):
@@ -43,13 +64,36 @@ def _parse_team_id(query_string):
     values = parse_qs(query_string).get("team_id")
     if not values:
         return None
-    raw = values[0]
-    if not _TEAM_ID_RE.match(raw):
+    return _coerce_team_id(values[0])
+
+
+def _parse_team_id_cookie(cookie_header):
+    """Extract a valid `fpl_team_id` cookie value, or None if absent/malformed."""
+    if not cookie_header:
         return None
-    team_id = int(raw)
-    if not (1 <= team_id <= 99_999_999):
+    parsed = http_cookies.SimpleCookie()
+    try:
+        parsed.load(cookie_header)
+    except http_cookies.CookieError:
         return None
-    return team_id
+    morsel = parsed.get(_TEAM_COOKIE_NAME)
+    if morsel is None:
+        return None
+    return _coerce_team_id(morsel.value)
+
+
+def _team_cookie_header(team_id):
+    """Build the Set-Cookie header value that remembers `team_id` for this browser.
+
+    Plain (unsigned) on purpose -- issue #45's security model treats this as convenience, not a
+    credential: a manager's FPL data is already public, so there's nothing this cookie needs to
+    keep secret, only something worth remembering across visits. `Secure` is safe to set even for
+    local http://127.0.0.1 testing -- browsers already treat loopback as a trustworthy origin.
+    """
+    return (
+        f"{_TEAM_COOKIE_NAME}={team_id}; Max-Age={_TEAM_COOKIE_MAX_AGE_SECONDS}; "
+        "Path=/; HttpOnly; Secure; SameSite=Lax"
+    )
 
 
 def _default_team_view_action(root):
@@ -65,6 +109,7 @@ def _default_team_view_action(root):
         transfers_artifact = json.loads(
             resolve_artifact(root, "official-transfers-latest.json").read_text(encoding="utf-8")
         )
+        saved = profiles.load_profile(_profiles_db_path(root), team_id)
         generated_at = datetime.now(timezone.utc).isoformat()
         return compute_manager_view(
             bootstrap,
@@ -72,7 +117,31 @@ def _default_team_view_action(root):
             transfers_artifact.get("transfers", []),
             generated_at,
             team_id,
+            confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
+            confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
         )
+
+    return action
+
+
+def _profiles_db_path(root):
+    return Path(root) / "data" / "profiles.db"
+
+
+def _default_visitor_profile_action(root):
+    """Build the default per-team saved-profile reader, for splicing into a served page."""
+
+    def action(team_id):
+        saved = profiles.load_profile(_profiles_db_path(root), team_id)
+        if saved is None:
+            return {"team_id": team_id, **_DEFAULT_VISITOR_PROFILE}
+        return {
+            "team_id": saved["team_id"],
+            "timezone": saved["timezone"],
+            "confirmed_free_transfers": saved["confirmed_free_transfers"],
+            "confirmed_free_transfers_event": saved["confirmed_free_transfers_event"],
+            "risk_profile": saved["risk_profile"],
+        }
 
     return action
 
@@ -162,38 +231,27 @@ def _validate_profile_payload(payload):
 
 
 def _default_profile_action(root, payload):
-    """Validate, merge, and atomically persist a profile update."""
+    """Validate and persist a per-team profile update to the SQLite store (issue #45).
+
+    Deliberately separate from `config/user-profile.json`, which keeps its own, narrower role
+    feeding `refresh.py`'s single-team forecast-accuracy history tracking (issue #64) -- this
+    action never reads or writes that file.
+    """
     cleaned = _validate_profile_payload(payload)
+    if cleaned["team_id"] is None:
+        # Unlike the old single-file model, there's no "profile" identity without a team ID to
+        # key storage on -- clearing a team is no longer a supported save, just don't save.
+        raise ProfileValidationError(_TEAM_ID_REQUIRED_MESSAGE)
 
-    profile_path = root / "config" / "user-profile.json"
-    if profile_path.exists():
-        try:
-            existing = json.loads(profile_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-    else:
-        existing = {"manager": {}, "experience": {}}
-
-    manager = existing.get("manager")
-    if not isinstance(manager, dict):
-        manager = {}
-    manager["team_id"] = cleaned["team_id"]
-    manager["timezone"] = cleaned["timezone"]
-    manager["risk_profile"] = cleaned["risk_profile"]
-    if cleaned["confirmed_free_transfers"] is None:
-        manager.pop("confirmed_free_transfers", None)
-        manager.pop("confirmed_free_transfers_event", None)
-    else:
-        manager["confirmed_free_transfers"] = cleaned["confirmed_free_transfers"]
-        manager["confirmed_free_transfers_event"] = cleaned["confirmed_free_transfers_event"]
-    existing["manager"] = manager
-
-    profile_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = profile_path.with_name(profile_path.name + ".tmp")
-    tmp_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp_path, profile_path)
+    profiles.save_profile(
+        _profiles_db_path(root),
+        team_id=cleaned["team_id"],
+        timezone=cleaned["timezone"],
+        risk_profile=cleaned["risk_profile"],
+        confirmed_free_transfers=cleaned["confirmed_free_transfers"],
+        confirmed_free_transfers_event=cleaned["confirmed_free_transfers_event"],
+        now=datetime.now(timezone.utc).isoformat(),
+    )
 
     return cleaned
 
@@ -256,6 +314,7 @@ def create_server(
     refresh_action=None,
     profile_action=None,
     team_view_action=None,
+    profile_read_action=None,
 ):
     """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
     root = Path(root).resolve()
@@ -265,18 +324,22 @@ def create_server(
     action = refresh_action or (lambda: _default_refresh_action(root))
     profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
     lookup_action = team_view_action or _default_team_view_action(root)
+    visitor_profile_action = profile_read_action or _default_visitor_profile_action(root)
     lookup_limiter = CooldownLimiter(cooldown_seconds=_TEAM_LOOKUP_COOLDOWN_SECONDS)
+    profile_write_limiter = CooldownLimiter(cooldown_seconds=_PROFILE_WRITE_COOLDOWN_SECONDS)
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "FPLDashboard/1.0"
 
-        def _json(self, status, payload):
+        def _json(self, status, payload, extra_headers=None):
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
@@ -301,7 +364,15 @@ def create_server(
             self.wfile.write(body)
 
         def _serve_dashboard(self, query_string):
-            team_id = _parse_team_id(query_string)
+            query_team_id = _parse_team_id(query_string)
+            # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
+            # someone else's team. A team_id from a saved cookie is "my own remembered team"
+            # (issue #45): same per-request compute path, but never flagged as a one-off lookup,
+            # since it's the visitor's own default view, not a look at someone else's team.
+            is_explicit_lookup = query_team_id is not None
+            team_id = query_team_id if query_team_id is not None else _parse_team_id_cookie(
+                self.headers.get("Cookie")
+            )
             if team_id is None:
                 dashboard = resolve_artifact(root, "dashboard.html")
                 if not dashboard.exists():
@@ -312,8 +383,7 @@ def create_server(
                 )
                 self._send_html(html)
                 return
-            # A team_id query param means an unauthenticated, no-signup lookup (issue #46):
-            # compute this one team's view at request time and splice it into a copy of the
+            # Compute this one team's view at request time and splice it into a copy of the
             # shared state, without touching the persisted dashboard-state.json/dashboard.html.
             if not lookup_limiter.allow(self.client_address[0]):
                 self._json(429, {"status": "error", "message": "Too many team lookups. Try again shortly."})
@@ -329,10 +399,21 @@ def create_server(
                 decision_center = dict(state.get("decision_center") or {})
                 decision_center["weekly_decisions"] = lookup_result["weekly_decisions"]
                 state["decision_center"] = decision_center
-                state["lookup"] = {"active": True, "team_id": team_id, "status": "ok"}
+                if is_explicit_lookup:
+                    state["lookup"] = {"active": True, "team_id": team_id, "status": "ok"}
+                visitor_profile = visitor_profile_action(team_id)
+                state["profile"] = visitor_profile
+                risk = visitor_profile.get("risk_profile")
+                if risk in _ALLOWED_RISK_PROFILES:
+                    if decision_center.get("profile_recommendations"):
+                        decision_center["default_profile"] = risk
+                    weekly = decision_center.get("weekly_decisions")
+                    if isinstance(weekly, dict) and weekly.get("profiles"):
+                        weekly["default_profile"] = risk
             except Exception as error:
                 print(f"Team lookup failed: {error!r}", file=sys.stderr)
-                state["lookup"] = {"active": True, "team_id": team_id, "status": "error"}
+                if is_explicit_lookup:
+                    state["lookup"] = {"active": True, "team_id": team_id, "status": "error"}
             html = render_dashboard(state).replace(
                 'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
             )
@@ -414,6 +495,16 @@ def create_server(
                 refresh_lock.release()
 
         def _handle_profile(self, body):
+            # No longer gated on refresh_lock (issue #45): a per-team profile save writes to its
+            # own SQLite store, unrelated to the shared refresh's own files -- blocking every
+            # visitor's save on whether an unrelated shared refresh happens to be running would
+            # directly undercut this issue's goal of letting every visitor independently save
+            # their own settings. SQLite's own transaction handles write safety instead; a
+            # per-source cooldown guards against automated abuse of the now-open write endpoint
+            # (issue #45's security model, tier 2).
+            if not profile_write_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many profile saves. Try again shortly."})
+                return
             try:
                 payload = json.loads(body.decode("utf-8")) if body else None
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -422,21 +513,18 @@ def create_server(
             if not isinstance(payload, dict):
                 self._json(400, {"status": "error", "message": "Invalid profile payload"})
                 return
-            if not refresh_lock.acquire(blocking=False):
-                self._json(409, {"status": "busy", "message": "A refresh is already running"})
-                return
             try:
                 cleaned = profile_write_action(payload)
-                self._json(200, {"status": "ok", "profile": cleaned})
+                self._json(
+                    200,
+                    {"status": "ok", "profile": cleaned},
+                    extra_headers={"Set-Cookie": _team_cookie_header(cleaned["team_id"])},
+                )
             except ProfileValidationError as error:
                 self._json(400, {"status": "error", "message": str(error)})
-            except (BlockingIOError, RefreshAlreadyRunning):
-                self._json(409, {"status": "busy", "message": "A refresh is already running"})
             except Exception as error:
                 print(f"Profile update failed: {error!r}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Profile update failed"})
-            finally:
-                refresh_lock.release()
 
         def log_message(self, message, *args):
             print(f"[{self.log_date_time_string()}] {message % args}")

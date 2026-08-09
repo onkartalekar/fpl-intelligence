@@ -388,7 +388,10 @@ def refresh_project(root, **kwargs):
         return _refresh_project_unlocked(root, **kwargs)
 
 
-def compute_manager_view(bootstrap, fixtures, transfers, generated_at, team_id, horizon=5):
+def compute_manager_view(
+    bootstrap, fixtures, transfers, generated_at, team_id, horizon=5,
+    confirmed_free_transfers=None, confirmed_free_transfers_event=None,
+):
     """Compute one team's manager summary and weekly decision, decoupled from the shared refresh.
 
     This is the per-team half split out of `_refresh_project_unlocked` for issue #46: it takes
@@ -399,10 +402,18 @@ def compute_manager_view(bootstrap, fixtures, transfers, generated_at, team_id, 
     consumes for the shared refresh (see `_refresh_project_unlocked`'s `raw_fixtures`), not the
     built fixture catalog.
 
-    A registered account's stored profile (issue #44/#45) is meant to become a second source
-    feeding this same function later -- this initial build only supports a request-supplied
-    `team_id`, and deliberately does not touch `_refresh_project_unlocked`'s own per-manager
-    block, which keeps its own more elaborate stale-fallback handling for the periodic refresh.
+    `confirmed_free_transfers`/`confirmed_free_transfers_event` are issue #45's per-team saved
+    override (FPL's public API doesn't always reflect a recently-used free transfer promptly) --
+    mirrors the same override `_refresh_project_unlocked` already applies from
+    `config/user-profile.json` for the single configured team, now available to any team with a
+    saved profile. Applied before `build_transfer_decisions` runs, since it changes the
+    computation itself, not just which already-computed result is shown by default.
+
+    A registered account's stored profile (issue #45) is a second source feeding this same
+    function, alongside a request-supplied `team_id` -- this deliberately does not touch
+    `_refresh_project_unlocked`'s own per-manager block, which keeps its own more elaborate
+    stale-fallback handling for the periodic refresh (see issue #64 for the follow-up question of
+    extending that separate, season-long tracking beyond one hardcoded team).
 
     Network/lookup failures (unknown team ID, the official FPL API being unavailable) are
     captured into a clean, non-raising result rather than propagated, since a bad request-supplied
@@ -412,6 +423,9 @@ def compute_manager_view(bootstrap, fixtures, transfers, generated_at, team_id, 
     try:
         manager_raw = collect_public_manager(team_id)
         manager_state = summarize_manager(manager_raw, bootstrap)
+        if confirmed_free_transfers is not None:
+            manager_state["confirmed_free_transfers"] = confirmed_free_transfers
+            manager_state["confirmed_free_transfers_event"] = confirmed_free_transfers_event
         weekly_decisions = build_transfer_decisions(
             bootstrap, fixtures, manager_state, generated_at=generated_at, horizon=horizon,
             recent_transfers=transfers,
