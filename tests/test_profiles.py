@@ -537,5 +537,94 @@ class ReminderStoreTests(unittest.TestCase):
         self.assertEqual(load_profile(self.db_path, 2)["reminder_pending_email"], "two@example.com")
 
 
+class SchemaMigrationTests(unittest.TestCase):
+    """Regression coverage for the 2026-08-09 incident: a `profiles.db` created by code older than
+    #61 kept running against every PR since, silently missing nine columns (`draft_squad` #61,
+    `opted_out`/`pin_hash` #62, `goal` #78, five `reminder_*` columns #79), until a live dashboard
+    server hit `OperationalError: no such column: draft_squad` on a real `/api/profile` write.
+
+    `CREATE TABLE IF NOT EXISTS` alone never catches this -- every other test in this file creates
+    a brand-new temp file, which gets the full current schema in one shot and never exercises the
+    "upgrade an existing older file" path. These tests build that older file by hand instead.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.directory.name) / "profiles.db"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _create_pre_61_schema(self):
+        """Recreate the exact 8-column schema #45 originally shipped, before #61/#62/#78/#79."""
+        import sqlite3
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """
+                CREATE TABLE profiles (
+                    team_id INTEGER PRIMARY KEY,
+                    timezone TEXT NOT NULL,
+                    risk_profile TEXT NOT NULL,
+                    confirmed_free_transfers INTEGER,
+                    confirmed_free_transfers_event INTEGER,
+                    email TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO profiles (team_id, timezone, risk_profile, email, created_at, "
+                "updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (364758, "America/New_York", "balanced", None, "2026-07-01T00:00:00Z",
+                 "2026-07-01T00:00:00Z"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def test_reading_a_pre_61_database_self_heals_and_preserves_existing_data(self):
+        self._create_pre_61_schema()
+
+        row = load_profile(self.db_path, 364758)
+
+        # The old row's own data survives the migration untouched.
+        self.assertEqual(row["timezone"], "America/New_York")
+        self.assertEqual(row["risk_profile"], "balanced")
+        # Every column added since #45's original schema reads back as a clean, unset default --
+        # not an error, not silently absent from the returned dict.
+        self.assertIsNone(row["draft_squad"])
+        self.assertIsNone(row["opted_out"])
+        self.assertIsNone(row["reminder_status"])
+        self.assertEqual(row["goal"], "top_50k")
+
+    def test_writing_to_a_pre_61_database_does_not_raise(self):
+        self._create_pre_61_schema()
+
+        # This exact call is what threw `OperationalError: no such column: draft_squad` in the
+        # live incident -- saving a draft squad against a database that predates that column.
+        row = save_draft_squad(self.db_path, 364758, [1, 2, 3], now="2026-08-09T00:00:00Z")
+
+        self.assertEqual(row["draft_squad"], [1, 2, 3])
+        # The pre-existing row's own data is untouched by the migration + write.
+        self.assertEqual(row["timezone"], "America/New_York")
+
+    def test_migration_is_idempotent_across_repeated_connections(self):
+        self._create_pre_61_schema()
+
+        load_profile(self.db_path, 364758)
+        load_profile(self.db_path, 364758)
+        row = save_profile(
+            self.db_path, team_id=364758, timezone="Europe/London", risk_profile="aggressive",
+            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
+            now="2026-08-09T00:00:00Z", goal="top_10k",
+        )
+
+        self.assertEqual(row["timezone"], "Europe/London")
+        self.assertEqual(row["goal"], "top_10k")
+
+
 if __name__ == "__main__":
     unittest.main()
