@@ -3,6 +3,8 @@ import unittest
 from fpl_intel.model_performance import (
     archive_forecast,
     build_performance_report,
+    build_team_model_performance,
+    migrate_manager_picks,
     normalize_live_event,
     normalize_manager_picks,
 )
@@ -223,7 +225,8 @@ class ModelPerformanceTests(unittest.TestCase):
         self._archive(store, self._decision_with_player_forecasts())
         store["actual_events"]["1"] = {"1": 6, "2": 0, "3": 0}
 
-        report = build_performance_report(store)
+        # player_performance is team-independent (issue #64) -- any team_id yields the same slice.
+        report = build_team_model_performance(store, team_id=999999)
         player_performance = report["player_performance"]
 
         self.assertEqual(player_performance["status"], "active")
@@ -263,13 +266,15 @@ class ModelPerformanceTests(unittest.TestCase):
         self._archive(store, self._decision_with_player_forecasts())
         store["actual_events"]["1"] = {"1": 6, "2": 3}
         store["manager_picks"] = {
-            "1": [
-                {"element_id": 1, "multiplier": 2, "is_captain": True},
-                {"element_id": 2, "multiplier": 1, "is_captain": False},
-            ]
+            "364759": {
+                "1": [
+                    {"element_id": 1, "multiplier": 2, "is_captain": True},
+                    {"element_id": 2, "multiplier": 1, "is_captain": False},
+                ]
+            }
         }
 
-        report = build_performance_report(store)
+        report = build_team_model_performance(store, team_id=364759)
         team_performance = report["team_performance"]
 
         self.assertEqual(team_performance["status"], "active")
@@ -279,12 +284,31 @@ class ModelPerformanceTests(unittest.TestCase):
         self.assertEqual(comparison["actual_points"], 2 * 6 + 1 * 3)
         self.assertEqual(comparison["error"], comparison["actual_points"] - comparison["modeled_points"])
 
+    def test_team_performance_reads_only_the_requested_teams_slice(self):
+        """manager_picks is keyed per team ID (issue #64) -- another team's picks must not leak in."""
+        store = {"forecasts": [], "actual_events": {}}
+        self._archive(store, self._decision_with_player_forecasts())
+        store["actual_events"]["1"] = {"1": 6, "2": 3}
+        store["manager_picks"] = {
+            "111": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]},
+            "222": {"1": [{"element_id": 2, "multiplier": 1, "is_captain": False}]},
+        }
+
+        report_111 = build_team_model_performance(store, team_id=111)
+        report_222 = build_team_model_performance(store, team_id=222)
+        report_unknown = build_team_model_performance(store, team_id=999)
+
+        self.assertEqual(report_111["team_performance"]["comparisons"][0]["modeled_points"], 5.0)
+        self.assertEqual(report_222["team_performance"]["comparisons"][0]["modeled_points"], 4.0)
+        self.assertEqual(report_unknown["team_performance"]["status"], "waiting_for_results")
+        self.assertEqual(report_unknown["team_performance"]["comparisons"], [])
+
     def test_team_performance_emits_no_comparison_without_frozen_forecast(self):
         store = {"forecasts": [], "actual_events": {}}
         store["actual_events"]["1"] = {"1": 6}
-        store["manager_picks"] = {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}
+        store["manager_picks"] = {"364759": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}}
 
-        report = build_performance_report(store)
+        report = build_team_model_performance(store, team_id=364759)
 
         self.assertEqual(report["team_performance"]["status"], "waiting_for_results")
         self.assertEqual(report["team_performance"]["comparisons"], [])
@@ -292,7 +316,7 @@ class ModelPerformanceTests(unittest.TestCase):
     def test_old_store_shape_yields_empty_player_and_team_performance(self):
         store = {"forecasts": [], "actual_events": {}}
 
-        report = build_performance_report(store)
+        report = build_team_model_performance(store, team_id=364759)
 
         self.assertEqual(report["player_performance"], {
             "status": "waiting_for_results", "events": [], "comparisons": [],
@@ -300,6 +324,54 @@ class ModelPerformanceTests(unittest.TestCase):
         })
         self.assertEqual(report["team_performance"]["status"], "waiting_for_results")
         self.assertEqual(report["team_performance"]["comparisons"], [])
+
+    def test_build_performance_report_no_longer_bakes_in_per_team_fields(self):
+        """Issue #64: team_performance/player_performance move to request time entirely."""
+        store = {"forecasts": [], "actual_events": {}}
+        self._archive(store, self._decision_with_player_forecasts())
+        store["actual_events"]["1"] = {"1": 6, "2": 3}
+        store["manager_picks"] = {"364759": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}
+
+        report = build_performance_report(store)
+
+        self.assertNotIn("team_performance", report)
+        self.assertNotIn("player_performance", report)
+
+    def test_migrate_manager_picks_reshapes_pre_issue_64_flat_store(self):
+        store = {
+            "forecasts": [], "actual_events": {},
+            "manager_picks": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]},
+        }
+
+        migrate_manager_picks(store, team_id=364759)
+
+        self.assertEqual(
+            store["manager_picks"],
+            {"364759": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}},
+        )
+
+    def test_migrate_manager_picks_is_idempotent_on_already_nested_store(self):
+        already_nested = {"364759": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}}
+        store = {"forecasts": [], "actual_events": {}, "manager_picks": dict(already_nested)}
+
+        migrate_manager_picks(store, team_id=364759)
+
+        self.assertEqual(store["manager_picks"], already_nested)
+
+    def test_migrate_manager_picks_leaves_flat_store_untouched_without_a_team_id(self):
+        flat = {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}
+        store = {"forecasts": [], "actual_events": {}, "manager_picks": dict(flat)}
+
+        migrate_manager_picks(store, team_id=None)
+
+        self.assertEqual(store["manager_picks"], flat)
+
+    def test_migrate_manager_picks_no_ops_on_empty_store(self):
+        store = {"forecasts": [], "actual_events": {}}
+
+        migrate_manager_picks(store, team_id=364759)
+
+        self.assertNotIn("manager_picks", store)
 
 
 if __name__ == "__main__":
