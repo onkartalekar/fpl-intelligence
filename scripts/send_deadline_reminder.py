@@ -11,6 +11,19 @@ pattern in `src/fpl_intel/news_signals.py`:
 - `FPL_INTEL_REMINDER_TEAMS`: a JSON list of recipients, one object per team, e.g.
   `[{"team_id": 123456, "email": "manager@example.com", "lead_hours": 3}]`. `lead_hours` is
   optional and defaults to 3.
+- `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80): optional, unset by default -- explicit opt-in,
+  matching the rest of this module's env-var-driven config (nothing here is ever auto-detected
+  from a file's mere presence). When set, adds recipients from `profiles.db`'s self-serve opt-in
+  data (issue #79): every team with `reminder_status == 'enabled'` and a confirmed `email`, using
+  each row's own `reminder_lead_hours`. Set it to a truthy sentinel ("1"/"true"/"yes",
+  case-insensitive) to use the default location `<root>/data/profiles.db`, or to an explicit path
+  to point elsewhere (e.g. in a test). Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`: when
+  the same team_id appears in both sources, the `FPL_INTEL_REMINDER_TEAMS` entry wins -- an
+  operator explicitly hand-configuring the secret for a team is a stronger, more deliberate signal
+  than an opportunistic profiles.db read, so it should not be silently overridden by one. Neither
+  source is required on its own, but leaving both unset/empty still fails loudly with a
+  `ConfigError`, exactly as an unset `FPL_INTEL_REMINDER_TEAMS` always has -- this script never
+  silently does nothing because nothing at all was configured.
 - `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD`:
   SMTP credentials (e.g. Gmail's `smtp.gmail.com:587` with an app password). Not required when
   `--dry-run` is passed.
@@ -41,6 +54,8 @@ from fpl_intel.refresh import compute_manager_view
 DEFAULT_LEAD_HOURS = 3
 
 REMINDER_TEAMS_ENV_VAR = "FPL_INTEL_REMINDER_TEAMS"
+REMINDER_PROFILES_DB_ENV_VAR = "FPL_INTEL_REMINDER_PROFILES_DB"
+_PROFILES_DB_TRUTHY_SENTINELS = {"1", "true", "yes"}
 SMTP_HOST_ENV_VAR = "FPL_INTEL_SMTP_HOST"
 SMTP_PORT_ENV_VAR = "FPL_INTEL_SMTP_PORT"
 SMTP_USER_ENV_VAR = "FPL_INTEL_SMTP_USER"
@@ -86,6 +101,88 @@ def parse_reminder_teams(raw_value):
             raise ConfigError(f"{REMINDER_TEAMS_ENV_VAR}[{index}].lead_hours must be a positive integer.")
         teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
     return teams
+
+
+def resolve_profiles_db_path(raw_value, root=ROOT):
+    """Resolve `FPL_INTEL_REMINDER_PROFILES_DB` to a concrete `profiles.db` path, or `None`.
+
+    `None` (unset or blank) means the profiles.db source is disabled -- explicit opt-in only, no
+    auto-detection of the file's presence. A truthy sentinel ("1"/"true"/"yes", case-insensitive)
+    resolves to the default location `<root>/data/profiles.db`; any other non-empty value is
+    treated as an explicit path to the database file (handy for tests, or a non-default layout).
+    """
+    if raw_value is None or not raw_value.strip():
+        return None
+    value = raw_value.strip()
+    if value.lower() in _PROFILES_DB_TRUTHY_SENTINELS:
+        return Path(root) / "data" / "profiles.db"
+    return Path(value)
+
+
+def load_teams_from_profiles_db(db_path):
+    """Build reminder-team entries from `profiles.db`'s self-serve opt-in data (issues #79/#80).
+
+    Yields one entry per team with a confirmed, *live* opt-in: `reminder_status == 'enabled'` and
+    a non-empty `email`. Rows that are `'pending'` (confirmation email sent but link not yet
+    clicked), `'declined'`, or `NULL` (never decided) are excluded -- only `confirm_reminder`
+    promotes a row to `'enabled'`, and it always copies the confirmed address into `email` at the
+    same time, so `reminder_status == 'enabled'` and a present `email` should always travel
+    together. `reminder_lead_hours` is always set alongside `reminder_status='enabled'` by #79's
+    write path (`set_reminder_pending` requires it as an argument, and `confirm_reminder` never
+    touches it), so the `DEFAULT_LEAD_HOURS` fallback below is defensive, not expected to trigger
+    in practice.
+    """
+    teams = []
+    for team_id in profiles.list_team_ids(db_path):
+        profile = profiles.load_profile(db_path, team_id)
+        if profile is None or profile.get("reminder_status") != "enabled":
+            continue
+        email = profile.get("email")
+        if not email:
+            continue
+        lead_hours = profile.get("reminder_lead_hours") or DEFAULT_LEAD_HOURS
+        teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
+    return teams
+
+
+def collect_teams(reminder_teams_raw, profiles_db_raw, root=ROOT):
+    """Build the final `teams` list `run()` operates on (issue #80).
+
+    `FPL_INTEL_REMINDER_TEAMS` and `FPL_INTEL_REMINDER_PROFILES_DB` are each independently
+    optional; either alone is sufficient, and both together are unioned by `team_id`.
+
+    When `FPL_INTEL_REMINDER_PROFILES_DB` is unset/blank, this is byte-identical to today's
+    behavior: it calls `parse_reminder_teams(reminder_teams_raw)` directly and returns (or raises)
+    exactly what that always has, with the profiles.db path never even touched.
+
+    When it is set, `FPL_INTEL_REMINDER_TEAMS` (if also set and non-blank) is parsed the same way,
+    then merged with `load_teams_from_profiles_db`'s rows. On a `team_id` collision, the
+    `FPL_INTEL_REMINDER_TEAMS` entry wins -- an operator explicitly hand-configuring the secret for
+    a team is a stronger, more deliberate signal than an opportunistic profiles.db read, so a
+    manually pinned entry is never silently overridden by one. If the union is still empty (both
+    sources unset/empty, or profiles.db configured but matched zero `'enabled'` rows and the env
+    var is also unset/empty), this raises `ConfigError` -- nothing configured must fail loudly, not
+    silently do nothing.
+    """
+    profiles_db_path = resolve_profiles_db_path(profiles_db_raw, root)
+    if profiles_db_path is None:
+        return parse_reminder_teams(reminder_teams_raw)
+
+    secret_teams = []
+    if reminder_teams_raw is not None and reminder_teams_raw.strip():
+        secret_teams = parse_reminder_teams(reminder_teams_raw)
+
+    db_teams = load_teams_from_profiles_db(profiles_db_path)
+    secret_team_ids = {team["team_id"] for team in secret_teams}
+    merged = secret_teams + [team for team in db_teams if team["team_id"] not in secret_team_ids]
+
+    if not merged:
+        raise ConfigError(
+            f"No reminder recipients configured: {REMINDER_TEAMS_ENV_VAR} is not set or empty, "
+            f"and {REMINDER_PROFILES_DB_ENV_VAR} is set but matched no team with "
+            "reminder_status='enabled' in profiles.db."
+        )
+    return merged
 
 
 def parse_smtp_config():
@@ -401,7 +498,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        teams = parse_reminder_teams(os.environ.get(REMINDER_TEAMS_ENV_VAR))
+        teams = collect_teams(
+            os.environ.get(REMINDER_TEAMS_ENV_VAR),
+            os.environ.get(REMINDER_PROFILES_DB_ENV_VAR),
+        )
     except ConfigError as error:
         print(f"Configuration error: {error}", file=sys.stderr)
         return 1

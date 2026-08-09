@@ -4,9 +4,11 @@ import io
 import json
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
+from fpl_intel import profiles
 from fpl_intel.refresh import compute_manager_view
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 from tests.test_transfer_decisions import gw2_inputs
@@ -440,6 +442,132 @@ class RunLoopTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_send.assert_not_called()
         self.assertIn("manager@example.com", captured.getvalue())
+
+
+def _enable_reminder(db_path, team_id, email, lead_hours, now):
+    """Drive a team to a genuine `reminder_status='enabled'` row via #79's real write path
+    (`set_reminder_pending` then `confirm_reminder`), rather than hand-writing SQL that bypasses
+    it -- exercises the real schema and the real column semantics `load_teams_from_profiles_db`
+    depends on."""
+    profiles.set_reminder_pending(
+        db_path, team_id, pending_email=email, lead_hours=lead_hours,
+        token_hash="deadbeef", expires_at="2099-01-01T00:00:00Z", now=now,
+    )
+    result = profiles.confirm_reminder(db_path, team_id, now)
+    assert result is not None, "confirm_reminder unexpectedly found nothing pending"
+    return result
+
+
+class LoadTeamsFromProfilesDbTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.db_path = Path(self._tmpdir.name) / "profiles.db"
+        self.now = "2026-08-09T12:00:00Z"
+
+    def test_filters_to_enabled_rows_only(self):
+        # Never decided: a plain profile save never touches reminder_status, so it stays NULL.
+        profiles.save_profile(
+            self.db_path, 100, "America/New_York", "balanced", None, None, self.now, "top_50k",
+        )
+        # Pending: confirmation email sent, link not yet clicked.
+        profiles.set_reminder_pending(
+            self.db_path, 200, pending_email="pending@example.com", lead_hours=3,
+            token_hash="hash", expires_at="2099-01-01T00:00:00Z", now=self.now,
+        )
+        # Declined: explicit opt-out, never enabled.
+        profiles.set_reminder_decision(self.db_path, 400, "declined", self.now)
+        # Enabled: the only row that should surface.
+        _enable_reminder(self.db_path, 300, "enabled@example.com", 6, self.now)
+
+        teams = sdr.load_teams_from_profiles_db(self.db_path)
+
+        self.assertEqual(teams, [{"team_id": 300, "email": "enabled@example.com", "lead_hours": 6}])
+
+    def test_reads_email_and_lead_hours_from_the_confirmed_row(self):
+        _enable_reminder(self.db_path, 42, "manager@example.com", 12, self.now)
+
+        teams = sdr.load_teams_from_profiles_db(self.db_path)
+
+        self.assertEqual(teams, [{"team_id": 42, "email": "manager@example.com", "lead_hours": 12}])
+
+    def test_no_profiles_at_all_yields_an_empty_list(self):
+        self.assertEqual(sdr.load_teams_from_profiles_db(self.db_path), [])
+
+
+class ResolveProfilesDbPathTests(unittest.TestCase):
+    def test_unset_or_blank_is_disabled(self):
+        self.assertIsNone(sdr.resolve_profiles_db_path(None, root=Path("/whatever")))
+        self.assertIsNone(sdr.resolve_profiles_db_path("   ", root=Path("/whatever")))
+
+    def test_truthy_sentinel_resolves_to_the_default_location(self):
+        root = Path("/repo/root")
+        for sentinel in ("1", "true", "True", "YES"):
+            self.assertEqual(
+                sdr.resolve_profiles_db_path(sentinel, root=root), root / "data" / "profiles.db",
+            )
+
+    def test_explicit_path_is_used_verbatim(self):
+        self.assertEqual(
+            sdr.resolve_profiles_db_path("/custom/path/profiles.db", root=Path("/repo/root")),
+            Path("/custom/path/profiles.db"),
+        )
+
+
+class CollectTeamsTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.db_path = Path(self._tmpdir.name) / "profiles.db"
+        self.now = "2026-08-09T12:00:00Z"
+
+    def test_profiles_db_unset_is_byte_identical_to_todays_env_var_only_behavior(self):
+        raw = json.dumps([{"team_id": 1, "email": "a@example.com", "lead_hours": 3}])
+
+        via_collect = sdr.collect_teams(raw, None)
+        via_parse = sdr.parse_reminder_teams(raw)
+
+        self.assertEqual(via_collect, via_parse)
+
+    def test_profiles_db_unset_and_env_var_unset_raises_same_config_error_as_before(self):
+        with self.assertRaises(sdr.ConfigError):
+            sdr.collect_teams(None, None)
+
+    def test_only_profiles_db_configured_env_var_unset(self):
+        _enable_reminder(self.db_path, 555, "solo@example.com", 3, self.now)
+
+        teams = sdr.collect_teams(None, str(self.db_path))
+
+        self.assertEqual(teams, [{"team_id": 555, "email": "solo@example.com", "lead_hours": 3}])
+
+    def test_union_of_both_sources_with_explicit_secret_entry_winning_on_collision(self):
+        _enable_reminder(self.db_path, 300, "from-db@example.com", 6, self.now)
+        _enable_reminder(self.db_path, 500, "db-only@example.com", 9, self.now)
+        raw = json.dumps([
+            {"team_id": 300, "email": "from-secret@example.com", "lead_hours": 1},
+            {"team_id": 600, "email": "secret-only@example.com", "lead_hours": 2},
+        ])
+
+        teams = sdr.collect_teams(raw, str(self.db_path))
+
+        by_team_id = {team["team_id"]: team for team in teams}
+        self.assertEqual(len(teams), 3)
+        # Collision on team_id 300: the explicit secret entry wins, not the DB row.
+        self.assertEqual(by_team_id[300], {"team_id": 300, "email": "from-secret@example.com", "lead_hours": 1})
+        # Present only in the secret.
+        self.assertEqual(by_team_id[600], {"team_id": 600, "email": "secret-only@example.com", "lead_hours": 2})
+        # Present only in profiles.db.
+        self.assertEqual(by_team_id[500], {"team_id": 500, "email": "db-only@example.com", "lead_hours": 9})
+
+    def test_profiles_db_configured_but_empty_and_env_var_unset_raises(self):
+        # DB exists but has no 'enabled' rows at all.
+        with self.assertRaises(sdr.ConfigError):
+            sdr.collect_teams(None, str(self.db_path))
+
+    def test_malformed_env_var_still_raises_even_with_profiles_db_configured(self):
+        _enable_reminder(self.db_path, 1, "a@example.com", 3, self.now)
+        with self.assertRaises(sdr.ConfigError):
+            sdr.collect_teams("{not json", str(self.db_path))
 
 
 class MainCliTests(unittest.TestCase):
