@@ -159,6 +159,16 @@ printed before/after backtest comparison first. Full history of what was
 tried, adopted, and rejected (including two deliberately-built-and-not-
 adopted models) is in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
+## Dependencies
+
+The dashboard, refresh pipeline, and tests are stdlib-only. The single exception is `numpy`,
+needed only by `scripts/fit_ml_minutes_weights.py`, which fits the ridge-regression weights
+for the ML minutes shadow challenger (issue #65, see [MODEL.md](MODEL.md)) offline:
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Tests
 
 ```bash

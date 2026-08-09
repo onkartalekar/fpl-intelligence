@@ -1,0 +1,10 @@
+# FPL Intelligence has been stdlib-only since Phase 0 (see IMPLEMENTATION_PLAN.md's
+# "Dependencies" rule). numpy is a single, deliberate, narrow exception: issue #65's
+# ridge-regression minutes/start-probability shadow challenger uses numpy's closed-form
+# ridge solve ((X^T X + lambda I)^-1 X^T y) in the offline weight-fitting script
+# (scripts/fit_ml_minutes_weights.py) rather than reimplementing linear-algebra primitives
+# by hand. The fitted weights are checked into config/ml-minutes-weights.json; the live
+# module that applies them at refresh time (src/fpl_intel/ml_minutes.py) is a plain
+# weighted sum and does not import numpy itself. See MODEL.md and
+# plans/issue-65-ml-shadow-model.md for the full rationale.
+numpy>=2.0,<3.0

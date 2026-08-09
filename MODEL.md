@@ -8,11 +8,17 @@ negative results below), see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 For the behavioral contract the model must satisfy, see
 [SPECIFICATION.md](SPECIFICATION.md).
 
-No machine learning, no foundation model, no betting odds. Every number a
-projection is built from is either an official FPL field or a constant
-fitted from historical results by `scripts/fit_coefficients.py`, and every
-projection can be decomposed back into named components in the dashboard's
-player inspector.
+No machine learning, no foundation model, no betting odds *in the live projection
+that drives recommendations*. Every number a projection is built from is either an
+official FPL field or a constant fitted from historical results by
+`scripts/fit_coefficients.py`, and every projection can be decomposed back into named
+components in the dashboard's player inspector. The one deliberate, narrow exception
+(issue #65): a ridge-regression ML minutes/start-probability model runs in **shadow
+mode** every refresh (`src/fpl_intel/ml_minutes.py`) -- computed and logged under its
+own `model_version`, scored the same way as the champion, but never feeding
+`project_players()` or any dashboard-visible recommendation. See
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)'s issue #65 entry and
+`plans/issue-65-ml-shadow-model.md` for the backtest evidence and shadow design.
 
 **Terms used throughout:** `GW` = gameweek; `GKP`/`DEF`/`MID`/`FWD` =
 goalkeeper/defender/midfielder/forward; `XI` = starting eleven; `xG`/`xA`
@@ -125,6 +131,31 @@ Both disabled features are visible in the API/dashboard as
 `uses_team_strength` / `uses_recency_minutes` flags on each player (always
 `false` today), and are called out explicitly in the dashboard's "Model
 basis and risks" limitations list.
+
+### Shadow only, not disabled: ML minutes challenger (issue #65)
+
+A third expected-minutes implementation, `src/fpl_intel/ml_minutes.py`, exists alongside the two
+above but occupies a different status from either: not the live estimate, and not a disabled,
+inert branch like Phase 1/Phase 4 -- a **running, scored challenger**. A ridge-regression model
+(fitted weights checked into `config/ml-minutes-weights.json`, refit offline by
+`scripts/fit_ml_minutes_weights.py`, same "computed once, reviewed in" precedent as
+`fit_coefficients.py`) predicting expected minutes from the same signals Phase 4 targeted --
+season-long start share/minutes-per-game, a 3-game recency window, and the gap between them --
+but with learned weights instead of one hand-picked decay speed. Unlike Phase 1/Phase 4, this one
+beat the champion in a 4-season leave-one-season-out backtest *and* in a full points-scoring
+pipeline check (not just isolated minutes MAE) -- see `plans/issue-65-ml-shadow-model.md`.
+
+It still never feeds a live recommendation. `refresh.py` computes a separate forecast every
+refresh via `ml_minutes.build_shadow_forecast` (reusing `project_players()`'s
+`expected_minutes_override` parameter, default `None`, so nothing changes for the champion path),
+archived under its own `model_version` (`archive_shadow_forecast`) and scored the same way as the
+champion but in a fully separate report key (`model_performance.py`'s
+`build_shadow_performance_report`/`shadow_models`) -- visible in the dashboard's "Forecast
+accountability" tab under "Experimental models in shadow", never blended into the champion's own
+numbers. The plan is to observe a full 2026-27 season of live comparisons before any promotion
+decision, which -- unlike a backtest replay of settled history -- can exercise real-time failure
+modes (breaking news, brand-new signings with no training rows) this candidate is specifically
+meant to react to.
 
 ## GW1-only: official `ep_next` blend
 

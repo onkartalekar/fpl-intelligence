@@ -19,8 +19,10 @@ from .fpl_data import (
 )
 from .generation import publish_generation, resolve_artifact
 from .manager_data import collect_public_manager, fetch_manager_event_picks, summarize_manager
+from . import ml_minutes
 from .model_performance import (
     archive_forecast,
+    archive_shadow_forecast,
     build_performance_report,
     migrate_manager_picks,
     normalize_live_event,
@@ -368,6 +370,28 @@ def _refresh_project_unlocked(
     )
     if current_event and not current_event.get("started") and not current_event.get("finished"):
         archive_forecast(performance_store, decision_center, current_event.get("deadline_time"))
+        # Issue #65: compute and log the ML minutes shadow challenger's own forecast for this
+        # same origin event, additively -- never read by decision_center/build_gw_recommendations
+        # above, so it cannot change the champion's own recommendation. Failure here must not
+        # take down a refresh that otherwise succeeded; it only means shadow tracking misses one
+        # event, the same tolerance already given to manager-picks/actual-event collection above.
+        if decision_center.get("status") == "active_preliminary":
+            try:
+                shadow_forecast = ml_minutes.build_shadow_forecast(
+                    bootstrap, raw_fixtures, generated_at,
+                    recent_transfers=transfers, horizon=5, start_event=decision_center.get("event"),
+                )
+            except Exception as error:
+                print(f"Shadow model computation failed: {error!r}", file=sys.stderr)
+                shadow_forecast = None
+            if shadow_forecast:
+                archive_shadow_forecast(
+                    performance_store,
+                    shadow_forecast["model_version"],
+                    shadow_forecast["event"],
+                    generated_at,
+                    shadow_forecast["player_forecasts"],
+                )
     model_performance = build_performance_report(performance_store)
     model_performance["collection_errors"] = actual_collection_errors
     model_performance["collection_health"] = performance_store.get("actual_event_collection", {})
