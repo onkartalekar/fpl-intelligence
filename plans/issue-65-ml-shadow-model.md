@@ -97,6 +97,43 @@ against a 0-90 scale) is on 3-game average minutes when started -- i.e.
 totals once a model is allowed to weigh it properly, which is the exact
 mechanism Phase 4 reached for and got the execution of wrong.
 
+**Full-pipeline check -- does the isolated minutes win survive being wired
+through actual scoring?** Isolated minutes accuracy is not this project's
+real adoption bar, and there is a direct precedent in this codebase for
+the two diverging: Phase 4's own postmortem found its minutes estimate
+"might actually be closer to true future minutes than the old model's"
+in isolation, yet still made full points MAE ~35% worse once wired
+through scoring -- "the damage likely concentrates in how that estimate
+propagates through scoring, not in the minutes estimate itself." Rather
+than assume the isolated win above implies a points-MAE win, the same
+ridge weights (fit on 2022-23/2023-24/2024-25, matching
+`run_backtest.py`'s own split) were wired into `project_players()` by
+monkeypatching `recommendations._expected_minutes` for one backtest run
+against the held-out 2025-26 season
+(`scripts/experiment_minutes_ml_full_pipeline_check.py`), and compared
+against an unpatched run of the same season -- everything else in the
+pipeline (opponent strength, component scoring, bonus/residual,
+uncertainty bands) identical on both sides.
+
+| | Champion (live) | Candidate #1 wired in | Delta |
+|---|---|---|---|
+| Overall points MAE (all horizons) | 2.41 | 2.23 | -0.18 |
+| horizon=1 MAE | 1.07 | 0.98 | -0.09 |
+| horizon=3 MAE | 2.52 | 2.31 | -0.21 |
+| horizon=5 MAE | 3.79 | 3.55 | -0.24 |
+| bias | 0.05 | 0.23 | +0.18 |
+| range_coverage | 0.85 | 0.84 | -0.01 |
+
+**The win survives, and grows with horizon** -- exactly the shape you'd
+expect if better minutes estimation compounds over a longer projection
+window, and the opposite of what Phase 4 showed. This clears the
+project's actual model-change bar (full points MAE beating the
+champion's own backtest, per `run_backtest.py`'s methodology), not just
+the isolated minutes-only proxy. Bias shifts slightly positive (+0.18)
+and range coverage drops marginally (0.85 -> 0.84) -- both worth
+watching in shadow, neither large enough to offset an 8% MAE
+improvement.
+
 **Known caveats, not yet resolved:**
 - ~1.4% of (element, gameweek) rows in the historical dataset are
   duplicated (double-gameweek fixtures recorded as two rows under one
@@ -176,8 +213,21 @@ folding a half-built version into this one.
 
 ## Recommendation
 
-1. **Build candidate #1's shadow-mode pipeline.** Evidence is strong
-   and consistent across all four held-out seasons. Concretely:
+1. **Build candidate #1's shadow-mode pipeline -- not a direct
+   replacement of the live model.** Evidence is strong and consistent
+   across all four held-out seasons, and now includes a full-pipeline
+   points-MAE win (not just isolated minutes MAE), clearing this
+   project's actual model-change bar in a way Phase 4 never did.
+   That's enough to build the shadow infrastructure -- it is not
+   enough, on its own, to swap the live model, because backtesting
+   (however thorough) replays settled history and cannot exercise the
+   live data feed's real-time failure modes: breaking news and
+   press-conference timing, brand-new signings/promoted-team players
+   with zero training rows, missed or late API updates. Those are
+   exactly the conditions this candidate is *for* (reacting fast to
+   rotation risk), so they're also where it's most exposed to
+   behaving differently live than in a backtest. A season of shadow
+   observation is what closes that specific, remaining gap. Concretely:
    - Extend `model_performance.py`'s `build_performance_report` (and
      the `player_forecasts` freeze in `archive_forecast`, currently
      gated on `is_champion`) to track and score every non-champion
