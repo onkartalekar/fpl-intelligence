@@ -10,10 +10,15 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fpl_intel.profiles import load_profile, set_lookup_opt_out
+from fpl_intel.profiles import load_profile, save_profile, set_lookup_opt_out
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import RefreshAlreadyRunning, project_refresh_lock
-from fpl_intel.server import _default_refresh_action, build_refresh_result, create_server
+from fpl_intel.server import (
+    _default_refresh_action,
+    _default_visitor_profile_action,
+    build_refresh_result,
+    create_server,
+)
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 
 
@@ -754,6 +759,7 @@ class ProfileEndpointTests(unittest.TestCase):
         "team_id": 364759,
         "timezone": "America/New_York",
         "risk_profile": "balanced",
+        "goal": "top_50k",
         "confirmed_free_transfers": None,
         "confirmed_free_transfers_event": None,
     }
@@ -841,10 +847,12 @@ class ProfileEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["profile"]["goal"], "top_50k")
         saved = load_profile(self.db_path, 364759)
         self.assertIsNotNone(saved)
         self.assertEqual(saved["timezone"], "America/New_York")
         self.assertEqual(saved["risk_profile"], "balanced")
+        self.assertEqual(saved["goal"], "top_50k")
         set_cookie = response.headers.get("Set-Cookie")
         self.assertIn("fpl_team_id=364759", set_cookie)
         self.assertIn("HttpOnly", set_cookie)
@@ -876,6 +884,31 @@ class ProfileEndpointTests(unittest.TestCase):
 
         saved = load_profile(self.db_path, 364759)
         self.assertEqual(saved["risk_profile"], "aggressive")
+
+    def test_saving_again_updates_goal_in_place(self):
+        second_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        thread = threading.Thread(target=second_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            urlopen(
+                self._post_profile(self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}),
+                timeout=3,
+            )
+            urlopen(
+                self._post_profile(
+                    {**self.VALID_PAYLOAD, "goal": "top_10k"},
+                    headers={"X-Refresh-Token": "test-token"},
+                    base_url=f"http://127.0.0.1:{second_server.server_port}",
+                ),
+                timeout=3,
+            )
+        finally:
+            second_server.shutdown()
+            second_server.server_close()
+            thread.join(timeout=2)
+
+        saved = load_profile(self.db_path, 364759)
+        self.assertEqual(saved["goal"], "top_10k")
 
     def test_rejects_null_team_id_with_a_dedicated_message(self):
         request = self._post_profile(
@@ -919,6 +952,36 @@ class ProfileEndpointTests(unittest.TestCase):
 
     def test_rejects_invalid_risk_profile(self):
         self._assert_rejected({**self.VALID_PAYLOAD, "risk_profile": "yolo"})
+
+    def test_rejects_invalid_goal(self):
+        self._assert_rejected({**self.VALID_PAYLOAD, "goal": "top_1k"})
+
+    def test_rejects_missing_goal(self):
+        payload = dict(self.VALID_PAYLOAD)
+        del payload["goal"]
+        self._assert_rejected(payload)
+
+    def test_accepts_every_allowed_goal(self):
+        for index, goal in enumerate(
+            ["top_10k", "top_50k", "top_100k", "beat_last_season", "just_for_fun"]
+        ):
+            with self.subTest(goal=goal):
+                server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    team_id = 100000 + index
+                    request = self._post_profile(
+                        {**self.VALID_PAYLOAD, "team_id": team_id, "goal": goal},
+                        headers={"X-Refresh-Token": "test-token"},
+                        base_url=f"http://127.0.0.1:{server.server_port}",
+                    )
+                    urlopen(request, timeout=3)
+                    self.assertEqual(load_profile(self.db_path, team_id)["goal"], goal)
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
 
     def test_rejects_free_transfer_count_without_event(self):
         self._assert_rejected({**self.VALID_PAYLOAD, "confirmed_free_transfers": 3})
@@ -1055,6 +1118,41 @@ class ProfileEndpointTests(unittest.TestCase):
             failing_server.shutdown()
             failing_server.server_close()
             thread.join(timeout=2)
+
+
+class DefaultVisitorProfileGoalTests(unittest.TestCase):
+    """Issue #78: `_default_visitor_profile_action` (the real, non-mocked implementation) reads
+    and defaults `goal` the same way it already does `risk_profile`, for both the "no row at
+    all" and "saved row" branches."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "profiles.db"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_defaults_to_top_50k_when_no_profile_was_ever_saved(self):
+        action = _default_visitor_profile_action(self.root)
+
+        profile = action(999)
+
+        self.assertEqual(profile["team_id"], 999)
+        self.assertEqual(profile["goal"], "top_50k")
+
+    def test_returns_a_saved_non_default_goal(self):
+        save_profile(
+            self.db_path, team_id=42, timezone="UTC", risk_profile="balanced",
+            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
+            now="2026-08-08T00:00:00Z", goal="top_10k",
+        )
+        action = _default_visitor_profile_action(self.root)
+
+        profile = action(42)
+
+        self.assertEqual(profile["goal"], "top_10k")
 
 
 class LookupOptOutEndpointTests(unittest.TestCase):
@@ -1420,6 +1518,7 @@ class DraftSquadEndpointTests(unittest.TestCase):
                         "team_id": 364759,
                         "timezone": "UTC",
                         "risk_profile": "balanced",
+                        "goal": "top_50k",
                         "confirmed_free_transfers": None,
                         "confirmed_free_transfers_event": None,
                     }

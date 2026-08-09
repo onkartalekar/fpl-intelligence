@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     draft_squad TEXT,
     opted_out INTEGER,
     pin_hash TEXT,
+    goal TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 _COLUMNS = (
     "team_id, timezone, risk_profile, confirmed_free_transfers, "
-    "confirmed_free_transfers_event, email, draft_squad, opted_out, pin_hash, "
+    "confirmed_free_transfers_event, email, draft_squad, opted_out, pin_hash, goal, "
     "created_at, updated_at"
 )
 
@@ -46,6 +47,12 @@ _COLUMNS = (
 # saving their own timezone/risk-profile preferences.
 _DEFAULT_TIMEZONE = "America/New_York"
 _DEFAULT_RISK_PROFILE = "balanced"
+# `goal` (issue #78) is a manager's stated season objective -- unlike `timezone`/`risk_profile`
+# it's nullable at the schema level (so pre-existing rows need no migration backfill), but every
+# *read* still resolves to a non-null value via this default, applied in `_row_to_dict` below.
+# Metadata only for now: `goal` does not drive `risk_profile` selection, model behavior, or any
+# recommendation/copy -- it is purely stored and displayed on the profile view.
+_DEFAULT_GOAL = "top_50k"
 
 
 def _connect(db_path):
@@ -71,8 +78,13 @@ def _row_to_dict(row):
         "draft_squad": json.loads(row[6]) if row[6] else None,
         "opted_out": bool(row[7]) if row[7] is not None else None,
         "pin_hash": row[8],
-        "created_at": row[9],
-        "updated_at": row[10],
+        # Read-time default substitution (issue #78): resolves NULL to `_DEFAULT_GOAL` for rows
+        # that predate this column, or were created by a path that never sets it
+        # (`save_draft_squad`, `set_lookup_opt_out`), so every caller of `load_profile` always
+        # sees a resolved goal without needing its own `or "top_50k"` fallback.
+        "goal": row[9] or _DEFAULT_GOAL,
+        "created_at": row[10],
+        "updated_at": row[11],
     }
 
 
@@ -105,6 +117,7 @@ def save_profile(
     confirmed_free_transfers,
     confirmed_free_transfers_event,
     now,
+    goal,
 ):
     """Create or update the saved profile for team_id. Returns the resulting row.
 
@@ -112,6 +125,11 @@ def save_profile(
     brand-new row), populated only by #55's explicit reminder opt-in, never implied
     by saving other preferences. `draft_squad` (issue #61) is preserved the same way,
     written only by `save_draft_squad`, never implied by an unrelated profile save.
+
+    `goal` (issue #78) is a real, settable field here, required the same way
+    `timezone`/`risk_profile` already are -- unlike `email`/`draft_squad` above, the profile
+    form is the intended write path for it, so every call always overwrites what was stored.
+    Metadata only for now: does not drive `risk_profile` selection or any model output.
     """
     with closing(_connect(db_path)) as connection:
         with connection:
@@ -126,18 +144,19 @@ def save_profile(
                 """
                 INSERT INTO profiles
                     (team_id, timezone, risk_profile, confirmed_free_transfers,
-                     confirmed_free_transfers_event, email, draft_squad, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     confirmed_free_transfers_event, email, draft_squad, goal, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(team_id) DO UPDATE SET
                     timezone = excluded.timezone,
                     risk_profile = excluded.risk_profile,
                     confirmed_free_transfers = excluded.confirmed_free_transfers,
                     confirmed_free_transfers_event = excluded.confirmed_free_transfers_event,
+                    goal = excluded.goal,
                     updated_at = excluded.updated_at
                 """,
                 (
                     team_id, timezone, risk_profile, confirmed_free_transfers,
-                    confirmed_free_transfers_event, email, draft_squad, created_at, now,
+                    confirmed_free_transfers_event, email, draft_squad, goal, created_at, now,
                 ),
             )
     return load_profile(db_path, team_id)
@@ -154,6 +173,12 @@ def save_draft_squad(db_path, team_id, draft_squad_ids, now):
 
     `draft_squad_ids` is a list of 15 element IDs, or None to clear a previously saved
     draft (e.g. once the manager no longer wants the preseason feedback shown).
+
+    `goal` (issue #78) is deliberately absent from the INSERT column list below, the same way
+    `opted_out`/`pin_hash` already are -- an existing row's `goal` is preserved automatically by
+    `ON CONFLICT DO UPDATE` (a column left out of the SET clause is never touched), and a
+    brand-new row simply gets SQL NULL, which `_row_to_dict`'s read-time default resolves to
+    `_DEFAULT_GOAL` on the next read. No explicit carry-forward needed.
     """
     with closing(_connect(db_path)) as connection:
         with connection:
@@ -207,12 +232,17 @@ def load_pin_hash(db_path, team_id):
 def set_lookup_opt_out(db_path, team_id, opted_out, pin_hash, now):
     """Create or update team_id's `opted_out` flag and `pin_hash` (issue #62).
 
-    Deliberately independent of `save_profile`'s five live-manager-preference fields -- a
+    Deliberately independent of `save_profile`'s six live-manager-preference fields -- a
     team's first opt-out toggle can happen before that team has ever saved a profile at all,
     in which case a row is created here using the same defaults
     `server._default_visitor_profile_action` would otherwise synthesize on read. Only
     `opted_out`/`pin_hash`/`updated_at` are overwritten on an existing row; every other column
     (including `email`, never touched outside its own #55 opt-in) is preserved untouched.
+
+    `goal` (issue #78), like `draft_squad` before it, is left out of the INSERT column list
+    below entirely -- `ON CONFLICT DO UPDATE` never touches a column absent from its SET clause,
+    so an existing row's `goal` survives this write untouched, and a brand-new row gets SQL
+    NULL, resolved to `_DEFAULT_GOAL` by `_row_to_dict` on the next read.
     """
     with closing(_connect(db_path)) as connection:
         with connection:
