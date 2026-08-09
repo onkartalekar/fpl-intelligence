@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -13,7 +14,7 @@ NARRATION = ROOT / "narration.mp3"
 
 
 def pause(page, seconds):
-    page.wait_for_timeout(int(seconds * 1000))
+    page.wait_for_timeout(max(0, int(seconds * 1000)))
 
 
 def caption(page, title, body):
@@ -28,17 +29,56 @@ def caption(page, title, body):
     )
 
 
+def show_view(page, name):
+    page.evaluate("name => showView(name)", name)
+    page.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
+    pause(page, 0.8)
+
+
 def smooth_to(page, selector, offset=-85):
     page.evaluate(
         """([selector, offset]) => {
           const el = document.querySelector(selector);
-          if (!el) return;
+          if (!el) throw new Error(`Demo target not found: ${selector}`);
           const top = el.getBoundingClientRect().top + window.scrollY + offset;
           window.scrollTo({top, behavior: 'smooth'});
         }""",
         [selector, offset],
     )
-    pause(page, 1.3)
+    pause(page, 1.0)
+
+
+def scene(page, title, body, seconds, action=None):
+    started = time.monotonic()
+    if action:
+        action()
+    caption(page, title, body)
+    pause(page, seconds - (time.monotonic() - started))
+
+
+def intro(page):
+    page.evaluate(
+        """() => {
+          const intro=document.createElement('div'); intro.id='demo-intro';
+          intro.innerHTML='<h1>FPL Intelligence</h1><p>Every feature in one <b>source-backed</b> weekly decision workspace</p>';
+          document.body.appendChild(intro);
+        }"""
+    )
+    pause(page, 5.2)
+    page.evaluate("document.getElementById('demo-intro').style.opacity='0'")
+    pause(page, 0.8)
+    page.evaluate("document.getElementById('demo-intro').remove()")
+
+
+def outro(page):
+    page.evaluate(
+        """() => {
+          const outro=document.createElement('div'); outro.id='demo-intro';
+          outro.innerHTML='<h1>One compact weekly decision</h1><p>Evidence, uncertainty, and limitations stay <b>visible</b></p>';
+          document.body.appendChild(outro);
+        }"""
+    )
+    pause(page, 7.0)
 
 
 with sync_playwright() as p:
@@ -53,7 +93,8 @@ with sync_playwright() as p:
     page.add_init_script("localStorage.setItem('fpl-theme', 'dark')")
     page.goto(URL, wait_until="networkidle")
     page.evaluate("showView('overview')")
-    page.add_style_tag(content="""
+    page.add_style_tag(
+        content="""
       html { scroll-behavior: smooth; }
       #demo-caption { position:fixed; z-index:9999; left:260px; right:24px; bottom:18px;
         display:flex; gap:14px; align-items:center; padding:12px 16px; border:1px solid #57dfae;
@@ -67,67 +108,148 @@ with sync_playwright() as p:
       #demo-intro h1 { margin:0; font-size:48px; color:#f3f6ff; }
       #demo-intro p { margin:12px 0 0; max-width:760px; color:#9eacc3; font-size:20px; }
       #demo-intro b { color:#57dfae; }
-    """)
-    page.evaluate("""() => {
-      const cap=document.createElement('div'); cap.id='demo-caption';
-      cap.innerHTML='<strong></strong><span></span>'; document.body.appendChild(cap);
-      const intro=document.createElement('div'); intro.id='demo-intro';
-      intro.innerHTML='<h1>FPL Intelligence</h1><p>A <b>five-gameweek</b>, scenario-aware decision workspace</p>';
-      document.body.appendChild(intro);
-    }""")
+    """
+    )
+    page.evaluate(
+        """() => {
+          const cap=document.createElement('div'); cap.id='demo-caption';
+          cap.innerHTML='<strong></strong><span></span>'; document.body.appendChild(cap);
+        }"""
+    )
 
-    pause(page, 4.5)
-    page.evaluate("document.getElementById('demo-intro').style.opacity='0'")
-    pause(page, 0.8)
-    page.evaluate("document.getElementById('demo-intro').remove()")
+    intro(page)
+    scene(
+        page,
+        "ATTENTION FIRST",
+        "Season readiness, material changes, source freshness, and manual refresh status stay together.",
+        9,
+        lambda: show_view(page, "overview"),
+    )
+    scene(
+        page,
+        "MY TEAM",
+        "Look up a public team ID and inspect the published squad, captaincy, value, bank, and connection health.",
+        10,
+        lambda: show_view(page, "squad"),
+    )
+    scene(
+        page,
+        "LEGAL DRAFT BUILDER",
+        "Declare a preseason squad with live budget, position, squad-size, and three-per-club validation.",
+        9,
+        lambda: smooth_to(page, "#draft-squad-panel", -70),
+    )
+    scene(
+        page,
+        "LOCAL PROFILE",
+        "Team ID, timezone, risk preference, and confirmed free transfers personalize recommendations without a password.",
+        8,
+        lambda: show_view(page, "profile"),
+    )
+    scene(
+        page,
+        "THREE STRATEGY PROFILES",
+        "Compare Conservative, Balanced, and Aggressive squads using one, three, and five-gameweek expected points.",
+        10,
+        lambda: show_view(page, "decisions"),
+    )
+    scene(
+        page,
+        "NEXT ACTION ONLY",
+        "The weekly decision uses actual free transfers, point costs, bank, captaincy, and future flexibility.",
+        11,
+        lambda: smooth_to(page, "#weekly-profile-options", -100),
+    )
+    scene(
+        page,
+        "FIVE-GAMEWEEK PLANNER",
+        "Rolling has explicit option value, while future moves remain conditional branches rather than a rigid script.",
+        10,
+        lambda: smooth_to(page, "#weekly-plan", -85),
+    )
+    scene(
+        page,
+        "POST-DECISION XI",
+        "Formation, starting eleven, bench order, captaincy, uncertainty, rotation risk, and player detail stay connected.",
+        10,
+        lambda: smooth_to(page, "#weekly-lineup", -75),
+    )
 
-    caption(page, "ATTENTION FIRST", "Official freshness, material changes, and the next decision in one local workspace.")
-    pause(page, 5.5)
+    def filter_players():
+        show_view(page, "players")
+        page.locator("#player-search").fill("Raya")
+        pause(page, 0.5)
 
-    page.locator('[data-view="decisions"]').click()
-    pause(page, 1.2)
-    caption(page, "THREE RISK PROFILES", "Compare Conservative, Balanced, and Aggressive recommendations without changing the FPL account.")
-    pause(page, 6.0)
+    scene(
+        page,
+        "PLAYER EXPLORER",
+        "Search and filter official prices, ownership, availability, positions, and clubs.",
+        8,
+        filter_players,
+    )
 
-    smooth_to(page, '#weekly-profile-options', -105)
-    caption(page, "ACTUAL FREE TRANSFERS", "This demo starts with 2 available transfers. Five is a cap, never an assumption.")
-    pause(page, 6.5)
+    def advance_fixture():
+        show_view(page, "fixtures")
+        button = page.locator("#fixture-gameweek-next")
+        if button.count() and button.is_enabled():
+            button.click()
+            pause(page, 0.5)
 
-    smooth_to(page, '#weekly-plan', -90)
-    caption(page, "FIVE-GAMEWEEK LOOKAHEAD", "Rolling, transfers, hits, bank, and future flexibility are compared over reachable states.")
-    pause(page, 7.5)
+    scene(
+        page,
+        "OFFICIAL FIXTURES",
+        "Navigate gameweeks and clubs while tracking kickoff times, blanks, doubles, and official difficulty.",
+        8,
+        advance_fixture,
+    )
 
-    details = page.locator('#weekly-plan details')
-    if details.count():
-        details.click()
-    caption(page, "NEXT ACTION ONLY", "Future moves are provisional conditions, not a rigid transfer script.")
-    pause(page, 6.5)
+    def inspect_transfer():
+        show_view(page, "transfers")
+        page.locator("#relevance-filter").select_option("all")
+        page.locator("#freshness-filter").evaluate(
+            "el => { el.value = 'all'; el.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        first = page.locator("#feed .transfer").first
+        if first.count():
+            first.click()
+            pause(page, 0.5)
 
-    smooth_to(page, '#weekly-lineup', -80)
-    caption(page, "POST-DECISION TEAM", "See the XI, bench, captaincy, formation, and 1 / 3 / 5-gameweek xPts together.")
-    pause(page, 7.0)
+    scene(
+        page,
+        "FIRST-PARTY TRANSFER EVIDENCE",
+        "Filters, relevance, FPL reconciliation, and the evidence inspector keep every source auditable.",
+        10,
+        inspect_transfer,
+    )
+    scene(
+        page,
+        "MODEL PERFORMANCE",
+        "Frozen pre-deadline forecasts are compared with official results across horizons, teams, and players.",
+        10,
+        lambda: show_view(page, "performance"),
+    )
+    scene(
+        page,
+        "MODEL STATUS",
+        "Feed readiness, projection version, configured sources, modeling policy, and account boundaries remain inspectable.",
+        9,
+        lambda: show_view(page, "model"),
+    )
 
-    page.locator('[data-weekly-profile="aggressive"]').click()
-    smooth_to(page, '#weekly-profile-options', -100)
-    caption(page, "SCENARIO COMPARISON", "Switch risk profiles instantly and inspect each planner edge against rolling.")
-    pause(page, 5.5)
+    def toggle_theme():
+        page.locator("#theme-toggle").click()
+        pause(page, 2.5)
+        page.locator("#theme-toggle").click()
+        pause(page, 0.5)
 
-    page.locator('[data-view="fixtures"]').click()
-    pause(page, 1.0)
-    caption(page, "OFFICIAL FIXTURES", "Gameweek filters, fixture difficulty, blanks, and doubles feed the projection horizon.")
-    pause(page, 5.5)
-
-    page.locator('[data-view="model"]').click()
-    pause(page, 1.0)
-    caption(page, "TRANSPARENT SOURCES", "Model status and source provenance stay inspectable. Refresh runs only on demand.")
-    pause(page, 5.5)
-
-    page.evaluate("""() => {
-      const outro=document.createElement('div'); outro.id='demo-intro';
-      outro.innerHTML='<h1>One compact weekly decision</h1><p>Built for a <b>top-50k objective</b> in under 15 minutes a week</p>';
-      document.body.appendChild(outro);
-    }""")
-    pause(page, 5.0)
+    scene(
+        page,
+        "ACCESSIBLE BY DEFAULT",
+        "Light and dark themes, responsive controls, keyboard navigation, and manual-only refresh complete the workspace.",
+        7,
+        toggle_theme,
+    )
+    outro(page)
 
     video = page.video
     context.close()
