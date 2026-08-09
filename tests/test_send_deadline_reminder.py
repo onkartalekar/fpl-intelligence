@@ -344,6 +344,64 @@ class RunLoopTests(unittest.TestCase):
         mock_send.assert_called_once()
         self.assertEqual(mock_send.call_args.args[1], "three-hour@example.com")
 
+    def test_saved_profile_overrides_are_passed_through_to_compute_manager_view(self):
+        """Issue #81 regression: a team with a saved confirmed-free-transfer/draft-squad
+        profile must have those values reach `compute_manager_view`, not silently be
+        dropped in favor of whatever the public FPL API currently reports."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+        manager_view = {
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+        saved_profile = {
+            "team_id": 42, "confirmed_free_transfers": 2, "confirmed_free_transfers_event": 3,
+            "draft_squad": [1, 2, 3],
+        }
+        smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr.profiles, "load_profile", return_value=saved_profile) as mock_load_profile, \
+             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_compute, \
+             patch.object(sdr, "send_email"):
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
+
+        mock_load_profile.assert_called_once()
+        self.assertEqual(mock_load_profile.call_args.args[1], 42)
+        mock_compute.assert_called_once()
+        self.assertEqual(mock_compute.call_args.kwargs["confirmed_free_transfers"], 2)
+        self.assertEqual(mock_compute.call_args.kwargs["confirmed_free_transfers_event"], 3)
+        self.assertEqual(mock_compute.call_args.kwargs["draft_squad_ids"], [1, 2, 3])
+
+    def test_no_saved_profile_passes_none_overrides_matching_prior_behavior(self):
+        """Regression for the "must not change existing no-profile behavior" requirement:
+        a team that has never saved a profile (`load_profile` returns None) must still pass
+        all three overrides as None, exactly as before this fix."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 999, "email": "manager@example.com", "lead_hours": 3}]
+        manager_view = {
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+        smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr.profiles, "load_profile", return_value=None), \
+             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_compute, \
+             patch.object(sdr, "send_email"):
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
+
+        mock_compute.assert_called_once()
+        self.assertIsNone(mock_compute.call_args.kwargs["confirmed_free_transfers"])
+        self.assertIsNone(mock_compute.call_args.kwargs["confirmed_free_transfers_event"])
+        self.assertIsNone(mock_compute.call_args.kwargs["draft_squad_ids"])
+
     def test_dry_run_prints_composed_email_and_never_calls_smtp(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
