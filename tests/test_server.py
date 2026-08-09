@@ -10,6 +10,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from fpl_intel.profiles import load_profile
 from fpl_intel.refresh import RefreshAlreadyRunning, project_refresh_lock
 from fpl_intel.server import _default_refresh_action, build_refresh_result, create_server
 
@@ -424,6 +425,89 @@ class TeamLookupTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 404)
 
 
+class CookieResolvedTeamTests(unittest.TestCase):
+    """Issue #45: a saved-team cookie is a second source for the per-request team view."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text(
+            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.lookup_calls = []
+        self.profile_read_calls = []
+
+        def team_view_action(team_id):
+            self.lookup_calls.append(team_id)
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": "Cookie Team", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        def profile_read_action(team_id):
+            self.profile_read_calls.append(team_id)
+            return {
+                "team_id": team_id, "timezone": "UTC", "confirmed_free_transfers": None,
+                "confirmed_free_transfers_event": None, "risk_profile": "aggressive",
+            }
+
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action, profile_read_action=profile_read_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _get_with_cookie(self, path, cookie_value):
+        request = Request(self.base_url + path, headers={"Cookie": f"fpl_team_id={cookie_value}"})
+        return urlopen(request, timeout=3)
+
+    def test_cookie_resolves_the_team_when_no_query_param_is_present(self):
+        html = self._get_with_cookie("/", "42").read().decode()
+
+        self.assertEqual(self.lookup_calls, [42])
+        self.assertIn("Cookie Team", html)
+
+    def test_cookie_resolved_team_is_not_flagged_as_a_one_off_lookup(self):
+        """Unlike an explicit ?team_id= lookup, this is the visitor's own remembered team."""
+        html = self._get_with_cookie("/", "42").read().decode()
+
+        self.assertNotIn('"lookup":', html.replace(" ", ""))
+
+    def test_query_param_takes_precedence_over_the_cookie(self):
+        request = Request(
+            self.base_url + "/?team_id=99", headers={"Cookie": "fpl_team_id=42"}
+        )
+        html = urlopen(request, timeout=3).read().decode()
+
+        self.assertEqual(self.lookup_calls, [99])
+        self.assertIn('"lookup":', html.replace(" ", ""))
+
+    def test_malformed_cookie_falls_back_to_the_shared_cached_dashboard(self):
+        html = self._get_with_cookie("/", "not-a-number").read().decode()
+
+        self.assertEqual(self.lookup_calls, [])
+        self.assertIn("<h1>Dashboard</h1>", html)
+
+    def test_saved_profile_is_spliced_in_and_drives_the_default_risk_profile(self):
+        html = self._get_with_cookie("/", "42").read().decode()
+
+        self.assertEqual(self.profile_read_calls, [42])
+        self.assertIn('"risk_profile": "aggressive"', html)
+
+
 class ProfileEndpointTests(unittest.TestCase):
     VALID_PAYLOAD = {
         "team_id": 364759,
@@ -444,7 +528,6 @@ class ProfileEndpointTests(unittest.TestCase):
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
         )
-        (self.root / "config").mkdir()
         self.calls = []
 
         def refresh_action():
@@ -465,7 +548,7 @@ class ProfileEndpointTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
-        self.profile_path = self.root / "config" / "user-profile.json"
+        self.db_path = self.root / "data" / "profiles.db"
 
     def tearDown(self):
         self.server.shutdown()
@@ -486,14 +569,14 @@ class ProfileEndpointTests(unittest.TestCase):
         )
         return request
 
-    def test_rejects_missing_token_and_leaves_file_untouched(self):
+    def test_rejects_missing_token_and_saves_nothing(self):
         request = self._post_profile(self.VALID_PAYLOAD)
 
         with self.assertRaises(HTTPError) as error:
             urlopen(request, timeout=3)
 
         self.assertEqual(error.exception.code, 403)
-        self.assertFalse(self.profile_path.exists())
+        self.assertFalse(self.db_path.exists())
 
     def test_rejects_cross_origin_request_even_with_valid_token(self):
         request = self._post_profile(
@@ -505,9 +588,9 @@ class ProfileEndpointTests(unittest.TestCase):
             urlopen(request, timeout=3)
 
         self.assertEqual(error.exception.code, 403)
-        self.assertFalse(self.profile_path.exists())
+        self.assertFalse(self.db_path.exists())
 
-    def test_valid_payload_is_saved_and_returned(self):
+    def test_valid_payload_is_saved_and_returned_and_sets_the_team_cookie(self):
         request = self._post_profile(
             self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}
         )
@@ -517,31 +600,54 @@ class ProfileEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["status"], "ok")
-        self.assertTrue(self.profile_path.exists())
-        saved = json.loads(self.profile_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["manager"]["team_id"], 364759)
-        self.assertNotIn("confirmed_free_transfers", saved["manager"])
+        saved = load_profile(self.db_path, 364759)
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["timezone"], "America/New_York")
+        self.assertEqual(saved["risk_profile"], "balanced")
+        set_cookie = response.headers.get("Set-Cookie")
+        self.assertIn("fpl_team_id=364759", set_cookie)
+        self.assertIn("HttpOnly", set_cookie)
 
-    def test_merge_preserves_reference_only_fields(self):
-        self.profile_path.write_text(
-            json.dumps(
-                {
-                    "manager": {"primary_goal": "overall_rank_below_50000"},
-                    "experience": {"previous_entry_id": 123},
-                }
-            ),
-            encoding="utf-8",
+    def test_saving_again_for_the_same_team_updates_in_place(self):
+        # A fresh server (own write-rate limiter) for the second save -- the two saves are
+        # otherwise indistinguishable from a single client rapidly resaving, which is exactly
+        # what the write cooldown (tested separately below) exists to bound.
+        urlopen(
+            self._post_profile(self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}),
+            timeout=3,
         )
+        second_server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        thread = threading.Thread(target=second_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            urlopen(
+                self._post_profile(
+                    {**self.VALID_PAYLOAD, "risk_profile": "aggressive"},
+                    headers={"X-Refresh-Token": "test-token"},
+                    base_url=f"http://127.0.0.1:{second_server.server_port}",
+                ),
+                timeout=3,
+            )
+        finally:
+            second_server.shutdown()
+            second_server.server_close()
+            thread.join(timeout=2)
 
+        saved = load_profile(self.db_path, 364759)
+        self.assertEqual(saved["risk_profile"], "aggressive")
+
+    def test_rejects_null_team_id_with_a_dedicated_message(self):
         request = self._post_profile(
-            self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}
+            {**self.VALID_PAYLOAD, "team_id": None}, headers={"X-Refresh-Token": "test-token"}
         )
-        urlopen(request, timeout=3)
 
-        saved = json.loads(self.profile_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["manager"]["primary_goal"], "overall_rank_below_50000")
-        self.assertEqual(saved["experience"]["previous_entry_id"], 123)
-        self.assertEqual(saved["manager"]["team_id"], 364759)
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+        payload = json.loads(error.exception.read())
+        self.assertEqual(payload["message"], "A team ID is required to save settings")
+        self.assertFalse(self.db_path.exists())
 
     def _assert_rejected(self, payload):
         request = self._post_profile(payload, headers={"X-Refresh-Token": "test-token"})
@@ -551,7 +657,7 @@ class ProfileEndpointTests(unittest.TestCase):
 
         self.assertEqual(error.exception.code, 400)
         body = error.exception.read().decode()
-        self.assertFalse(self.profile_path.exists())
+        self.assertFalse(self.db_path.exists())
         return body
 
     def test_rejects_non_numeric_team_id(self):
@@ -597,7 +703,7 @@ class ProfileEndpointTests(unittest.TestCase):
             urlopen(request, timeout=3)
 
         self.assertEqual(error.exception.code, 413)
-        self.assertFalse(self.profile_path.exists())
+        self.assertFalse(self.db_path.exists())
 
     def test_rejects_non_json_body(self):
         request = self._post_profile(
@@ -613,7 +719,8 @@ class ProfileEndpointTests(unittest.TestCase):
         payload = json.loads(error.exception.read())
         self.assertEqual(payload["status"], "error")
 
-    def test_returns_busy_while_refresh_lock_is_held(self):
+    def test_profile_save_is_not_blocked_by_a_running_shared_refresh(self):
+        """Issue #45: profile saves write to their own store, decoupled from refresh_lock."""
         release = threading.Event()
         entered = threading.Event()
 
@@ -622,17 +729,17 @@ class ProfileEndpointTests(unittest.TestCase):
             release.wait(timeout=5)
             return {}
 
-        busy_server = create_server(
+        server = create_server(
             self.root,
             host="127.0.0.1",
             port=0,
             token="test-token",
             refresh_action=blocking_refresh_action,
         )
-        thread = threading.Thread(target=busy_server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            base_url = f"http://127.0.0.1:{busy_server.server_port}"
+            base_url = f"http://127.0.0.1:{server.server_port}"
             refresh_thread = threading.Thread(
                 target=lambda: urlopen(
                     Request(
@@ -650,18 +757,33 @@ class ProfileEndpointTests(unittest.TestCase):
             request = self._post_profile(
                 self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}, base_url=base_url
             )
-            with self.assertRaises(HTTPError) as error:
-                urlopen(request, timeout=3)
-            payload = json.loads(error.exception.read())
+            response = urlopen(request, timeout=3)
 
-            self.assertEqual(error.exception.code, 409)
-            self.assertEqual(payload, {"status": "busy", "message": "A refresh is already running"})
+            self.assertEqual(response.status, 200)
         finally:
             release.set()
             refresh_thread.join(timeout=5)
-            busy_server.shutdown()
-            busy_server.server_close()
+            server.shutdown()
+            server.server_close()
             thread.join(timeout=2)
+
+    def test_repeated_saves_from_the_same_source_are_rate_limited(self):
+        first = urlopen(
+            self._post_profile(self.VALID_PAYLOAD, headers={"X-Refresh-Token": "test-token"}),
+            timeout=3,
+        )
+        self.assertEqual(first.status, 200)
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(
+                self._post_profile(
+                    {**self.VALID_PAYLOAD, "team_id": 100001},
+                    headers={"X-Refresh-Token": "test-token"},
+                ),
+                timeout=3,
+            )
+
+        self.assertEqual(error.exception.code, 429)
 
     def test_returns_generic_error_without_internal_details(self):
         failing_server = create_server(
