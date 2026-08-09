@@ -26,7 +26,7 @@ from .model_performance import (
     normalize_manager_picks,
 )
 from .recommendations import build_gw_recommendations
-from .transfer_decisions import build_transfer_decisions
+from .transfer_decisions import build_draft_decisions, build_transfer_decisions
 from .relevance import enrich_transfers, summarize_clubs
 from .transfers import canonical_club, normalize_transfer
 
@@ -391,6 +391,7 @@ def refresh_project(root, **kwargs):
 def compute_manager_view(
     bootstrap, fixtures, transfers, generated_at, team_id, horizon=5,
     confirmed_free_transfers=None, confirmed_free_transfers_event=None,
+    draft_squad_ids=None,
 ):
     """Compute one team's manager summary and weekly decision, decoupled from the shared refresh.
 
@@ -419,6 +420,14 @@ def compute_manager_view(
     captured into a clean, non-raising result rather than propagated, since a bad request-supplied
     team ID is an expected, frequent case here -- not the exceptional case it is for a configured
     profile's own team ID.
+
+    `draft_squad_ids` is issue #61's saved preseason draft (15 element IDs, or None): when
+    `build_transfer_decisions` reports `waiting_for_gw2` -- the season hasn't reached Gameweek 2,
+    so there is no real published squad to personalize against yet -- and a draft is saved for
+    this team, `build_draft_decisions` is used instead so the Weekly Decision panel shows
+    personalized feedback on the manager's own declared squad rather than staying inactive. Once
+    the season reaches Gameweek 2, `build_transfer_decisions`'s own gate stops applying and this
+    fallback is never reached, so the real GW2+ path takes back over automatically.
     """
     try:
         manager_raw = collect_public_manager(team_id)
@@ -430,6 +439,11 @@ def compute_manager_view(
             bootstrap, fixtures, manager_state, generated_at=generated_at, horizon=horizon,
             recent_transfers=transfers,
         )
+        if weekly_decisions.get("status") == "waiting_for_gw2" and draft_squad_ids:
+            weekly_decisions = build_draft_decisions(
+                bootstrap, fixtures, draft_squad_ids, generated_at=generated_at, horizon=horizon,
+                recent_transfers=transfers,
+            )
     except Exception:
         manager_state = {
             "connection_status": "lookup_failed",

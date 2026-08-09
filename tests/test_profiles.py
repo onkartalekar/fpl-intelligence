@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from fpl_intel.profiles import load_profile, save_profile
+from fpl_intel.profiles import load_profile, save_draft_squad, save_profile
 
 
 class ProfileStoreTests(unittest.TestCase):
@@ -28,6 +28,7 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(row["risk_profile"], "balanced")
         self.assertIsNone(row["confirmed_free_transfers"])
         self.assertIsNone(row["email"])
+        self.assertIsNone(row["draft_squad"])
         self.assertEqual(row["created_at"], "2026-08-08T00:00:00Z")
         self.assertEqual(row["updated_at"], "2026-08-08T00:00:00Z")
         self.assertEqual(load_profile(self.db_path, 364759), row)
@@ -86,6 +87,53 @@ class ProfileStoreTests(unittest.TestCase):
         )
 
         self.assertTrue(nested_db_path.exists())
+
+    def test_saves_and_loads_a_draft_squad_for_a_brand_new_team_id(self):
+        draft_ids = list(range(1, 16))
+
+        row = save_draft_squad(self.db_path, team_id=99, draft_squad_ids=draft_ids, now="2026-08-08T00:00:00Z")
+
+        self.assertEqual(row["team_id"], 99)
+        self.assertEqual(row["draft_squad"], draft_ids)
+        # Seeded with the same defaults the dashboard already applies for an unconfigured visitor.
+        self.assertEqual(row["timezone"], "America/New_York")
+        self.assertEqual(row["risk_profile"], "balanced")
+        self.assertEqual(load_profile(self.db_path, 99), row)
+
+    def test_saving_a_draft_squad_preserves_an_existing_profile(self):
+        save_profile(
+            self.db_path, team_id=5, timezone="Europe/London", risk_profile="aggressive",
+            confirmed_free_transfers=2, confirmed_free_transfers_event=3,
+            now="2026-08-01T00:00:00Z",
+        )
+
+        row = save_draft_squad(self.db_path, team_id=5, draft_squad_ids=list(range(1, 16)), now="2026-08-08T00:00:00Z")
+
+        self.assertEqual(row["timezone"], "Europe/London")
+        self.assertEqual(row["risk_profile"], "aggressive")
+        self.assertEqual(row["confirmed_free_transfers"], 2)
+        self.assertEqual(row["confirmed_free_transfers_event"], 3)
+        self.assertEqual(row["created_at"], "2026-08-01T00:00:00Z")
+        self.assertEqual(row["draft_squad"], list(range(1, 16)))
+
+    def test_saving_a_profile_preserves_an_existing_draft_squad(self):
+        save_draft_squad(self.db_path, team_id=7, draft_squad_ids=list(range(1, 16)), now="2026-08-01T00:00:00Z")
+
+        row = save_profile(
+            self.db_path, team_id=7, timezone="UTC", risk_profile="conservative",
+            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
+            now="2026-08-08T00:00:00Z",
+        )
+
+        self.assertEqual(row["draft_squad"], list(range(1, 16)))
+        self.assertEqual(row["risk_profile"], "conservative")
+
+    def test_saving_none_clears_a_previously_saved_draft_squad(self):
+        save_draft_squad(self.db_path, team_id=8, draft_squad_ids=list(range(1, 16)), now="2026-08-01T00:00:00Z")
+
+        row = save_draft_squad(self.db_path, team_id=8, draft_squad_ids=None, now="2026-08-08T00:00:00Z")
+
+        self.assertIsNone(row["draft_squad"])
 
 
 if __name__ == "__main__":

@@ -4,10 +4,21 @@ from unittest.mock import patch
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.transfer_decisions import (
     _planner_player_score,
+    build_draft_decisions,
     build_transfer_decisions,
     derive_free_transfers,
+    validate_draft_squad,
 )
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
+
+
+def draft_inputs():
+    """A legal preseason (event 1) bootstrap/fixtures pair plus a legal 15-player draft."""
+    bootstrap = sample_bootstrap()
+    fixtures = sample_fixtures()
+    opening = build_gw_recommendations(bootstrap, fixtures, "2026-07-01T12:00:00-04:00")
+    draft_squad_ids = [player["id"] for player in opening["recommended_squad"]["players"]]
+    return bootstrap, fixtures, draft_squad_ids
 
 
 def gw2_inputs():
@@ -269,6 +280,125 @@ class TransferDecisionTests(unittest.TestCase):
             )
             self.assertEqual(profile["chip_recommendation"]["chip"], "freehit")
             self.assertEqual(profile["multiweek_plan"]["immediate_action"], "play_freehit")
+
+
+class ValidateDraftSquadTests(unittest.TestCase):
+    def test_accepts_a_legal_draft_squad(self):
+        bootstrap, _fixtures, draft_squad_ids = draft_inputs()
+
+        # Should not raise.
+        validate_draft_squad(bootstrap, draft_squad_ids)
+
+    def test_rejects_the_wrong_number_of_players(self):
+        bootstrap, _fixtures, draft_squad_ids = draft_inputs()
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, draft_squad_ids[:14])
+
+    def test_rejects_duplicate_players(self):
+        bootstrap, _fixtures, draft_squad_ids = draft_inputs()
+        duplicated = draft_squad_ids[:14] + [draft_squad_ids[0]]
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, duplicated)
+
+    def test_rejects_an_unknown_player_id(self):
+        bootstrap, _fixtures, draft_squad_ids = draft_inputs()
+        broken = draft_squad_ids[:14] + [999999]
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, broken)
+
+    def test_rejects_a_squad_that_violates_formation_quotas(self):
+        bootstrap, _fixtures, _draft_squad_ids = draft_inputs()
+        all_goalkeepers = [
+            row["id"] for row in bootstrap["elements"] if row["element_type"] == 1
+        ]
+        others = [row["id"] for row in bootstrap["elements"] if row["element_type"] != 1]
+        illegal = (all_goalkeepers + others)[:15]
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, illegal)
+
+    def test_rejects_a_squad_over_the_club_limit(self):
+        bootstrap, _fixtures, _draft_squad_ids = draft_inputs()
+        for player in bootstrap["elements"]:
+            player["team"] = 1
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, [row["id"] for row in bootstrap["elements"][:15]])
+
+    def test_rejects_a_squad_over_budget(self):
+        bootstrap, _fixtures, draft_squad_ids = draft_inputs()
+        for player in bootstrap["elements"]:
+            player["now_cost"] = 200
+
+        with self.assertRaises(ValueError):
+            validate_draft_squad(bootstrap, draft_squad_ids)
+
+
+class BuildDraftDecisionsTests(unittest.TestCase):
+    def test_builds_roll_single_and_double_scenarios_for_three_profiles(self):
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids, generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["event"], 1)
+        self.assertTrue(result["draft"])
+        self.assertEqual(
+            [row["id"] for row in result["profiles"]],
+            ["conservative", "balanced", "aggressive"],
+        )
+        for profile in result["profiles"]:
+            actions = {scenario["action"] for scenario in profile["scenarios"]}
+            self.assertTrue({"roll", "single_transfer", "double_transfer"} <= actions)
+            for scenario in profile["scenarios"]:
+                # The core of issue #61: no free-transfer point cost applies before GW1.
+                self.assertEqual(scenario["point_cost"], 0)
+            roll = next(row for row in profile["scenarios"] if row["action"] == "roll")
+            self.assertEqual(roll["transfers"], [])
+            self.assertIn(profile["recommendation"]["action"], actions)
+            self.assertEqual(len(profile["recommendation"]["starting_xi"]), 11)
+            self.assertIn("reason", profile["recommendation"])
+
+    def test_reports_the_declared_squads_unspent_budget(self):
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids, generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        spend = sum(
+            row["now_cost"] / 10
+            for row in bootstrap["elements"]
+            if row["id"] in draft_squad_ids
+        )
+        self.assertAlmostEqual(result["bank"], round(100.0 - spend, 1))
+
+    def test_rejects_a_draft_squad_with_the_wrong_number_of_players(self):
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids[:14], generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["status"], "draft_squad_invalid")
+        self.assertEqual(result["event"], 1)
+        self.assertIn("reason", result)
+
+    def test_rejects_an_illegal_draft_squad_over_budget(self):
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+        for player in bootstrap["elements"]:
+            player["now_cost"] = 200
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids, generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["status"], "draft_squad_invalid")
 
 
 if __name__ == "__main__":

@@ -713,6 +713,26 @@ dd {
   color: var(--muted);
   font-size: 12px;
 }
+.draft-add,.draft-remove {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.draft-remove {
+  margin-top: 8px;
+}
+.draft-add:disabled,.draft-remove:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.draft-add:not(:disabled):hover,.draft-remove:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .player-toolbar {
   display: grid;
   grid-template-columns: 1.4fr repeat(3,minmax(150px,1fr));
