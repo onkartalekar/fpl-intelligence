@@ -1,10 +1,15 @@
 from pathlib import Path
+import shutil
+import subprocess
+
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent
 URL = "http://127.0.0.1:8878/dashboard-demo.html"
 VIDEO_DIR = ROOT / "raw-video"
 VIDEO_DIR.mkdir(exist_ok=True)
+OUTPUT = ROOT / "fpl-intelligence-demo.mp4"
+NARRATION = ROOT / "narration.mp3"
 
 
 def pause(page, seconds):
@@ -45,7 +50,9 @@ with sync_playwright() as p:
         record_video_size={"width": 1280, "height": 720},
     )
     page = context.new_page()
+    page.add_init_script("localStorage.setItem('fpl-theme', 'dark')")
     page.goto(URL, wait_until="networkidle")
+    page.evaluate("showView('overview')")
     page.add_style_tag(content="""
       html { scroll-behavior: smooth; }
       #demo-caption { position:fixed; z-index:9999; left:260px; right:24px; bottom:18px;
@@ -130,4 +137,46 @@ with sync_playwright() as p:
         final_raw.unlink()
     raw_path.replace(final_raw)
     browser.close()
-    print(final_raw)
+
+ffmpeg = shutil.which("ffmpeg")
+if not ffmpeg:
+    raise RuntimeError("ffmpeg is required to produce the narrated MP4")
+if not NARRATION.exists():
+    raise RuntimeError(f"Narration track not found: {NARRATION}")
+subprocess.run(
+    [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(final_raw),
+        "-i",
+        str(NARRATION),
+        "-filter_complex",
+        "[1:a]apad[a]",
+        "-map",
+        "0:v:0",
+        "-map",
+        "[a]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "22",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        str(OUTPUT),
+    ],
+    check=True,
+)
+final_raw.unlink()
+if VIDEO_DIR.exists() and not any(VIDEO_DIR.iterdir()):
+    VIDEO_DIR.rmdir()
+print(OUTPUT)
