@@ -106,6 +106,37 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(len(projections[0]["fixture_xp"]), 5)
         self.assertGreater(projections[0]["xp_1"], 0)
 
+    def test_expected_minutes_override_replaces_the_champion_estimate_for_every_player(self):
+        """Issue #65: project_players' expected_minutes_override is the hook the ML minutes
+        shadow challenger uses (ml_minutes.build_shadow_forecast) -- default None must leave
+        the champion's own estimate untouched (see the next test), and a supplied override
+        must fully replace it, with everything downstream (component scoring, component_xp,
+        uncertainty bands) computed from the overridden value."""
+        bootstrap = sample_bootstrap()
+
+        def flat_thirty(player, fixtures_played, availability_multiplier):
+            return 30.0 * availability_multiplier
+
+        projections = project_players(
+            bootstrap, sample_fixtures(), horizon=1, expected_minutes_override=flat_thirty,
+        )
+
+        for player in projections:
+            self.assertEqual(player["expected_minutes"], 30.0)
+            self.assertTrue(player["component_xp"])  # scoring pipeline still ran normally
+
+    def test_expected_minutes_override_defaults_to_none_and_leaves_champion_output_unchanged(self):
+        bootstrap = sample_bootstrap()
+        fixtures = sample_fixtures()
+
+        default = project_players(bootstrap, fixtures, horizon=1)
+        explicit_none = project_players(bootstrap, fixtures, horizon=1, expected_minutes_override=None)
+
+        self.assertEqual(
+            [player["expected_minutes"] for player in default],
+            [player["expected_minutes"] for player in explicit_none],
+        )
+
     def test_expected_minutes_use_team_fixtures_played_for_blanks_and_doubles(self):
         bootstrap = sample_bootstrap()
         for event in bootstrap["events"]:

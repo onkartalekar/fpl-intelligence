@@ -2,7 +2,9 @@ import unittest
 
 from fpl_intel.model_performance import (
     archive_forecast,
+    archive_shadow_forecast,
     build_performance_report,
+    build_shadow_performance_report,
     build_team_model_performance,
     migrate_manager_picks,
     normalize_live_event,
@@ -372,6 +374,113 @@ class ModelPerformanceTests(unittest.TestCase):
         migrate_manager_picks(store, team_id=364759)
 
         self.assertNotIn("manager_picks", store)
+
+
+class ShadowForecastTests(unittest.TestCase):
+    """Issue #65: non-champion model_versions are tracked and scored additively, without
+    disturbing the champion's own player_forecasts/build_performance_report numbers."""
+
+    _shadow_forecasts = [
+        {"id": 1, "modeled": 4.0, "lower": 1.0, "upper": 7.0},
+        {"id": 2, "modeled": 3.0, "lower": 0.0, "upper": 6.0},
+        {"id": 3, "modeled": 0.0, "lower": 0.0, "upper": 0.0},
+    ]
+
+    def test_archive_shadow_forecast_freezes_once_per_model_version_and_event(self):
+        store = {"forecasts": [], "actual_events": {}}
+
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "2026-08-20T12:00:00-04:00", self._shadow_forecasts)
+
+        frozen = store["shadow_forecasts"]["ml-minutes-ridge-v1"]["1"]
+        self.assertEqual(frozen["players"]["1"], [4.0, 1.0, 7.0])
+        self.assertEqual(frozen["players"]["2"], [3.0, 0.0, 6.0])
+
+        # Re-archiving the same (model_version, event) must not overwrite (first-write-wins,
+        # matching archive_forecast's own immutability discipline).
+        archive_shadow_forecast(
+            store, "ml-minutes-ridge-v1", 1, "later", [{"id": 1, "modeled": 99.0, "lower": 99.0, "upper": 99.0}]
+        )
+        self.assertEqual(store["shadow_forecasts"]["ml-minutes-ridge-v1"]["1"]["players"]["1"], [4.0, 1.0, 7.0])
+
+    def test_archive_shadow_forecast_keeps_distinct_model_versions_separate(self):
+        store = {"forecasts": [], "actual_events": {}}
+
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "t1", self._shadow_forecasts)
+        archive_shadow_forecast(
+            store, "ml-residual-v1", 1, "t2", [{"id": 1, "modeled": 8.0, "lower": 3.0, "upper": 12.0}]
+        )
+
+        self.assertEqual(set(store["shadow_forecasts"].keys()), {"ml-minutes-ridge-v1", "ml-residual-v1"})
+        self.assertEqual(store["shadow_forecasts"]["ml-residual-v1"]["1"]["players"]["1"], [8.0, 3.0, 12.0])
+
+    def test_archive_shadow_forecast_never_touches_champion_player_forecasts(self):
+        store = {"forecasts": [], "actual_events": {}}
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "t1", self._shadow_forecasts)
+        self.assertNotIn("player_forecasts", store)
+
+    def test_archive_shadow_forecast_ignores_empty_inputs(self):
+        store = {"forecasts": [], "actual_events": {}}
+        archive_shadow_forecast(store, None, 1, "t1", self._shadow_forecasts)
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", None, "t1", self._shadow_forecasts)
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "t1", [])
+        self.assertNotIn("shadow_forecasts", store)
+
+    def test_build_shadow_performance_report_scores_each_model_version_independently(self):
+        store = {"forecasts": [], "actual_events": {"1": {"1": 6, "2": 0, "3": 0}}}
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "t1", self._shadow_forecasts)
+        archive_shadow_forecast(
+            store, "ml-residual-v1", 1, "t2",
+            [{"id": 1, "modeled": 10.0, "lower": 5.0, "upper": 15.0}],
+        )
+
+        report = build_shadow_performance_report(store)
+
+        self.assertEqual(set(report.keys()), {"ml-minutes-ridge-v1", "ml-residual-v1"})
+        minutes_report = report["ml-minutes-ridge-v1"]
+        self.assertEqual(minutes_report["status"], "active")
+        self.assertEqual(minutes_report["model_version"], "ml-minutes-ridge-v1")
+        # player 1: modeled 4.0 vs actual 6 -> error +2.0; player 2 (0 actual too) excluded
+        # by the same cohort rule the champion's own player_performance uses.
+        self.assertEqual({row["element_id"] for row in minutes_report["comparisons"]}, {1, 2})
+        row = next(row for row in minutes_report["comparisons"] if row["element_id"] == 1)
+        self.assertEqual(row["error"], 2.0)
+
+        residual_report = report["ml-residual-v1"]
+        self.assertEqual(residual_report["summary"]["mae"], 4.0)  # |6 - 10|
+
+    def test_build_shadow_performance_report_is_empty_without_any_shadow_forecasts(self):
+        self.assertEqual(build_shadow_performance_report({"forecasts": [], "actual_events": {}}), {})
+
+    def test_build_performance_report_includes_shadow_models_without_changing_champion_numbers(self):
+        store = {"forecasts": [], "actual_events": {}}
+        champion_decision = {
+            "status": "active_preliminary",
+            "event": 1,
+            "generated_at": "2026-08-20T12:00:00-04:00",
+            "model": {"version": "0.7", "is_champion": True},
+            "profile_recommendations": [
+                {
+                    "id": "balanced",
+                    "label": "Balanced",
+                    "metrics": {"central_1gw": 44.0, "lower_1gw": 36.0, "upper_1gw": 52.0},
+                    "evaluation_horizons": {
+                        "1": {"lineup_player_ids": list(range(1, 12)), "captain_id": 1},
+                    },
+                }
+            ],
+        }
+        archive_forecast(store, champion_decision, "2026-08-21T17:30:00Z")
+        store["actual_events"]["1"] = {"1": 6, "2": 4, "3": 0}
+        archive_shadow_forecast(store, "ml-minutes-ridge-v1", 1, "t1", self._shadow_forecasts)
+
+        without_shadow = build_performance_report({**store, "shadow_forecasts": {}})
+        with_shadow = build_performance_report(store)
+
+        # Adding a shadow challenger must not move a single champion-report number.
+        for key in ("summary", "by_horizon", "by_profile", "calibration", "completed_comparisons"):
+            self.assertEqual(with_shadow[key], without_shadow[key])
+        self.assertIn("ml-minutes-ridge-v1", with_shadow["shadow_models"])
+        self.assertEqual(without_shadow["shadow_models"], {})
 
 
 if __name__ == "__main__":

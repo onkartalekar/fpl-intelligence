@@ -154,7 +154,7 @@ def build_origin_inputs(season, origin_gw):
                 "_expected_goals_conceded": 0.0,
                 "_saves": 0,
                 "_defensive_contribution": 0.0,
-                "_recent_rows": [],
+                "_recent_rows_by_gw": {},
                 "_last_gameweek": 0,
             },
         )
@@ -167,7 +167,16 @@ def build_origin_inputs(season, origin_gw):
         record["_expected_goals_conceded"] += row["expected_goals_conceded"]
         record["_saves"] += row["saves"]
         record["_defensive_contribution"] += row.get("defensive_contribution", 0.0)
-        record["_recent_rows"].append({"gameweek": row["gameweek"], "minutes": row["minutes"], "starts": row["starts"]})
+        # ~1.4% of (element, gameweek) rows in the historical dataset are duplicated: a
+        # double-gameweek fixture is recorded as two separate rows under one shared "GW" label.
+        # Summing here (rather than the last-row-seen overwrite an earlier prototype used) keeps
+        # a double-gameweek's full minutes/starts in the per-gameweek recency window below instead
+        # of silently dropping one of the two fixtures. See plans/issue-65-ml-shadow-model.md.
+        gw_bucket = record["_recent_rows_by_gw"].setdefault(
+            row["gameweek"], {"gameweek": row["gameweek"], "minutes": 0, "starts": 0}
+        )
+        gw_bucket["minutes"] += row["minutes"]
+        gw_bucket["starts"] += row["starts"]
         if row["gameweek"] >= record["_last_gameweek"]:
             record["_last_gameweek"] = row["gameweek"]
             record["now_cost"] = row["now_cost"]
@@ -179,7 +188,7 @@ def build_origin_inputs(season, origin_gw):
         # Per-90 rates mirror the live bootstrap-static's own derived fields,
         # computed here from season-to-date cumulative totals only.
         per_90 = (lambda total: round(total * 90 / minutes, 3)) if minutes > 0 else (lambda total: 0.0)
-        recent_rows = sorted(record.pop("_recent_rows"), key=lambda row: row["gameweek"])
+        recent_rows = sorted(record.pop("_recent_rows_by_gw").values(), key=lambda row: row["gameweek"])
         elements.append(
             {
                 **record,

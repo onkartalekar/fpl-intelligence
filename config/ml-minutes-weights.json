@@ -1,0 +1,34 @@
+{
+  "model_version": "ml-minutes-ridge-v1",
+  "fitted_at": "2026-08-08",
+  "ridge_lambda": 5.0,
+  "fit_seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25",
+    "2025-26"
+  ],
+  "feature_names": [
+    "intercept",
+    "season_start_share",
+    "season_minutes_per_game_90",
+    "last3_start_rate",
+    "last3_avg_minutes_90",
+    "trend",
+    "maturity"
+  ],
+  "weights": [
+    2.0431,
+    -1.6527,
+    21.479,
+    -3.8711,
+    65.6249,
+    -2.2183,
+    0.7429
+  ],
+  "validation": {
+    "method": "leave-one-season-out cross-validation, pooled minutes MAE vs. the live _expected_minutes baseline",
+    "pooled_baseline_mae": 18.797,
+    "pooled_learned_mae": 14.953
+  }
+}

@@ -1141,6 +1141,44 @@ negative.
 
 ---
 
+## Considered and declined — ridge-regression residual meta-learner (issue #65, 2026-08-08)
+
+**Context:** issue #65 asked whether a small ML model trained on
+signals the projection model ignores (ICT index, bps, price, ownership,
+transfer activity) could improve on the existing hand-shrunk `residual`
+component by predicting the live model's own error directly.
+
+**What was tried:** ridge regression (`numpy` closed-form solve)
+predicting `actual_points - modeled_points` (horizon=1) from pre-origin
+per-game ICT/bps rates, price, log-ownership, and net transfer balance,
+fit on 2022-23/2023-24/2024-25 and evaluated on the held-out 2025-26
+season -- the same fit/held-out split `run_backtest.py` uses for the
+live model.
+
+**Result:** held-out MAE got worse (1.0740 -> 1.1052, champion vs.
+champion+residual), including in-sample on the fit seasons themselves
+(1.0584 -> 1.0975). Held-out RMSE modestly improved (2.0364 -> 2.0216)
+in the same runs -- the signature of a model minimizing squared error
+at the expense of the metric this project actually reports and gates
+adoption on (MAE, per `_summarize()` and the model-change rule).
+
+**Decision: declined as tested**, on the project's own MAE bar. Not
+recorded as "no signal" -- the RMSE improvement suggests the features
+aren't pure noise, but ridge regression under a squared-error objective
+is the wrong tool for an MAE-gated decision. If revisited, start from
+an MAE-minimizing objective (L1/quantile-loss regression) or an
+outlier-robust non-linear model, not this exact formulation.
+
+**Also from issue #65:** a companion ML minutes/start-probability ridge
+model (candidate #1) *did* clear the project's backtest bar in every
+held-out season and now runs in shadow mode (`src/fpl_intel/ml_minutes.py`,
+`config/ml-minutes-weights.json`) -- computed and logged every refresh
+under its own `model_version`, never feeding `project_players()` or any
+recommendation. See `plans/issue-65-ml-shadow-model.md` for the full
+backtest/full-pipeline evidence and the shadow design.
+
+---
+
 ## Cross-cutting rules
 
 - **Versioning:** every phase bumps `model.version`; frozen forecasts keep
@@ -1152,13 +1190,17 @@ negative.
 - **Dependencies:** stdlib-only through Phase 4 (deliberate); Phase 5 adds
   an LLM API call as an optional runtime dependency — no vendor SDK, and
   provider-agnostic (Claude by default, or any OpenAI Chat Completions-
-  compatible host via env vars — see Phase 5's 2026-07-25 amendment).
+  compatible host via env vars — see Phase 5's 2026-07-25 amendment). Issue
+  #65 (2026-08-08) adds `numpy` as a first declared third-party Python
+  dependency (`requirements.txt`), scoped to offline ridge-weight fitting
+  for a shadow-mode ML minutes challenger — see that issue's entry below.
 - **Docs:** README and SPECIFICATION.md updated as each phase lands;
   `model.limitations` in the dashboard always reflects the active phase's
   real limitations.
-- **Out of scope (re-affirmed):** betting odds; gradient boosting / ML
-  regressors (revisit only if the fitted statistical model plateaus in
-  live calibration); any automated coefficient adoption.
+- **Out of scope (re-affirmed):** betting odds; an ML model *feeding live
+  recommendations* (issue #65 runs one narrow ML challenger in shadow mode
+  only, computed and logged but never wired into `project_players()` —
+  see that issue's entry below); any automated coefficient adoption.
 
 ## Suggested order & rough total (superseded by actual results below)
 

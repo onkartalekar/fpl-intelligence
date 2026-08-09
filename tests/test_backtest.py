@@ -130,6 +130,28 @@ class BuildOriginInputsTests(unittest.TestCase):
         snapshot = build_origin_inputs(season, origin_gw=1)
         self.assertEqual(snapshot["elements"], [])
 
+    def test_double_gameweek_rows_are_summed_not_overwritten_in_recent_history(self):
+        """~1.4% of (element, gameweek) rows in the historical dataset are duplicated: a
+        double-gameweek fixture recorded as two rows sharing one GW label. An earlier
+        prototype took the last row seen, silently dropping one fixture's minutes from the
+        recency window -- see plans/issue-65-ml-shadow-model.md."""
+        season = self._season()
+        season["rows"] = [
+            _row(10, "Player Ten", 3, "Alpha FC", 1, 90, 1, 6, now_cost=55),
+            _row(10, "Player Ten", 3, "Alpha FC", 2, 45, 1, 2, now_cost=55),  # GW2 fixture A
+            _row(10, "Player Ten", 3, "Alpha FC", 2, 30, 0, 1, now_cost=55),  # GW2 fixture B (double GW)
+        ]
+        snapshot = build_origin_inputs(season, origin_gw=3)
+        player = snapshot["elements"][0]
+        self.assertEqual(player["recent_history"], [
+            {"minutes": 90, "started": True},   # gw1
+            {"minutes": 75, "started": True},   # gw2: 45 + 30 summed into one entry, starts 1+0 > 0
+        ])
+        # Season-to-date cumulative totals were already correct before this fix (they sum
+        # every row regardless of gameweek label) -- unaffected by this change.
+        self.assertEqual(player["minutes"], 165)
+        self.assertEqual(player["starts"], 2)
+
 
 class SeasonComparisonsTests(unittest.TestCase):
     def _season(self, label="test"):

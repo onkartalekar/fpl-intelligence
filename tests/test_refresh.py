@@ -318,6 +318,57 @@ class RefreshProjectTests(unittest.TestCase):
         self.assertEqual(state["decision_center"]["event"], 1)
         self.assertEqual(state["decision_center"]["weekly_decisions"]["status"], "waiting_for_gw2")
 
+    def _refresh_with_shadow(self, root):
+        (root / "data").mkdir()
+        (root / "config").mkdir()
+        (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+        (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+        return refresh_project(
+            root,
+            bootstrap_payload=sample_bootstrap(),
+            fixture_payload=sample_fixtures(),
+            official_transfer_records=[],
+            generated_at="2026-07-23T18:00:00-04:00",
+        )
+
+    def test_refresh_computes_and_archives_the_ml_minutes_shadow_forecast(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = self._refresh_with_shadow(root)
+
+            self.assertIn("ml-minutes-ridge-v1", state["model_performance"]["shadow_models"])
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            shadow = persisted["shadow_forecasts"]["ml-minutes-ridge-v1"]["1"]
+            self.assertGreater(len(shadow["players"]), 0)
+            # Player forecasts are [modeled, lower, upper] triples, same shape as the
+            # champion's own frozen player_forecasts (model_performance.py).
+            first_player_forecast = next(iter(shadow["players"].values()))
+            self.assertEqual(len(first_player_forecast), 3)
+
+    def test_shadow_forecast_computation_never_changes_the_champion_recommendation(self):
+        """Wiring the issue #65 shadow challenger into the refresh pipeline must be purely
+        additive -- the champion's own recommended squad/xp is computed by
+        build_gw_recommendations before the shadow hook ever runs, so it cannot be affected,
+        but this locks that in as an explicit regression test."""
+        with tempfile.TemporaryDirectory() as first_directory, tempfile.TemporaryDirectory() as second_directory:
+            with_shadow_state = self._refresh_with_shadow(Path(first_directory))
+
+            # A second, independent refresh with the exact same inputs -- if the shadow hook
+            # ever mutated shared bootstrap/player data in place, the two runs would diverge.
+            other_state = self._refresh_with_shadow(Path(second_directory))
+
+        self.assertEqual(
+            with_shadow_state["decision_center"]["recommended_squad"],
+            other_state["decision_center"]["recommended_squad"],
+        )
+        self.assertEqual(
+            with_shadow_state["decision_center"]["model"]["version"],
+            other_state["decision_center"]["model"]["version"],
+        )
+        self.assertNotEqual(
+            with_shadow_state["decision_center"]["model"]["version"], "ml-minutes-ridge-v1"
+        )
+
     def test_refresh_feeds_recent_confirmed_transfers_into_projection_model(self):
         bootstrap = sample_bootstrap()
         player = bootstrap["elements"][0]

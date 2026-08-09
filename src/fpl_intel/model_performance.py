@@ -149,6 +149,34 @@ def archive_forecast(store, decision, deadline_time=None):
     return store
 
 
+def archive_shadow_forecast(store, model_version, origin_event, generated_at, player_forecasts):
+    """Archive the first pre-result per-player forecast for one non-champion `model_version`.
+
+    Issue #65's shadow challenger(s) have no squad/profile concept of their own -- see
+    `ml_minutes.build_shadow_forecast` -- so this is a smaller sibling of `archive_forecast`'s
+    `player_forecasts` freeze, keyed by `model_version` rather than gated on `is_champion`.
+    Kept fully separate from `store["player_forecasts"]`/`store["champion_forecasts"]` so the
+    champion's own frozen forecasts and report shape are untouched by any number of shadow
+    challengers coming and going over time. Idempotent per (model_version, origin_event), same
+    "archive the first one seen, never rewrite it" discipline as `archive_forecast`.
+    """
+    if not model_version or not origin_event or not player_forecasts:
+        return store
+    shadow = store.setdefault("shadow_forecasts", {}).setdefault(str(model_version), {})
+    origin_key = str(int(origin_event))
+    if origin_key in shadow:
+        return store
+    shadow[origin_key] = {
+        "model_version": model_version,
+        "generated_at": generated_at,
+        "players": {
+            str(row["id"]): [row.get("modeled", 0.0), row.get("lower", 0.0), row.get("upper", 0.0)]
+            for row in player_forecasts
+        },
+    }
+    return store
+
+
 def _actual_points(actual_events, origin_event, horizon, lineup_ids, captain_id, event_lineups=None):
     event_ids = range(origin_event, origin_event + horizon)
     if not all(str(event_id) in actual_events for event_id in event_ids):
@@ -215,17 +243,15 @@ def _calibration(summary, comparisons):
     }
 
 
-def _player_performance(store):
-    """Compare frozen per-player forecasts with official per-player actuals.
-
-    Mirrors the backtest cohort rule (project_players/season_comparisons):
-    a player only enters the comparison set for an origin event if the
-    model gave them a positive modeled score or they actually scored --
-    this keeps untouched fringe players from diluting the error metrics
-    with trivial correct-zero predictions.
+def _score_frozen_player_forecasts(frozen_forecasts, actual_events):
+    """Compare a store of frozen per-player forecasts (keyed by origin event) with official
+    per-player actuals. Shared by `_player_performance` (the champion's own
+    `player_forecasts`) and `_shadow_model_performance` (one non-champion `model_version`'s
+    `shadow_forecasts` entry, issue #65) so both apply the exact same cohort rule and error
+    metrics -- a player only enters the comparison set for an origin event if the model gave
+    them a positive modeled score or they actually scored, which keeps untouched fringe
+    players from diluting the error metrics with trivial correct-zero predictions.
     """
-    frozen_forecasts = store.get("player_forecasts", {})
-    actual_events = store.get("actual_events", {})
     comparisons = []
     scored_events = []
     for origin_key, frozen in frozen_forecasts.items():
@@ -253,11 +279,57 @@ def _player_performance(store):
                 }
             )
     comparisons.sort(key=lambda row: (row["event"], row["element_id"]), reverse=True)
+    return comparisons, sorted(scored_events)
+
+
+def _player_performance(store):
+    """Compare the champion's own frozen per-player forecasts with official per-player actuals."""
+    comparisons, scored_events = _score_frozen_player_forecasts(
+        store.get("player_forecasts", {}), store.get("actual_events", {})
+    )
     return {
         "status": "active" if comparisons else "waiting_for_results",
-        "events": sorted(scored_events),
+        "events": scored_events,
         "comparisons": comparisons,
         "summary": _summarize(comparisons),
+    }
+
+
+def _shadow_model_performance(store, model_version):
+    """Score one non-champion `model_version`'s frozen shadow forecasts (issue #65).
+
+    Uses the exact same cohort rule and error metrics as the champion's own
+    `_player_performance`, via `_score_frozen_player_forecasts` -- but reads from
+    `store["shadow_forecasts"][model_version]`, entirely separate from the champion's
+    `player_forecasts`/`build_performance_report` numbers. Deliberately kept apart per
+    plans/issue-65-ml-shadow-model.md: the champion's own calibration gate
+    (`_MIN_CALIBRATION_COMPARISONS`, "don't retune from a small sample") is champion-specific
+    and would be corrupted by challenger rows blended in.
+    """
+    comparisons, scored_events = _score_frozen_player_forecasts(
+        store.get("shadow_forecasts", {}).get(model_version, {}), store.get("actual_events", {})
+    )
+    return {
+        "model_version": model_version,
+        "status": "active" if comparisons else "waiting_for_results",
+        "events": scored_events,
+        "comparisons": comparisons,
+        "summary": _summarize(comparisons),
+    }
+
+
+def build_shadow_performance_report(store):
+    """One performance report per non-champion `model_version` currently tracked in shadow.
+
+    Additive alongside `build_performance_report`'s champion-only numbers (issue #65) --
+    driven entirely by whatever `model_version` keys `archive_shadow_forecast` has recorded
+    into `store["shadow_forecasts"]`, so a new challenger needs no change here to start
+    being scored, and a retired one simply stops appearing once its forecasts age out of the
+    store (nothing here removes stored data itself).
+    """
+    return {
+        model_version: _shadow_model_performance(store, model_version)
+        for model_version in sorted(store.get("shadow_forecasts", {}).keys())
     }
 
 
@@ -394,6 +466,11 @@ def build_performance_report(store):
         "by_horizon": by_horizon,
         "by_profile": by_profile,
         "calibration": _calibration(summary, comparisons),
+        # Issue #65: every non-champion `model_version` currently running in shadow, scored
+        # the same way as the champion above but kept in its own key -- never blended into
+        # `summary`/`by_horizon`/`by_profile`/`calibration`, which stay champion-only exactly
+        # as before this key was added. See build_shadow_performance_report.
+        "shadow_models": build_shadow_performance_report(store),
     }
 
 

@@ -242,6 +242,7 @@ def _fixtures_played_by_team(fixtures, start_event):
 
 def project_players(
     bootstrap, fixtures, horizon=5, start_event=None, recent_transfers=None, as_of=None,
+    expected_minutes_override=None,
 ):
     """Project players over a rolling official-event horizon without betting markets.
 
@@ -250,6 +251,15 @@ def project_players(
     toward a positional baseline and adjusted by official FDR. Expected minutes
     are estimated conservatively from season-to-date starts and minutes. The
     first projected event also blends in the official FPL ``ep_next`` estimate.
+
+    ``expected_minutes_override`` (default ``None``, preserving existing behavior
+    exactly): an optional ``(player, fixtures_played, availability_multiplier) -> float``
+    callable that fully replaces the champion's own expected-minutes estimate (both the
+    season-average and Phase 4 recency-weighted branches) for every player, wherever it is
+    supplied. Nothing in this codebase passes it today except `ml_minutes.build_shadow_forecast`
+    (issue #65) computing its own, separate, never-live-facing forecast -- see that module's
+    docstring. Everything downstream of expected minutes (opponent strength, component
+    scoring, bonus/residual, uncertainty bands, `component_xp`) is untouched either way.
     """
     start_event = int(start_event or _next_event_id(bootstrap))
     projection_events = list(range(start_event, start_event + horizon))
@@ -301,7 +311,13 @@ def project_players(
             if preseason_fixtures is not None
             else int(played_by_team.get(int(player.get("team") or 0), max(1, start_event - 1)))
         )
-        if use_recency_minutes:
+        if expected_minutes_override is not None:
+            # issue #65 shadow challenger: fully replaces both branches below, never used
+            # for a live recommendation -- see this parameter's docstring above.
+            base_expected_minutes = expected_minutes_override(
+                player, team_fixtures_played, _availability_multiplier(player)
+            )
+        elif use_recency_minutes:
             base_expected_minutes = minutes_model.expected_minutes_from_history(
                 recent_history, availability_multiplier=_availability_multiplier(player)
             )
@@ -991,6 +1007,8 @@ def build_gw_recommendations(
                 "Projections use official Premier League fixtures and FPL fixture difficulty. European and domestic-cup "
                 "schedules are not yet modeled directly, so their travel, fatigue, and rotation effects are not included explicitly.",
                 "Projections are preliminary and have not yet been calibrated on 2026/27 results.",
+                "An ML-based minutes model is being evaluated in shadow this season; it never affects your "
+                "recommendations.",
             ],
             "role_transition_player_ids": role_transition_player_ids,
             "teammate_transfer_impact_player_ids": teammate_transfer_impact_player_ids,
