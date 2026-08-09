@@ -30,6 +30,25 @@ def normalize_manager_picks(payload):
     ]
 
 
+def migrate_manager_picks(store, team_id):
+    """Reshape a pre-#64 single-team `manager_picks` store in place, idempotently.
+
+    Before issue #64, `manager_picks` was `{event_key: picks}` for whichever one team
+    `config/user-profile.json` configured. It is now `{team_id: {event_key: picks}}`, so that
+    many teams with a saved #45 profile can each accumulate their own history. The two shapes are
+    reliably distinguishable: old values are pick lists, new values are per-event dicts. A no-op
+    once already migrated, when there's nothing to migrate, or when there's no known `team_id` to
+    attribute the old flat data to (it is then simply left alone -- stale, but harmless, since it
+    won't match any team's lookup key).
+    """
+    manager_picks = store.get("manager_picks")
+    if not manager_picks or team_id is None:
+        return store
+    if all(isinstance(value, list) for value in manager_picks.values()):
+        store["manager_picks"] = {str(team_id): manager_picks}
+    return store
+
+
 def archive_forecast(store, decision, deadline_time=None):
     """Archive the first pre-result forecast for an origin event without rewriting it."""
     if decision.get("status") != "active_preliminary" or not decision.get("event"):
@@ -242,15 +261,19 @@ def _player_performance(store):
     }
 
 
-def _team_performance(store):
-    """Score the manager's own published picks against frozen per-player forecasts.
+def _team_performance(store, team_id):
+    """Score one team's own published picks against frozen per-player forecasts.
 
     Only events with BOTH published picks (facts) and a frozen pre-deadline
     forecast (never reconstructed with hindsight) are scored; an event
     missing a frozen forecast yields no comparison rather than one derived
     after the fact.
+
+    `manager_picks` is keyed per team ID (issue #64) -- `team_id` selects which team's slice to
+    score; a team with no collected picks yet (or an unrecognized team_id) simply yields no
+    comparisons, the same "waiting for results" shape as before this store became multi-team.
     """
-    manager_picks = store.get("manager_picks", {})
+    manager_picks = (store.get("manager_picks") or {}).get(str(team_id), {})
     actual_events = store.get("actual_events", {})
     frozen_forecasts = store.get("player_forecasts", {})
     comparisons = []
@@ -354,6 +377,12 @@ def build_performance_report(store):
         profile_id: _summarize([row for row in comparisons if row["profile_id"] == profile_id])
         for profile_id in ("conservative", "balanced", "aggressive")
     }
+    # `player_performance`/`team_performance` deliberately no longer live here (issue #64) --
+    # `team_performance` is inherently per-team now that `manager_picks` is keyed by team ID, and
+    # both are cheap enough to compute fresh per request rather than precomputed for every saved
+    # profile on every refresh. See `build_team_model_performance` below, spliced in at request
+    # time by `server.py`'s `_serve_dashboard` the same way `state["manager"]`/`state["profile"]`
+    # already are for issues #45/#46.
     return {
         "status": "active" if comparisons else "waiting_for_results",
         "method": "Frozen pre-event profile XI and captain compared with official FPL event points; no hindsight substitutions or autosubs.",
@@ -365,6 +394,19 @@ def build_performance_report(store):
         "by_horizon": by_horizon,
         "by_profile": by_profile,
         "calibration": _calibration(summary, comparisons),
+    }
+
+
+def build_team_model_performance(store, team_id):
+    """Compute one team's request-time model-performance slice (issue #64).
+
+    Splits back out what `build_performance_report` used to bake at refresh time for a single
+    hardcoded team: `team_performance` (scored against this team's slice of the now-per-team-keyed
+    `manager_picks`) and `player_performance` (already team-independent, but grouped here since it
+    was previously returned alongside `team_performance` and is just as cheap to compute on
+    demand). Mirrors `compute_manager_view`'s per-request role in `refresh.py`.
+    """
+    return {
+        "team_performance": _team_performance(store, team_id),
         "player_performance": _player_performance(store),
-        "team_performance": _team_performance(store),
     }

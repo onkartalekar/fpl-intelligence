@@ -707,17 +707,187 @@ class RefreshProjectTests(unittest.TestCase):
                 bootstrap_payload=bootstrap,
                 manager_payload=manager_payload,
                 event_live_payloads={1: live},
-                manager_picks_payloads={1: picks},
+                manager_picks_payloads={364759: {1: picks}},
                 generated_at="2026-08-22T12:00:00-04:00",
             )
 
             persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
-            self.assertIn("1", persisted["manager_picks"])
-            self.assertEqual(persisted["manager_picks"]["1"][0]["element_id"], 1)
-            self.assertEqual(len(state["model_performance"]["team_performance"]["comparisons"]), 1)
-            comparison = state["model_performance"]["team_performance"]["comparisons"][0]
+            self.assertIn("364759", persisted["manager_picks"])
+            self.assertIn("1", persisted["manager_picks"]["364759"])
+            self.assertEqual(persisted["manager_picks"]["364759"]["1"][0]["element_id"], 1)
+            # team_performance/player_performance no longer live in refresh-time state (issue #64)
+            # -- they're spliced in per request instead, see ServerTests/TeamModelPerformanceTests.
+            self.assertNotIn("team_performance", state["model_performance"])
+            self.assertNotIn("player_performance", state["model_performance"])
+
+            from fpl_intel.model_performance import build_team_model_performance
+            team_performance = build_team_model_performance(persisted, team_id=364759)["team_performance"]
+            self.assertEqual(len(team_performance["comparisons"]), 1)
+            comparison = team_performance["comparisons"][0]
             self.assertEqual(comparison["modeled_points"], 10.0)
             self.assertEqual(comparison["actual_points"], 6)
+
+
+class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
+    """Issue #64: the refresh loop iterates every saved #45 profile's team, capped per run (C1)."""
+
+    def _bootstrap(self):
+        return {
+            "events": [
+                {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-14T17:30:00Z", "finished": True},
+                {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-21T17:30:00Z", "is_next": True, "finished": False},
+            ],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+
+    def _seed_root(self, directory, team_ids):
+        from fpl_intel.profiles import save_profile
+
+        root = Path(directory)
+        (root / "data").mkdir()
+        (root / "config").mkdir()
+        (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+        (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+        for team_id in team_ids:
+            save_profile(
+                root / "data" / "profiles.db", team_id=team_id, timezone="UTC",
+                risk_profile="balanced", confirmed_free_transfers=None,
+                confirmed_free_transfers_event=None, now="2026-08-08T00:00:00Z",
+            )
+        return root
+
+    def test_refresh_collects_picks_for_every_saved_profiles_team(self):
+        live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+        picks = {"picks": [{"element": 1, "multiplier": 1, "is_captain": False, "is_vice_captain": False}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200])
+
+            state = refresh_project(
+                root,
+                bootstrap_payload=self._bootstrap(),
+                event_live_payloads={1: live},
+                manager_picks_payloads={100: {1: picks}, 200: {1: picks}},
+                generated_at="2026-08-15T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted["manager_picks"].keys()), {"100", "200"})
+            self.assertEqual(persisted["manager_picks"]["100"]["1"][0]["element_id"], 1)
+            self.assertEqual(persisted["manager_picks"]["200"]["1"][0]["element_id"], 1)
+            self.assertNotIn("team_performance", state["model_performance"])
+
+    def test_refresh_caps_the_number_of_teams_collected_in_one_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200, 300])
+
+            with patch("fpl_intel.refresh._MANAGER_PICKS_TEAM_CAP", 2), \
+                 patch("fpl_intel.refresh.fetch_bootstrap", return_value=self._bootstrap()), \
+                 patch("fpl_intel.refresh.fetch_fixtures", return_value=[]), \
+                 patch("fpl_intel.refresh.fetch_manager_event_picks", return_value=None) as mock_fetch:
+                live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+                refresh_project(
+                    root,
+                    event_live_payloads={1: live},
+                    generated_at="2026-08-15T12:00:00-04:00",
+                )
+
+            called_team_ids = sorted(call.args[0] for call in mock_fetch.call_args_list)
+            self.assertEqual(called_team_ids, [100, 200])
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted["manager_picks"].keys()), {"100", "200"})
+
+    def test_teams_already_caught_up_do_not_consume_the_cap(self):
+        """A team with every finished event's picks already collected costs nothing this run,
+        leaving cap headroom for a team that still needs collecting."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200])
+            (root / "data" / "model-performance.json").write_text(
+                json.dumps({
+                    "forecasts": [], "actual_events": {},
+                    "manager_picks": {"100": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]}},
+                }),
+                encoding="utf-8",
+            )
+
+            with patch("fpl_intel.refresh._MANAGER_PICKS_TEAM_CAP", 1), \
+                 patch("fpl_intel.refresh.fetch_bootstrap", return_value=self._bootstrap()), \
+                 patch("fpl_intel.refresh.fetch_fixtures", return_value=[]), \
+                 patch("fpl_intel.refresh.fetch_manager_event_picks", return_value=None) as mock_fetch:
+                live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+                refresh_project(
+                    root,
+                    event_live_payloads={1: live},
+                    generated_at="2026-08-15T12:00:00-04:00",
+                )
+
+            called_team_ids = sorted(call.args[0] for call in mock_fetch.call_args_list)
+            self.assertEqual(called_team_ids, [200])
+
+    def test_refresh_migrates_pre_issue_64_flat_manager_picks_store(self):
+        """A model-performance.json written before #64 has flat manager_picks ({event: picks})
+        for whichever single team config/user-profile.json configured -- refresh migrates it to
+        the per-team shape ({team_id: {event: picks}}) on load, using that same team ID."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [])
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps({"manager": {"team_id": 364759}}), encoding="utf-8"
+            )
+            (root / "data" / "model-performance.json").write_text(
+                json.dumps({
+                    "forecasts": [], "actual_events": {},
+                    "manager_picks": {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]},
+                }),
+                encoding="utf-8",
+            )
+            live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+
+            with patch("fpl_intel.refresh.collect_public_manager", return_value={
+                "entry": {"id": 364759, "name": "Solo", "player_first_name": "Solo",
+                          "player_last_name": "Manager", "current_event": None, "started_event": 1},
+                "history": {"current": [], "past": [], "chips": []},
+                "transfers": [], "picks": None,
+            }):
+                refresh_project(
+                    root,
+                    bootstrap_payload=self._bootstrap(),
+                    event_live_payloads={1: live},
+                    generated_at="2026-08-15T12:00:00-04:00",
+                )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                persisted["manager_picks"]["364759"],
+                {"1": [{"element_id": 1, "multiplier": 1, "is_captain": False}]},
+            )
+
+    def test_config_team_id_is_included_alongside_saved_profiles_without_duplication(self):
+        picks = {"picks": [{"element": 1, "multiplier": 1, "is_captain": False, "is_vice_captain": False}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100])
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps({"manager": {"team_id": 100}}), encoding="utf-8"
+            )
+            live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+
+            with patch("fpl_intel.refresh._MANAGER_PICKS_TEAM_CAP", 5), \
+                 patch("fpl_intel.refresh.collect_public_manager", return_value={
+                     "entry": {"id": 100, "name": "Solo", "player_first_name": "Solo",
+                               "player_last_name": "Manager", "current_event": None, "started_event": 1},
+                     "history": {"current": [], "past": [], "chips": []},
+                     "transfers": [], "picks": None,
+                 }):
+                refresh_project(
+                    root,
+                    bootstrap_payload=self._bootstrap(),
+                    event_live_payloads={1: live},
+                    manager_picks_payloads={100: {1: picks}},
+                    generated_at="2026-08-15T12:00:00-04:00",
+                )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted["manager_picks"].keys()), {"100"})
 
 
 class ComputeManagerViewTests(unittest.TestCase):

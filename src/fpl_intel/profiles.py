@@ -66,6 +66,18 @@ def load_profile(db_path, team_id):
     return _row_to_dict(row)
 
 
+def list_team_ids(db_path):
+    """Return every team ID with a saved profile, ascending.
+
+    Used by `refresh.py`'s per-team `manager_picks` collection loop (issue #64) to discover which
+    teams now have season-long forecast-accuracy tracking to maintain, beyond the single team
+    `config/user-profile.json` used to hardcode.
+    """
+    with closing(_connect(db_path)) as connection:
+        rows = connection.execute("SELECT team_id FROM profiles ORDER BY team_id").fetchall()
+    return [row[0] for row in rows]
+
+
 def save_profile(
     db_path,
     team_id,
