@@ -204,6 +204,14 @@ class EmailCompositionTests(unittest.TestCase):
         self.assertIn(captain_name, body)
         self.assertNotIn("manager@example.com", body)
 
+        # Regression coverage for issue #82: all three risk profiles must appear in the
+        # composed body, not just the default/balanced one used for the full squad detail above.
+        self.assertIn("Conservative", body)
+        self.assertIn("Balanced", body)
+        self.assertIn("Aggressive", body)
+        for profile in decision_center["profile_recommendations"]:
+            self.assertIn(profile["squad"]["captain"]["name"], body)
+
     def test_active_transfer_decision_state_composes_the_recommendation(self):
         bootstrap, fixtures, manager = gw2_inputs()
         with patch("fpl_intel.refresh.collect_public_manager", return_value=_raw_manager_payload(manager)):
@@ -222,6 +230,17 @@ class EmailCompositionTests(unittest.TestCase):
         self.assertIn("Recommended action", body)
         self.assertIn("Point cost:", body)
         self.assertNotIn("manager@example.com", body)
+
+        # Regression coverage for issue #82: all three risk profiles must appear in the
+        # composed body, not just the default/balanced one used for the full-detail section above.
+        self.assertIn("Conservative", body)
+        self.assertIn("Balanced", body)
+        self.assertIn("Aggressive", body)
+        for profile in manager_view["weekly_decisions"]["profiles"]:
+            recommendation = profile["recommendation"]
+            captain_name = (recommendation.get("captain") or {}).get("name")
+            if captain_name:
+                self.assertIn(captain_name, body)
 
     def test_stale_data_adds_an_explicit_staleness_line(self):
         manager_view = {"weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."}}
