@@ -1187,3 +1187,24 @@ v0.6, MAE 2.39 (fit) / 2.34 (held-out) vs. the v0.3 starting point's 2.68 —
 an ~11% error reduction anchored by the calibration fix and the two bug
 fixes (minutes-formula divisor, MID/FWD residual trust), not by the two
 larger modeling efforts this session also tried.
+
+## Considered and declined — local and in-process triggers for the deadline reminder (issue #55, 2026-08-08)
+
+For the transfer-deadline email reminder, three trigger mechanisms were
+considered and declined in favor of a scheduled GitHub Actions workflow
+invoking a trigger-agnostic script (`scripts/send_deadline_reminder.py`,
+`.github/workflows/deadline-reminder.yml`). **launchd and cron on the
+user's machine**: ruled out by the explicit direction that the reminder
+be cloud-native with no local machine in the loop (a local timer also
+inherits the machine's sleep schedule — cron silently skips runs during
+sleep; launchd merely fires them late on wake). **An in-process
+scheduler thread in `server.py`**: only alive while the dashboard
+service happens to be running — the inverse of the reliability a
+reminder needs — and the only option that would put a timer inside the
+app itself, breaching the externally-triggered-only architecture behind
+SPECIFICATION.md's scheduling posture. **Dedicated cloud compute
+(VM/Fly machine) just for the reminder**: premature while issue #27's
+compute choice is deliberately open; GitHub Actions provides the
+always-on property with zero new infrastructure, and the reminder
+script migrates unchanged onto the #27 host's scheduler when that
+lands. Full analysis in `plans/issue-55-deadline-email-reminder.md`.

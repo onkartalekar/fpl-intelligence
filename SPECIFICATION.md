@@ -213,7 +213,7 @@ A quiet or not-yet-launched dataset is shown honestly. No fake player projection
 - Produce one final deadline report
 - If the manager is unavailable near the deadline, show the safest actionable plan and conditional alternatives
 
-No scheduler is created in this foundation phase. Scheduling will be considered only after an interactive refresh has been verified.
+No scheduler is created in this foundation phase. Scheduling will be considered only after an interactive refresh has been verified. That verification has since happened (the Refresh button → `/api/refresh` path), and issue #55's opt-in, admin-configured deadline-reminder GitHub Actions workflow (`.github/workflows/deadline-reminder.yml`, invoking the trigger-agnostic `scripts/send_deadline_reminder.py`) is the anticipated post-verification scheduling exception: it lives outside `server.py` and the refresh pipeline, which still never act on their own, and is slated to move onto issue #27's eventual hosted deployment's own scheduler once that lands.
 
 ## Decision-report contract
 

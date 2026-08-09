@@ -108,7 +108,9 @@ It writes:
 - `data/dashboard-state.json`
 - `dashboard.html`
 
-The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. No scheduler is configured, by explicit choice.
+The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. No scheduler is configured for the app itself, by explicit choice.
+
+The one anticipated exception is issue #55's opt-in deadline-email reminder: `.github/workflows/deadline-reminder.yml` is a scheduled GitHub Actions workflow (hourly) that invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. It is admin/secrets-configured (recipient team IDs, emails, and SMTP credentials live in Actions secrets, not in this repo), runs entirely outside `server.py` and the refresh pipeline -- neither of which gains any new self-triggered behavior -- and is expected to move onto issue #27's hosted deployment's own scheduler once that lands.
 
 ## Keep dashboard.html in sync with dashboard.py
 

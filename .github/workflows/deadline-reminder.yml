@@ -1,0 +1,94 @@
+name: Deadline reminder
+
+# Issue #55: emails a transfer-deadline reminder with current recommendations, a configurable
+# number of hours before each gameweek's deadline (default 3h, per-team via
+# FPL_INTEL_REMINDER_TEAMS). See plans/issue-55-deadline-email-reminder.md for the full design --
+# this workflow is deliberately a thin, trigger-agnostic wrapper around
+# scripts/send_deadline_reminder.py, which does all the real work and takes no opinion on what
+# invokes it (this workflow today; a future #27 host's own scheduler unchanged, later).
+#
+# GitHub's schedule cron is best-effort (documented delays of minutes, occasionally longer, under
+# load); the hourly cadence against a >=3h lead comfortably absorbs that.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print composed email(s) instead of sending (safe to run any time)."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # actions: write is only used for the best-effort layer-2 dedup marker (gh variable set) below.
+  actions: write
+
+jobs:
+  send-reminder:
+    runs-on: ubuntu-latest
+    env:
+      FPL_INTEL_REMINDER_TEAMS: ${{ secrets.FPL_INTEL_REMINDER_TEAMS }}
+      FPL_INTEL_SMTP_HOST: ${{ secrets.FPL_INTEL_SMTP_HOST }}
+      FPL_INTEL_SMTP_PORT: ${{ secrets.FPL_INTEL_SMTP_PORT }}
+      FPL_INTEL_SMTP_USER: ${{ secrets.FPL_INTEL_SMTP_USER }}
+      FPL_INTEL_SMTP_PASSWORD: ${{ secrets.FPL_INTEL_SMTP_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Public-repo log hygiene (see plans/issue-55-deadline-email-reminder.md): the script itself
+      # already never prints recipient emails or SMTP credentials in normal operation, but
+      # --dry-run's entire purpose is showing a human the composed email, which *does* include the
+      # recipient address and full body. Since this repo's workflow run logs are publicly visible,
+      # that full output is redirected to a file and never echoed to the log -- only the script's
+      # own final one-line summary ("checked: outside window" / "reminder sent for GW<N> to
+      # N team(s)") is printed. The full file is kept only as a short-lived build artifact for
+      # local/manual debugging of a workflow_dispatch dry run, not printed inline.
+      - name: Run deadline reminder
+        id: reminder
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            DRY_RUN_FLAG=""
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          else
+            DRY_RUN_FLAG=""
+          fi
+          PYTHONPATH=src python3 scripts/send_deadline_reminder.py $DRY_RUN_FLAG > reminder-output.log 2>&1
+          status=$?
+          echo "----- reminder run summary (full output, including any --dry-run email bodies, kept out of the public log; see the uploaded artifact) -----"
+          tail -n 1 reminder-output.log
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit $status
+
+      - name: Upload full run output (debug artifact, not printed to the log)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reminder-output-${{ github.run_id }}
+          path: reminder-output.log
+          retention-days: 7
+
+      # Belt-and-braces dedup marker (layer 2 in the plan doc, on top of the script's own
+      # stateless send-window check which is layer 1 and sufficient on its own). Best-effort and
+      # non-blocking: if GITHUB_TOKEN's actions:write scope turns out to be insufficient for
+      # writing a repo variable when this actually runs on GitHub, this step fails harmlessly
+      # (continue-on-error) and layer 1 alone still prevents duplicate sends. Only runs after a
+      # real (non-dry-run) scheduled send actually happened.
+      - name: Record last-sent gameweek (best-effort dedup marker)
+        if: always() && steps.reminder.outputs.exit_code == '0' && github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          SENT_GW=$(grep -oE 'reminder sent for GW[0-9]+' reminder-output.log | grep -oE '[0-9]+' | head -n1 || true)
+          if [ -n "$SENT_GW" ]; then
+            gh variable set REMINDER_LAST_EVENT_ID --body "$SENT_GW"
+          fi
