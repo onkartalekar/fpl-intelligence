@@ -18,35 +18,41 @@ _DEFAULT_TIMEZONE = "America/New_York"
 _DEFAULT_RISK_PROFILE = "balanced"
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS profiles (
-    team_id INTEGER PRIMARY KEY,
-    timezone TEXT NOT NULL,
-    risk_profile TEXT NOT NULL,
-    confirmed_free_transfers INTEGER,
-    confirmed_free_transfers_event INTEGER,
-    email TEXT,
-    draft_squad TEXT,
-    opted_out INTEGER,
-    pin_hash TEXT,
-    goal TEXT,
-    reminder_status TEXT,
-    reminder_lead_hours INTEGER,
-    reminder_pending_email TEXT,
-    reminder_confirmation_token_hash TEXT,
-    reminder_confirmation_expires_at TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-)
-"""
+# Single source of truth for the table's columns, shared by `_SCHEMA` (brand-new databases) and
+# `_migrate_schema` (upgrading a database file created by older code) -- see `_migrate_schema`'s
+# docstring for why this pair exists and what bug it fixes. Add a new column here once; both the
+# CREATE TABLE and the migration path pick it up automatically, so a future column addition cannot
+# repeat the 2026-08-09 "OperationalError: no such column" incident by only updating one of them.
+#
+# Any NEW NOT NULL column would need an explicit SQL DEFAULT to be addable via `ALTER TABLE ADD
+# COLUMN` (SQLite's requirement, since existing rows need a value) -- every column added after the
+# original #45 schema (`team_id`/`timezone`/`risk_profile`/`created_at`/`updated_at`) is nullable,
+# so this hasn't been needed yet, but a future NOT NULL addition must carry one.
+_COLUMN_DEFS = [
+    ("team_id", "INTEGER PRIMARY KEY"),
+    ("timezone", "TEXT NOT NULL"),
+    ("risk_profile", "TEXT NOT NULL"),
+    ("confirmed_free_transfers", "INTEGER"),
+    ("confirmed_free_transfers_event", "INTEGER"),
+    ("email", "TEXT"),
+    ("draft_squad", "TEXT"),
+    ("opted_out", "INTEGER"),
+    ("pin_hash", "TEXT"),
+    ("goal", "TEXT"),
+    ("reminder_status", "TEXT"),
+    ("reminder_lead_hours", "INTEGER"),
+    ("reminder_pending_email", "TEXT"),
+    ("reminder_confirmation_token_hash", "TEXT"),
+    ("reminder_confirmation_expires_at", "TEXT"),
+    ("created_at", "TEXT NOT NULL"),
+    ("updated_at", "TEXT NOT NULL"),
+]
 
-_COLUMNS = (
-    "team_id, timezone, risk_profile, confirmed_free_transfers, "
-    "confirmed_free_transfers_event, email, draft_squad, opted_out, pin_hash, goal, "
-    "reminder_status, reminder_lead_hours, reminder_pending_email, "
-    "reminder_confirmation_token_hash, reminder_confirmation_expires_at, "
-    "created_at, updated_at"
-)
+_SCHEMA = "CREATE TABLE IF NOT EXISTS profiles (\n" + ",\n".join(
+    f"    {name} {declaration}" for name, declaration in _COLUMN_DEFS
+) + "\n)"
+
+_COLUMNS = ", ".join(name for name, _declaration in _COLUMN_DEFS)
 
 # Defaults used only when a team's very first row is created by the lookup opt-out endpoint
 # (issue #62) rather than by a normal `/api/profile` save -- mirrors
@@ -62,13 +68,40 @@ _DEFAULT_RISK_PROFILE = "balanced"
 _DEFAULT_GOAL = "top_50k"
 
 
+def _migrate_schema(connection):
+    """Add any column present in `_COLUMN_DEFS` but missing from an existing on-disk table.
+
+    `CREATE TABLE IF NOT EXISTS` (`_SCHEMA`, above) only creates the table on a brand-new database
+    file -- it is a silent no-op against a table that already exists, so it never adds columns
+    introduced by later schema changes (`draft_squad` #61, `opted_out`/`pin_hash` #62, `goal` #78,
+    the five `reminder_*` columns #79) to a database file created by older code. That gap is
+    exactly the bug behind the 2026-08-09 incident: a `data/profiles.db` created before #61 kept
+    running, unnoticed, against every PR since -- silently missing nine columns -- until the first
+    read/write that actually touched one of them threw `OperationalError: no such column:
+    draft_squad`. None of those PRs' test suites caught it because a test always creates a brand
+    new temp SQLite file, which gets every column via `_SCHEMA` in one shot; the "upgrade an
+    existing older file" path was simply never exercised.
+
+    Idempotent and cheap to run on every `_connect()` call (one `PRAGMA table_info` read plus, at
+    most, a handful of `ALTER TABLE ADD COLUMN` statements the very first time a given file sees
+    each new column) -- this makes every connection self-healing regardless of how old the on-disk
+    file is, so this class of bug cannot recur when a new column is added in the future.
+    """
+    existing_columns = {row[1] for row in connection.execute("PRAGMA table_info(profiles)")}
+    for name, declaration in _COLUMN_DEFS:
+        if name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE profiles ADD COLUMN {name} {declaration}")
+
+
 def _connect(db_path):
-    """Open (creating if needed) the profiles database, with the schema applied."""
+    """Open (creating if needed) the profiles database, with the schema applied and up to date."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_path, timeout=10)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute(_SCHEMA)
+    _migrate_schema(connection)
     return connection
 
 
