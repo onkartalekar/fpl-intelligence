@@ -256,15 +256,51 @@ folding a half-built version into this one.
 3. **Defer candidate #3.** Feature audit clears it for a future
    prototype (genuinely richer inputs exist than Phase 1 used), but
    scope it as its own issue rather than this one.
-4. **Open items before #1 ships** (for `/ship-issue` to resolve, not
-   decided here): exact refresh-pipeline hook point; whether shadow
-   performance surfaces in the dashboard's existing "Model basis and
-   risks" panel this season or stays a developer-only report; the
-   auditability path if #1 is ever promoted -- SPECIFICATION.md
-   requires a per-event `component_xp` breakdown on every live
-   projection, so a promoted ML minutes model still needs to produce a
-   labeled contribution the same way `team_strength.py`'s replacement
-   candidacy would.
+4. **Dashboard visibility -- resolved (2026-08-08).** Two additions,
+   both reusing existing dashboard mechanisms rather than new surfaces:
+   - **`model.limitations` one-liner (cheap, do regardless):** the
+     "Model basis and risks" panel already renders a generic
+     `decision.model.limitations` string list inside its "Show model
+     inputs and risks" disclosure ([dashboard.js:81](../src/fpl_intel/dashboard.js)) --
+     the same spot the disabled team-strength/recency-minutes flags use.
+     Add one line: *"An ML-based minutes model is being evaluated in
+     shadow this season; it never affects your recommendations."* No
+     new UI code.
+   - **New section on the existing "Forecast accountability" tab
+     (`view-performance`), not a new top-level nav tab, and not merged
+     into the champion's own numbers.** That tab already reports the
+     champion's accuracy (`renderPerformance()`, summary/by-horizon
+     cards, calibration diagnostics, forecast history table) from
+     `build_performance_report()`. Add a clearly separate section below
+     it -- *"Experimental models in shadow"* -- with its own status
+     line and its own small metric cards (reusing the existing
+     `.performance-card` styling for visual consistency), sourced from
+     a **separate** report object per shadow `model_version`, not rows
+     mixed into the champion's report. Two reasons for the separation:
+     (a) the champion's own `_calibration()` gate ("don't retune from a
+     small sample") is champion-specific and would be corrupted by
+     challenger rows blended in; (b) a shared top-level nav tab would
+     either overstate an unproven model's prominence or go unseen --
+     living as a second, explicitly-labeled section on the page users
+     already check for "is this thing accurate" keeps the framing
+     honest without new navigation to discover.
+   - **Per-player shadow numbers (e.g. extending the
+     `uses_team_strength`/`uses_recency_minutes` inline labels in the
+     player inspector) -- explicitly deferred, not for this season.**
+     Users act on individual player numbers specifically; even a
+     clearly-labeled second number next to the real projection risks
+     being read as "which do I trust," which is exactly the
+     leakage-into-decisions shadow mode exists to prevent. Revisit only
+     once the challenger has a partial season of the tab-2 track record
+     behind it.
+   - Mockups of the new section deferred to the `/ship-issue` pass, per
+     request (2026-08-08) -- not built as part of this planning issue.
+5. **Other open items for `/ship-issue` to resolve** (not decided
+   here): exact refresh-pipeline hook point; the auditability path if
+   #1 is ever promoted -- SPECIFICATION.md requires a per-event
+   `component_xp` breakdown on every live projection, so a promoted ML
+   minutes model still needs to produce a labeled contribution the same
+   way `team_strength.py`'s replacement candidacy would.
 
 ## If declined: text for IMPLEMENTATION_PLAN.md
 
