@@ -24,12 +24,17 @@ from .transfer_decisions import validate_draft_squad
 
 
 _ALLOWED_RISK_PROFILES = {"conservative", "balanced", "aggressive"}
+# Issue #78: a manager's stated season objective -- metadata only, does not drive
+# `risk_profile` selection, model behavior, or any recommendation/copy (see
+# plans/issue-78-manager-goal.md). Keys mirror the profile form's `#profile-goal` <option>s.
+_ALLOWED_GOALS = {"top_10k", "top_50k", "top_100k", "beat_last_season", "just_for_fun"}
 _ALLOWED_PROFILE_KEYS = {
     "team_id",
     "timezone",
     "confirmed_free_transfers",
     "confirmed_free_transfers_event",
     "risk_profile",
+    "goal",
 }
 _TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
 _PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
@@ -56,6 +61,11 @@ _DEFAULT_VISITOR_PROFILE = {
     "confirmed_free_transfers_event": None,
     "risk_profile": "balanced",
     "draft_squad": None,
+    # Matches `profiles._DEFAULT_GOAL` (issue #78) -- re-literaled here the same way
+    # "timezone"/"risk_profile" above already duplicate `profiles._DEFAULT_TIMEZONE`/
+    # `profiles._DEFAULT_RISK_PROFILE` rather than reaching into another module's private
+    # constant.
+    "goal": "top_50k",
 }
 
 
@@ -164,7 +174,17 @@ def _default_model_performance_action(root):
 
 
 def _default_visitor_profile_action(root):
-    """Build the default per-team saved-profile reader, for splicing into a served page."""
+    """Build the default per-team saved-profile reader, for splicing into a served page.
+
+    Note (issue #78): this reader's output is spliced into `state["profile"]` on *both* the
+    visitor's own cookie-resolved team path and the explicit `?team_id=` lookup-of-someone-else's
+    -team path (see `_serve_dashboard` below) -- so `goal`, like the `risk_profile` already
+    returned here, becomes visible to anyone who looks a team ID up. That's an intentional,
+    considered choice, not an oversight: `goal` is a low-sensitivity, five-option self-declared
+    target (comparable in sensitivity to `risk_profile`, which this same code path already
+    exposes today), not personal contact information like `email` -- so no extra gating is added
+    for it here.
+    """
 
     def action(team_id):
         saved = profiles.load_profile(_profiles_db_path(root), team_id)
@@ -177,6 +197,7 @@ def _default_visitor_profile_action(root):
             "confirmed_free_transfers_event": saved["confirmed_free_transfers_event"],
             "risk_profile": saved["risk_profile"],
             "draft_squad": saved["draft_squad"],
+            "goal": saved["goal"],
         }
 
     return action
@@ -189,7 +210,7 @@ class ProfileValidationError(Exception):
 def _validate_profile_payload(payload):
     """Validate and normalize a /api/profile request body.
 
-    Returns a cleaned dict with exactly the five live manager keys, or
+    Returns a cleaned dict with exactly the six live manager keys, or
     raises ProfileValidationError with a fixed, input-free message.
     """
     if not isinstance(payload, dict):
@@ -263,6 +284,13 @@ def _validate_profile_payload(payload):
         raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
     cleaned["risk_profile"] = risk_profile
 
+    # Issue #78: metadata-only stated season objective, validated the same way as
+    # `risk_profile` above -- a fixed, closed option set, rejecting anything else.
+    goal = payload.get("goal")
+    if goal not in _ALLOWED_GOALS:
+        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
+    cleaned["goal"] = goal
+
     return cleaned
 
 
@@ -286,6 +314,7 @@ def _default_profile_action(root, payload):
         risk_profile=cleaned["risk_profile"],
         confirmed_free_transfers=cleaned["confirmed_free_transfers"],
         confirmed_free_transfers_event=cleaned["confirmed_free_transfers_event"],
+        goal=cleaned["goal"],
         now=datetime.now(timezone.utc).isoformat(),
     )
 
