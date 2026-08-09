@@ -81,6 +81,30 @@ def outro(page):
     pause(page, 7.0)
 
 
+def show_reminder_preview(page):
+    page.evaluate(
+        """() => {
+          const card=document.createElement('section'); card.id='demo-feature-card';
+          card.innerHTML=`
+            <div class="eyebrow">Opt-in automation · GitHub Actions</div>
+            <h2>Deadline reminder email</h2>
+            <div class="demo-feature-pills"><span>Hourly check</span><span>Per-team lead time</span><span>Dry-run safe</span></div>
+            <div class="demo-email">
+              <strong>FPL reminder: GW2 deadline in ~3h</strong>
+              <span>Recommended action: Make two transfers</span>
+              <span>Captain: B. Fernandes · Vice-captain: Semenyo</span>
+              <span>Projected points, bank, and free transfers included</span>
+            </div>
+            <p>Recipient and SMTP settings stay in repository secrets. Public workflow logs never print addresses, credentials, or dry-run email bodies.</p>`;
+          document.body.appendChild(card);
+        }"""
+    )
+
+
+def hide_reminder_preview(page):
+    page.evaluate("document.getElementById('demo-feature-card')?.remove()")
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     context = browser.new_context(
@@ -108,6 +132,16 @@ with sync_playwright() as p:
       #demo-intro h1 { margin:0; font-size:48px; color:#f3f6ff; }
       #demo-intro p { margin:12px 0 0; max-width:760px; color:#9eacc3; font-size:20px; }
       #demo-intro b { color:#57dfae; }
+      #demo-feature-card { position:fixed; z-index:9998; left:300px; right:66px; top:86px;
+        padding:28px; border:1px solid #57dfae; border-radius:14px; background:#101b2e;
+        color:#f3f6ff; box-shadow:0 18px 50px rgba(0,0,0,.5); }
+      #demo-feature-card h2 { margin:4px 0 14px; font-size:28px; }
+      #demo-feature-card p { color:#9eacc3; margin:16px 0 0; }
+      .demo-feature-pills { display:flex; gap:8px; margin-bottom:16px; }
+      .demo-feature-pills span { border:1px solid #293a58; border-radius:999px; padding:6px 10px; color:#57dfae; }
+      .demo-email { display:grid; gap:8px; padding:18px; border-radius:10px; background:#08101f; border:1px solid #293a58; }
+      .demo-email strong { color:#57dfae; font-size:17px; }
+      .demo-email span { color:#d8e2f2; }
     """
     )
     page.evaluate(
@@ -228,6 +262,21 @@ with sync_playwright() as p:
         10,
         lambda: show_view(page, "performance"),
     )
+    scene(
+        page,
+        "SHADOW MODEL",
+        "The ML minutes challenger is scored separately against the champion and never changes live recommendations.",
+        7,
+        lambda: smooth_to(page, "#shadow-models-list", -180),
+    )
+    scene(
+        page,
+        "DEADLINE REMINDER EMAILS",
+        "An hourly, opt-in GitHub Action sends current advice inside each team's configured lead-time window.",
+        7,
+        lambda: show_reminder_preview(page),
+    )
+    hide_reminder_preview(page)
     scene(
         page,
         "MODEL STATUS",
