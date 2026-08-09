@@ -1,22 +1,24 @@
-# Issue #83 -- HTML/multimedia reminder email template (nice-to-have)
+# Issue #83 -- HTML/multimedia reminder email template
 
-Researched 2026-08-09. Issue body: `send_email()` in
-`scripts/send_deadline_reminder.py` (#55) currently sends plain text only.
-The issue proposes a richer HTML layout -- possibly a pitch/formation
-graphic reusing dashboard rendering logic, color-coded action badges, and
-the three risk profiles as visually distinct cards -- via stdlib
-`EmailMessage.add_alternative(html, subtype="html")`. Explicitly the
-lowest-priority reminder follow-up, and explicitly open-ended: "the exact
-layout is a product call."
+Researched 2026-08-09; mockup-reviewed and unblocked 2026-08-09. Issue
+body: `send_email()` in `scripts/send_deadline_reminder.py` (#55)
+currently sends plain text only. The issue proposes a richer HTML
+layout -- possibly a pitch/formation graphic reusing dashboard rendering
+logic, color-coded action badges, and the three risk profiles as
+visually distinct cards -- via stdlib
+`EmailMessage.add_alternative(html, subtype="html")`. Originally filed as
+the lowest-priority, explicitly-deferred reminder follow-up; see "Mockup
+review" below for why it's now ready to build.
 
 ## Context
 
 Issue #55 shipped a working plain-text reminder. #83 is a pure
 presentation upgrade over it -- nothing here is blocking, and the issue
-itself says to sequence it after the functional gaps (profile schema,
-self-serve opt-in, all-three-profiles, confirmed overrides) are closed.
-This plan exists to settle the layout question in writing, per the
-issue's own framing, before anyone spends implementation time on it.
+itself originally said to sequence it after the functional gaps (profile
+schema, self-serve opt-in, all-three-profiles, confirmed overrides) were
+closed. As of 2026-08-09 all of those have shipped (#78/#79/#80/#81/#82),
+and a reviewed mockup now exists, so the deferral this plan originally
+recommended no longer applies -- see "Mockup review" below.
 
 ## What the current code does
 
@@ -265,13 +267,15 @@ sent to every recipient as the fallback (that's the whole point of
 better framed as "do this to the plain-text part no matter which HTML
 candidate ships" than as an alternative to (a)/(b).
 
-## Recommendation
+## Recommendation (superseded below by a reviewed mockup)
 
-**Design: (a) table-based HTML as the primary build, with (b)'s SVG
-pitch diagram as an explicitly optional, separately-scoped enhancement
-layered on afterward -- not bundled into the same pass.**
+**Design, as originally recommended: (a) table-based HTML as the primary
+build, with (b)'s SVG pitch diagram as an explicitly optional,
+separately-scoped enhancement layered on afterward -- not bundled into
+the same pass.** Kept here for the record; see "Mockup review" below for
+the design that actually ships.
 
-Reasoning:
+Reasoning at the time:
 
 1. (a) alone already delivers the two clearest wins the issue asks for
    (color-coded action badges, per-profile cards) with zero rendering
@@ -293,33 +297,132 @@ Reasoning:
    unconditionally either way -- it's not a sequencing decision, just a
    line item within the (a) build.
 
-**Sequencing: defer.** This remains the lowest-priority reminder
-follow-up, and the issue's own dependency note says to sequence it after
-the functional gaps (profile schema, self-serve opt-in, all-three-profiles,
-confirmed overrides) land -- several of which change what
-`compose_email()` has available to render (e.g. the companion "all three
-profiles" issue directly changes candidate (a)'s per-profile-card section
-from one card to three). Building the HTML template now risks reworking
-it once those land. This plan documents the design so implementation is
-a mechanical `/ship-issue` pass whenever it's prioritized -- not
-resolving here whether that's soon.
+**Sequencing, as originally recommended: defer**, since several
+functional issues (all-three-profiles chief among them) would change
+what `compose_email()` has available to render. That functional
+prerequisite -- all-three-profiles (#82) -- has since shipped, alongside
+the rest of the reminder-feature dependency chain (#78/#79/#80/#81/#82
+all merged as of 2026-08-09), so the sequencing concern that justified
+deferring is now resolved.
 
-**Scope for the eventual `/ship-issue` pass**, once picked up:
+## Mockup review (2026-08-09) -- supersedes the recommendation above
 
-- Refactor `compose_email()` to return `(subject, text_body, html_body)`
-  or similar; `send_email()` calls `set_content(text_body)` then
+A concrete visual mockup was produced and reviewed
+(`plans/assets/issue-83-reminder-email-mockup.pdf`), rendering (a) and
+(b) together as one combined design rather than (a) now / (b) later, and
+showing both the full render (Apple Mail / Gmail, SVG pitch diagram
+intact) and the degraded fallback (Outlook desktop, SVG absent). This
+resolves the sequencing question the original recommendation left open:
+**build (a) and (b) together, in one `/ship-issue` pass, now that the
+functional prerequisites have shipped.**
+
+### What the mockup locks in
+
+- **Both candidates ship together**, not (b) as a separate later
+  follow-up. The pitch diagram is treated as core to this build, not an
+  optional add-on, provided it degrades cleanly per the finding above
+  (raw inline `<svg>`, not a data-URI `<img>`).
+- **Literal hex badge colors, exactly as originally specified**: `roll`
+  green (`#164b3a` bg / `#94efcb` fg), `hit` red (`#573040` bg /
+  `#ffc1cb` fg), `info` blue (`#203b59` bg / `#b9dcff` fg) -- confirmed
+  reused as-is from this plan's own earlier research, not re-derived.
+  Mapping used in the mockup: `HOLD` -> info (blue), `ROLL` -> roll
+  (green), `TRANSFER \xb7 −4` (a transfer with a point cost) -> hit
+  (red). **Open item for `/ship-issue`**: the mockup's three example
+  profiles happen to cover hold/roll/transfer-with-a-hit only -- a
+  `single_transfer`/`double_transfer` action with `point_cost == 0`
+  (using an already-free transfer, no hit) isn't shown in the mockup and
+  needs a badge mapping decided at implementation time. Leaning `roll`
+  green (it's not costing the manager anything, same as banking the
+  transfer), but worth a quick confirm rather than assuming.
+- **No `<style>` block, no CSS custom properties, no flexbox/grid** --
+  nested `<table role="presentation">` throughout, matching (a)'s
+  original reliability argument exactly.
+- **Header badge, present on every state**: a single pill reading
+  `GAMEWEEK <N> \xb7 DEADLINE IN <lead_hours>H`, replacing the earlier
+  per-profile "GAMEWEEK 3 \xb7 BALANCED PROFILE" header sketch now that
+  all three profiles render as stacked cards below it rather than one
+  profile owning the header.
+- **`RECOMMENDED STARTING XI` section**: inline-`<svg>` pitch diagram,
+  four position rows (GKP/DEF/MID/FWD) per `weeklyPitch()`'s existing
+  grouping logic, one box per player (name + club-short code), captain
+  visually distinguished by an outlined/bordered box rather than a
+  filled one (an email-safe translation of the dashboard's own
+  `box-shadow` captain glow, which doesn't survive into email per the
+  CSS-mechanism findings above).
+- **Three stacked profile cards** (`CONSERVATIVE` / `BALANCED \xb7
+  DEFAULT` / `AGGRESSIVE`), each: eyebrow label, action badge, one-line
+  plain-language rationale, then a compact key-value table (`Captain`,
+  `Projected pts`, `Bank after`, `Free transfers next GW`, plus an
+  `OUT: X → IN: Y` row and `Net gain vs. holding` for a transfer
+  action). This is the HTML-email counterpart to #82's plain-text
+  all-three-profiles change -- same three profiles, same underlying
+  `weekly["profiles"]` data, different rendering.
+- **Degraded fallback (Outlook desktop) replaces the diagram with an
+  explanatory placeholder**, not silence: a dashed-border box reading
+  *"(starting-XI diagram not shown in this client)"*, while the badge
+  header and all three profile cards render unaffected. This is a
+  refinement over the original plan's "silently absent" framing -- it
+  requires **MSO conditional comments**
+  (`<!--[if mso]>...<![endif]-->` / `<!--[if !mso]><!-->...<!--<![endif]-->`),
+  the standard Outlook-targeting technique, to show the placeholder text
+  specifically to Outlook and the real `<svg>` to everyone else, rather
+  than relying on Outlook's default unsupported-tag handling alone. This
+  is new scope versus the original plan, which only established that a
+  raw `<svg>` tag degrades cleanly (nothing shown) -- the mockup goes
+  one step further and fills that gap with a real explanation, which
+  needs explicit conditional markup to do reliably.
+- **Footer links to reminder settings**: *"You're receiving this because
+  you opted into deadline reminders for FPL Intelligence. Manage
+  reminder settings"* -- the link target is now a real, shippable thing
+  (#79's reminder card on the Profile tab), which didn't exist when this
+  plan was first researched earlier the same day. Use the same
+  trusted-`Host`-header base-URL construction #79 already established
+  for its confirmation link, not a hardcoded origin.
+
+### Open item, not resolved by the mockup
+
+The degraded-fallback profile cards in the mockup show fewer table rows
+than the full-render cards (`Captain`/`Projected pts` only, dropping
+`Bank after`/`Free transfers next GW`; the aggressive card's fallback
+keeps only the transfer row and `Net gain vs. holding`). This may be a
+deliberate "keep the Outlook email leaner since it already lost the
+visual anchor" choice, or an artifact of how the mockup was captured for
+review. Not called out in the mockup's own "Notes for review" section,
+so treat as genuinely open -- confirm intent before `/ship-issue`
+matches it exactly, rather than assuming either reading.
+
+## Scope for the `/ship-issue` pass
+
+- Refactor `compose_email()` to return `(subject, text_body, html_body)`;
+  `send_email()` calls `set_content(text_body)` then
   `add_alternative(html_body, subtype="html")`, per the confirmed
   mechanism above.
-- Build (a)'s table shell for both `_compose_gw1_section()`'s and
-  `_compose_active_section()`'s states, reusing the same literal badge
-  colors for `roll`/`single_transfer`/`double_transfer`/`hold` from
-  `transfer_decisions.py`'s action vocabulary.
+- Build the combined (a)+(b) table shell + inline-SVG pitch diagram for
+  both `_compose_gw1_section()`'s and `_compose_active_section()`'s
+  states, with all three profiles as stacked cards (reusing #82's
+  already-shipped per-profile iteration, rendered as HTML cards instead
+  of plain-text blocks).
+- Implement the MSO-conditional-comment Outlook fallback (placeholder
+  text box) for the pitch diagram specifically, not just an unstyled
+  gap.
+- Link the footer's "Manage reminder settings" to the real #79 profile
+  location, built from the trusted `Host` header.
+- Resolve the two open items above (zero-cost-transfer badge color;
+  whether the Outlook fallback cards are deliberately leaner) during
+  implementation, not by guessing here.
 - Extend `--dry-run` to print (or optionally write to a file) the HTML
   part too, so a human can review a rendered preview without sending
   real mail -- today's dry-run only prints the plain-text body.
 - Add a test asserting the sent message is `multipart/alternative` with
   both `text/plain` and `text/html` parts present (mirroring the sanity
-  check above), not just that `send_content`/`add_alternative` were
+  check above), not just that `set_content`/`add_alternative` were
   called.
-- SVG pitch diagram (b): separate, explicitly optional follow-up scoped
-  after (a) ships and is confirmed working, not bundled in.
+- (c)'s plain-text polish (spacing, dividers, bracketed action tags)
+  happens as part of this same pass, since the `text/plain` part is sent
+  unconditionally either way.
+
+**Sequencing: ready to ship.** No longer deferred -- every functional
+prerequisite the original plan named (profile schema, self-serve opt-in,
+all-three-profiles, confirmed overrides) has shipped, and a concrete,
+reviewed mockup now exists to build against.
