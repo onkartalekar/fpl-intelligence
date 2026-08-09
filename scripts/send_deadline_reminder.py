@@ -32,6 +32,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from fpl_intel import profiles
 from fpl_intel.fpl_data import fetch_bootstrap, fetch_fixtures
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import compute_manager_view
@@ -323,7 +324,13 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
     decision_center = None
     sent_count = 0
     for team in in_window_teams:
-        manager_view = compute_manager_view(bootstrap, fixtures, [], generated_at, team["team_id"])
+        saved = profiles.load_profile(root / "data" / "profiles.db", team["team_id"])
+        manager_view = compute_manager_view(
+            bootstrap, fixtures, [], generated_at, team["team_id"],
+            confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
+            confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
+            draft_squad_ids=saved["draft_squad"] if saved else None,
+        )
         status = manager_view["weekly_decisions"].get("status")
         if status == "team_not_found":
             print(
