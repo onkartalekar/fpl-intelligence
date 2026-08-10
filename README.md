@@ -178,9 +178,17 @@ run with none of these set, exactly as `## Open the dashboard` describes. They o
 specific opt-in features (LLM-based news parsing, the deadline-reminder email) or for the
 hosted deployment tracked in [issue #27](https://github.com/onkartalekar/fpl-intelligence/issues/27).
 
+None of these are read from a `.env` file -- this codebase has no dotenv loading, by the same
+stdlib-only rule as everything else (see `## Dependencies`). Locally, set one by exporting it in
+the shell before running the affected script/server, e.g. `export FPL_INTEL_SMTP_HOST=...`; it
+isn't picked up any other way.
+
 ### LLM-based news parsing (optional)
 
 Unset by default; the feature silently no-ops (no error) when its provider's key is missing.
+**Where to set:** nowhere, currently -- `news_signals.py` isn't called from the refresh pipeline,
+the server, or any script yet (only its own unit tests exercise it), so these have no live
+placement to worry about until it's actually wired into something.
 
 | Variable | Required when | Notes |
 |---|---|---|
@@ -194,15 +202,26 @@ Unset by default; the feature silently no-ops (no error) when its provider's key
 
 Not used by the dashboard server itself; only by the separate script the (currently disabled)
 `.github/workflows/deadline-reminder.yml` GitHub Actions workflow invokes.
+**Where to set:** **GitHub Actions repo secrets** (Settings -> Secrets and variables -> Actions on
+the GitHub repo), not Railway -- this workflow runs on GitHub's own runners, unrelated to wherever
+the dashboard server is hosted. That stays true even after #27 ships Railway hosting, *unless* you
+later choose to move this script onto a Railway cron service against the same `data/` volume
+instead of GitHub Actions -- an alternative worth considering once the workflow is re-enabled, but
+not yet decided; if you do, these move to Railway's Variables tab like the vars below instead.
 
 | Variable | Required when | Notes |
 |---|---|---|
 | `FPL_INTEL_REMINDER_TEAMS` | At least one of this or `FPL_INTEL_REMINDER_PROFILES_DB` must resolve at least one team, or the script raises `ConfigError` | JSON list of `{"team_id", "email", "lead_hours"}` objects, manually maintained. |
 | `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80) | Never | Path to a `profiles.db` to additionally source opted-in teams from (`reminder_status == "enabled"`). Unset by default. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`; the explicit-secret entry wins on collision. |
 | `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` | To actually send mail (a `--dry-run` flag exists for previewing without them) | Deliberately separate credentials from the server's own SMTP vars below, so each can be rotated independently. |
-| `FPL_INTEL_DASHBOARD_BASE_URL` (issue #83) | Never | Base URL used to build the email footer's "manage reminder settings" link. Defaults to `http://localhost:8877`. |
+| `FPL_INTEL_DASHBOARD_BASE_URL` (issue #83) | Never | Base URL used to build the email footer's "manage reminder settings" link. Defaults to `http://localhost:8877`. Once hosted on Railway, set this to the real `https://<app>.up.railway.app` so the footer link isn't a dead `localhost` URL in emails sent from the offline script. |
 
 ### Reminder opt-in confirmation email -- live server (`src/fpl_intel/reminder_confirmation.py`, issue #79)
+
+**Where to set:** wherever `server.py`'s process actually runs -- your local shell for local
+testing, and **Railway's project Variables tab** once hosted, since these are read at request
+time by the same process serving the dashboard. This is the one reminder-email group that
+directly matters for the Railway setup, unlike the offline-script group above.
 
 | Variable | Required when | Notes |
 |---|---|---|
@@ -213,6 +232,12 @@ Not used by the dashboard server itself; only by the separate script the (curren
 Local (`scripts/start_dashboard.py`) behavior is unaffected either way: the plan calls for these
 to default to today's localhost-only behavior when unset, so a plain local checkout keeps working
 exactly as it does now once #27 ships.
+**Where to set:** all three go in **Railway's project Variables tab** (Project -> your service ->
+Variables). `PORT` needs no action -- Railway injects it into the service's environment
+automatically, it isn't something you type in yourself. The other two are secrets you set by hand
+there; Railway also supports per-environment variable scoping (e.g. separate values for a staging
+vs. production environment) if that's ever needed, though a single Hobby-tier service doesn't need
+it today.
 
 | Variable | Purpose |
 |---|---|
