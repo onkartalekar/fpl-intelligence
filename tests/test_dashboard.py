@@ -86,8 +86,12 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Model Status", html)
         self.assertIn("Since last refresh", html)
         self.assertIn('class="overview-stack"', html)
-        self.assertIn('id="refresh-now"', html)
-        self.assertIn('name="refresh-token"', html)
+        # Issue #27: there is no in-page refresh control or refresh token anymore -- /api/refresh
+        # is operator-only. `#refresh-message`/`#refresh-source-status` remain (they still show
+        # the "last refreshed" status), just without the button or the token that used to sit
+        # alongside them.
+        self.assertNotIn('id="refresh-now"', html)
+        self.assertNotIn('name="refresh-token"', html)
         self.assertIn('id="refresh-message"', html)
 
     def test_renders_stage_aware_accessible_controls(self):
@@ -430,13 +434,17 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Refresh required to load the next deadline", html)
         self.assertIn("deadline <= Date.now()", html)
 
-    def test_successful_refresh_preserves_view_profile_and_filters(self):
+    def test_page_load_restores_the_previously_saved_view_profile_and_filters(self):
+        # Issue #27: `captureWorkspaceContext()`/`restoreWorkspaceContext()` predate the
+        # now-removed in-browser refresh flow (their only caller was `runRefresh()`, which
+        # captured context right before the client-side reload it triggered) -- both function
+        # definitions remain, and `restoreWorkspaceContext()` is still invoked on every page
+        # load, so a workspace-context snapshot from a previous session is still restored.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertIn("function captureWorkspaceContext()", html)
         self.assertIn("function restoreWorkspaceContext()", html)
         self.assertIn("'fpl-workspace-context'", html)
-        self.assertIn("captureWorkspaceContext();sessionStorage.setItem('fpl-refresh-result'", html)
         self.assertIn("restoreWorkspaceContext();", html)
 
     def test_model_performance_collection_errors_are_visible(self):
@@ -504,20 +512,24 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-save"', html)
         self.assertIn('id="profile-message"', html)
         self.assertIn("fetch('/api/profile'", html)
-        self.assertIn("X-Refresh-Token", html)
+        # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
+        # longer gates -- the save request must not send it.
+        self.assertNotIn("X-Refresh-Token", html)
         self.assertIn("Start the local dashboard service to edit your profile.", html)
         self.assertIn("Manager profile form", html)
         self.assertNotIn("Copy config/user-profile.example.json", html)
 
-    def test_profile_save_reuses_shared_refresh_routine(self):
+    def test_no_in_browser_refresh_control_or_token_remain(self):
+        """Issue #27: the in-page "Refresh now" button, its wiring, and the refresh token were
+        removed entirely -- /api/refresh is operator-only now, never reachable from the UI."""
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("function runRefresh()", html)
-        self.assertIn(
-            "captureWorkspaceContext();sessionStorage.setItem('fpl-refresh-result'", html
-        )
-        self.assertIn("runRefresh()", html)
-        self.assertEqual(html.count('meta[name="refresh-token"]'), 1)
+        self.assertNotIn("function runRefresh()", html)
+        self.assertNotIn("function refreshToken()", html)
+        self.assertNotIn("function refreshAvailable()", html)
+        self.assertNotIn('id="refresh-now"', html)
+        self.assertNotIn('meta[name="refresh-token"]', html)
+        self.assertNotIn("X-Refresh-Token", html)
 
 
 if __name__ == "__main__":

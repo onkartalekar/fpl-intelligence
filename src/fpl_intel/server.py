@@ -12,6 +12,7 @@ import secrets
 import subprocess
 import sys
 import threading
+import traceback
 from urllib.parse import parse_qs, urlsplit
 import zoneinfo
 
@@ -729,6 +730,7 @@ def create_server(
     host="127.0.0.1",
     port=8877,
     token=None,
+    allowed_origin=None,
     refresh_action=None,
     profile_action=None,
     team_view_action=None,
@@ -739,10 +741,18 @@ def create_server(
     reminder_opt_in_action=None,
     reminder_email_action=None,
 ):
-    """Create a localhost dashboard server with token-protected refresh and profile endpoints."""
+    """Create a dashboard server with a token-protected /api/refresh and open, rate-limited
+    per-team write endpoints (issue #45's model).
+
+    `host`/`port` may be any bindable value -- issue #27 lifted the old 127.0.0.1-only
+    restriction so this can run on a hosting platform (e.g. Railway, which injects `PORT` and
+    expects a `0.0.0.0` bind). `allowed_origin`, when set, is the single source of truth for
+    both the trusted `Host` header (its netloc) and the trusted `Origin` header (its full value)
+    -- see `_has_trusted_host`/`do_POST` below. Left `None` (the default, used by every existing
+    caller/test), both checks fall back to today's exact `127.0.0.1:{port}` behavior, byte-for-
+    byte unchanged.
+    """
     root = Path(root).resolve()
-    if host != "127.0.0.1":
-        raise ValueError("Dashboard server must bind only to 127.0.0.1")
     token = token or secrets.token_urlsafe(32)
     action = refresh_action or (lambda: _default_refresh_action(root))
     profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
@@ -790,8 +800,18 @@ def create_server(
             self.end_headers()
             self.wfile.write(body)
 
+        def _expected_origin(self):
+            # Per-request, not cached at server-creation time: the default branch reads
+            # `self.server.server_port`, the *actual* bound port -- important for tests, which
+            # pass `port=0` for a dynamic OS-assigned port. `allowed_origin`, when set, carries
+            # its own scheme and (real deployments almost always omit a port on HTTPS's default
+            # 443) omits the port entirely -- so this is never built by substituting a hostname
+            # into a hardcoded `http://{host}:{port}` shape.
+            return allowed_origin or f"http://127.0.0.1:{self.server.server_port}"
+
         def _has_trusted_host(self):
-            return self.headers.get("Host", "") == f"127.0.0.1:{self.server.server_port}"
+            expected_netloc = urlsplit(self._expected_origin()).netloc
+            return self.headers.get("Host", "") == expected_netloc
 
         def _reject_untrusted_host(self):
             if self._has_trusted_host():
@@ -825,10 +845,7 @@ def create_server(
                 if not dashboard.exists():
                     self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                     return
-                html = dashboard.read_text(encoding="utf-8").replace(
-                    'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
-                )
-                self._send_html(html)
+                self._send_html(dashboard.read_text(encoding="utf-8"))
                 return
             # Compute this one team's view at request time and splice it into a copy of the
             # shared state, without touching the persisted dashboard-state.json/dashboard.html.
@@ -849,10 +866,7 @@ def create_server(
                 saved_profile = profiles.load_profile(_profiles_db_path(root), team_id)
                 if saved_profile and saved_profile.get("opted_out"):
                     state["lookup"] = {"active": True, "team_id": team_id, "status": "opted_out"}
-                    html = render_dashboard(state).replace(
-                        'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
-                    )
-                    self._send_html(html)
+                    self._send_html(render_dashboard(state))
                     return
             try:
                 lookup_result = lookup_action(team_id)
@@ -893,13 +907,10 @@ def create_server(
                 model_performance.update(performance_action(team_id))
                 state["model_performance"] = model_performance
             except Exception as error:
-                print(f"Team lookup failed: {error!r}", file=sys.stderr)
+                print(f"Team lookup failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 if is_explicit_lookup:
                     state["lookup"] = {"active": True, "team_id": team_id, "status": "error"}
-            html = render_dashboard(state).replace(
-                'content="__REFRESH_TOKEN__"', f'content="{token}"', 1
-            )
-            self._send_html(html)
+            self._send_html(render_dashboard(state))
 
         def do_GET(self):
             if self._reject_untrusted_host():
@@ -935,7 +946,7 @@ def create_server(
             if self._reject_untrusted_host():
                 return
             origin = self.headers.get("Origin")
-            expected_origin = f"http://127.0.0.1:{self.server.server_port}"
+            expected_origin = self._expected_origin()
             if origin is not None and origin != expected_origin:
                 self._json(403, {"status": "error", "message": "Untrusted Origin header"})
                 return
@@ -946,9 +957,16 @@ def create_server(
             }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
-            if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
-                self._json(403, {"status": "error", "message": "Invalid refresh token"})
-                return
+            # Issue #27: the shared bearer token now gates only /api/refresh, an operator-only
+            # action never shipped to the browser (see _serve_dashboard). The other four paths
+            # are open, rate-limited per-team writes by design (issue #45) -- each already has
+            # its own CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so
+            # re-gating them behind one shared secret was redundant and, once public, actively
+            # broken (the token was visible via view-source on every served page).
+            if path == "/api/refresh":
+                if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
+                    self._json(403, {"status": "error", "message": "Invalid refresh token"})
+                    return
             max_body = 1024 if path == "/api/refresh" else 4096
             try:
                 content_length = int(self.headers.get("Content-Length", "0") or 0)
@@ -983,7 +1001,7 @@ def create_server(
             except (BlockingIOError, RefreshAlreadyRunning):
                 self._json(409, {"status": "busy", "message": "A refresh is already running"})
             except Exception as error:
-                print(f"Dashboard refresh failed: {error!r}", file=sys.stderr)
+                print(f"Dashboard refresh failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Dashboard refresh failed"})
             finally:
                 refresh_lock.release()
@@ -1017,7 +1035,7 @@ def create_server(
             except ProfileValidationError as error:
                 self._json(400, {"status": "error", "message": str(error)})
             except Exception as error:
-                print(f"Profile update failed: {error!r}", file=sys.stderr)
+                print(f"Profile update failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Profile update failed"})
 
         def _handle_draft_squad(self, body):
@@ -1045,7 +1063,7 @@ def create_server(
             except DraftSquadValidationError as error:
                 self._json(400, {"status": "error", "message": str(error)})
             except Exception as error:
-                print(f"Draft squad update failed: {error!r}", file=sys.stderr)
+                print(f"Draft squad update failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Draft squad update failed"})
 
         def _handle_lookup_opt_out(self, body):
@@ -1071,7 +1089,7 @@ def create_server(
             except LookupOptOutValidationError as error:
                 self._json(400, {"status": "error", "message": str(error)})
             except Exception as error:
-                print(f"Lookup opt-out update failed: {error!r}", file=sys.stderr)
+                print(f"Lookup opt-out update failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Lookup opt-out update failed"})
 
         def _handle_reminder_opt_in(self, body):
@@ -1105,7 +1123,7 @@ def create_server(
             except ReminderOptInSendError as error:
                 self._json(502, {"status": "error", "message": str(error)})
             except Exception as error:
-                print(f"Reminder opt-in update failed: {error!r}", file=sys.stderr)
+                print(f"Reminder opt-in update failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Reminder opt-in update failed"})
 
         def _handle_reminder_confirm(self, query_string):

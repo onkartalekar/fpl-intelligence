@@ -25,7 +25,6 @@ _TEMPLATE = r'''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="refresh-token" content="__REFRESH_TOKEN__">
 <title>FPL Intelligence Workspace</title>
 <style>__DASHBOARD_CSS__</style>
 </head>
@@ -36,7 +35,7 @@ _TEMPLATE = r'''<!doctype html>
 </nav></aside>
 <main class="content">
 <div class="mobile-nav-wrap"><label for="mobile-nav">Section</label><select id="mobile-nav"><option value="overview">Preseason overview</option><option value="decisions">Decision Center</option><option value="squad" selected>My Team</option><option value="profile">My Profile</option><option value="players">Player Explorer</option><option value="fixtures">Fixtures</option><option value="transfers">Transfers &amp; News</option><option value="performance">Model Performance</option><option value="model">Model Status</option></select></div>
-<header class="topbar"><div><div class="eyebrow">Decision workspace</div><h1 id="view-title">My Team</h1><div class="muted">Top-50k objective · <span id="topbar-risk">balanced risk</span> · <span id="topbar-timezone">Eastern Time (New York)</span> · free first-party data</div><div id="deadline-status" class="deadline">Deadline appears when the 2026/27 feed launches.</div></div><div class="header-actions"><button id="refresh-now" class="refresh-button" type="button">Refresh now</button><button id="theme-toggle" class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark theme" title="Toggle color theme"><span class="theme-toggle-icon theme-toggle-icon-light" aria-hidden="true">☀️</span><span class="theme-toggle-icon theme-toggle-icon-dark" aria-hidden="true">🌙</span><span class="theme-toggle-thumb" aria-hidden="true"></span></button><div id="refresh-message" class="refresh-message" role="status" aria-live="polite"></div><div id="refresh-source-status" class="refresh-source-status" aria-live="polite"></div></div></header>
+<header class="topbar"><div><div class="eyebrow">Decision workspace</div><h1 id="view-title">My Team</h1><div class="muted">Top-50k objective · <span id="topbar-risk">balanced risk</span> · <span id="topbar-timezone">Eastern Time (New York)</span> · free first-party data</div><div id="deadline-status" class="deadline">Deadline appears when the 2026/27 feed launches.</div></div><div class="header-actions"><button id="theme-toggle" class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark theme" title="Toggle color theme"><span class="theme-toggle-icon theme-toggle-icon-light" aria-hidden="true">☀️</span><span class="theme-toggle-icon theme-toggle-icon-dark" aria-hidden="true">🌙</span><span class="theme-toggle-thumb" aria-hidden="true"></span></button><div id="refresh-message" class="refresh-message" role="status" aria-live="polite"></div><div id="refresh-source-status" class="refresh-source-status" aria-live="polite"></div></div></header>
 <aside id="lookup-banner" class="limitation-note" role="note" hidden></aside>
 <section id="view-overview" class="view">
 <section class="attention-panel"><div class="section-heading"><h2>What needs attention</h2><span class="muted">Only material items</span></div><div id="attention" class="attention"></div></section>

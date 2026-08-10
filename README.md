@@ -75,7 +75,10 @@ This opens:
 http://127.0.0.1:8877/dashboard.html
 ```
 
-Use the **Refresh now** button whenever you want new data. Refreshes are never scheduled and do not run automatically. The button is token-protected, available only through the localhost service, and rebuilds the dashboard before reloading it.
+There is no in-page refresh control -- see `## Refresh manually from Terminal` below for the only
+way to pull new data, locally or hosted. `POST /api/refresh` still exists on the server as an
+operator-only HTTP endpoint (for future scripting/automation), gated by `FPL_INTEL_REFRESH_TOKEN`;
+it is never reachable from the dashboard UI.
 
 The standalone file remains available at:
 
@@ -83,7 +86,8 @@ The standalone file remains available at:
 <path-to-clone>/fpl-intelligence/dashboard.html
 ```
 
-When opened as a standalone file, its Refresh button is disabled because a static HTML file cannot securely start the local Python collector.
+When opened as a standalone file, the Manager profile, Draft squad, and deadline-reminder forms
+are disabled, since a static HTML file has no server behind it to save anything to.
 
 ## Refresh manually from Terminal
 
@@ -226,20 +230,19 @@ Railway setup, unlike the offline-script group above.
 |---|---|---|---|
 | `FPL_INTEL_SERVER_SMTP_HOST` / `FPL_INTEL_SERVER_SMTP_PORT` / `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` | To send the double-opt-in confirmation email when a visitor enables reminders from the Profile tab | Local shell for local testing; **Railway's project Variables tab** once hosted | Separate credentials from the offline script's `FPL_INTEL_SMTP_*` above by design. |
 
-### Hosted deployment (issue #27 -- planned, not yet implemented)
+### Hosted deployment (issue #27)
 
-Local (`scripts/start_dashboard.py`) behavior is unaffected either way: the plan calls for these
-to default to today's localhost-only behavior when unset, so a plain local checkout keeps working
-exactly as it does now once #27 ships. All three go in **Railway's project Variables tab**
-(Project -> your service -> Variables); Railway also supports per-environment variable scoping
-(e.g. separate values for a staging vs. production environment) if that's ever needed, though a
-single Hobby-tier service doesn't need it today.
+Local (`scripts/start_dashboard.py`) behavior is unaffected either way: none of these are set by
+a plain local checkout, so it keeps binding `127.0.0.1` and behaving exactly as before #27. All
+three go in **Railway's project Variables tab** (Project -> your service -> Variables); Railway
+also supports per-environment variable scoping (e.g. separate values for a staging vs. production
+environment) if that's ever needed, though a single Hobby-tier service doesn't need it today.
 
 | Variable | Where to set | Purpose |
 |---|---|---|
-| `PORT` | Railway (auto-injected -- no action needed) | The server binds here instead of the hardcoded `8877`. |
-| `FPL_INTEL_REFRESH_TOKEN` | Railway Variables tab (operator-set secret) | Operator-only secret gating `POST /api/refresh`. Read from this env var instead of the random per-process token generated today, and never rendered into any served page. |
-| Allowed-host value (exact env var name not yet finalized) | Railway Variables tab (operator-set secret) | Replaces the hardcoded `127.0.0.1:{port}` check in `_has_trusted_host` / the `Origin` check, so the deployed hostname (e.g. `*.up.railway.app`) is trusted instead of only localhost. |
+| `PORT` | Railway (auto-injected -- no action needed) | The server binds here instead of the local default `8877`; its presence is also what switches the bind host from `127.0.0.1` to `0.0.0.0`. |
+| `FPL_INTEL_REFRESH_TOKEN` | Railway Variables tab (operator-set secret) | Operator-only secret gating `POST /api/refresh`. Read from this env var instead of the random per-process token used when unset, and never rendered into any served page. |
+| `FPL_INTEL_ALLOWED_ORIGIN` | Railway Variables tab (operator-set secret) | The full trusted origin, scheme included, e.g. `https://fpl-intelligence.up.railway.app`. Replaces the hardcoded `127.0.0.1:{port}` check `_has_trusted_host`/the `Origin` check use by default -- its host:port becomes the trusted `Host` header value, and the full string becomes the trusted `Origin` header value. Defaults to `http://127.0.0.1:{port}` locally when unset. |
 
 See [plans/issue-27-cloud-hosting.md](plans/issue-27-cloud-hosting.md) for the full design.
 

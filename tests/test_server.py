@@ -1,4 +1,6 @@
+from contextlib import redirect_stderr
 import http.client
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -151,7 +153,7 @@ class DashboardServerTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -185,13 +187,15 @@ class DashboardServerTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self.directory.cleanup()
 
-    def test_dashboard_injects_server_token(self):
+    def test_dashboard_never_ships_the_refresh_token(self):
+        # Issue #27: the refresh token is an operator-only secret now -- it must never appear
+        # anywhere in a served page, unlike before #27's token-in-markup design.
         html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
 
-        self.assertIn('content="test-token"', html)
-        self.assertNotIn("__REFRESH_TOKEN__", html)
+        self.assertNotIn("test-token", html)
+        self.assertNotIn("refresh-token", html)
 
-    def test_rejects_untrusted_host_before_serving_token_bearing_dashboard(self):
+    def test_rejects_untrusted_host_before_serving_dashboard(self):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
         connection.putrequest("GET", "/dashboard.html", skip_host=True)
         connection.putheader("Host", "attacker.example")
@@ -246,9 +250,15 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertEqual(self.calls, [])
 
-    def test_server_rejects_non_loopback_binding(self):
-        with self.assertRaises(ValueError):
-            create_server(self.root, host="0.0.0.0", port=0, token="test-token")
+    def test_accepts_a_non_loopback_binding(self):
+        # Issue #27: the old 127.0.0.1-only restriction is gone -- create_server accepts any
+        # bindable host (e.g. the 0.0.0.0 a hosting platform like Railway expects) and starts
+        # cleanly, without raising.
+        hosted_server = create_server(self.root, host="0.0.0.0", port=0, token="test-token")
+        try:
+            self.assertEqual(hosted_server.server_address[0], "0.0.0.0")
+        finally:
+            hosted_server.server_close()
 
     def test_cross_process_refresh_contention_returns_stable_busy_response(self):
         busy_server = create_server(
@@ -327,6 +337,121 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(payload["confirmed_movements"], 7)
         self.assertEqual(self.calls, ["refresh"])
 
+    def test_error_logging_includes_a_traceback(self):
+        # Issue #27: the six `except Exception` call sites in server.py used to print only the
+        # exception's one-line repr, dropping exactly where it happened -- now every one of them
+        # also includes `traceback.format_exc()`.
+        failing_server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            refresh_action=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        captured = io.StringIO()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{failing_server.server_port}/api/refresh",
+                data=b"{}",
+                method="POST",
+                headers={"X-Refresh-Token": "test-token", "Content-Type": "application/json"},
+            )
+            with redirect_stderr(captured):
+                with self.assertRaises(HTTPError):
+                    urlopen(request, timeout=3)
+            self.assertIn("Traceback", captured.getvalue())
+            self.assertIn("RuntimeError: boom", captured.getvalue())
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+
+class AllowedOriginTests(unittest.TestCase):
+    """Issue #27: a custom `allowed_origin` is the single source of truth for both the trusted
+    Host header (its netloc) and the trusted Origin header (its full value), replacing the
+    hardcoded `127.0.0.1:{port}` default every other test class in this file exercises."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text("<h1>Dashboard</h1>", encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            allowed_origin="https://example.up.railway.app",
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _get_with_host(self, host_header):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        connection.putrequest("GET", "/dashboard.html", skip_host=True)
+        connection.putheader("Host", host_header)
+        connection.endheaders()
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+        return response.status
+
+    def _post_profile_with_headers(self, headers):
+        body = json.dumps({
+            "team_id": 364759,
+            "timezone": "America/New_York",
+            "risk_profile": "balanced",
+            "goal": "top_50k",
+            "confirmed_free_transfers": None,
+            "confirmed_free_transfers_event": None,
+        }).encode("utf-8")
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        connection.putrequest("POST", "/api/profile", skip_host=True)
+        for name, value in headers.items():
+            connection.putheader(name, value)
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders()
+        connection.send(body)
+        response = connection.getresponse()
+        status = response.status
+        response.read()
+        connection.close()
+        return status
+
+    def test_the_configured_origin_host_is_trusted(self):
+        self.assertEqual(self._get_with_host("example.up.railway.app"), 200)
+
+    def test_the_old_default_localhost_host_is_now_rejected(self):
+        self.assertEqual(self._get_with_host(f"127.0.0.1:{self.server.server_port}"), 421)
+
+    def test_the_configured_origin_header_passes_the_post_check(self):
+        status = self._post_profile_with_headers({
+            "Host": "example.up.railway.app",
+            "Origin": "https://example.up.railway.app",
+            "Content-Type": "application/json",
+        })
+        self.assertEqual(status, 200)
+
+    def test_the_old_default_localhost_origin_header_is_now_rejected(self):
+        status = self._post_profile_with_headers({
+            "Host": "example.up.railway.app",
+            "Origin": f"http://127.0.0.1:{self.server.server_port}",
+            "Content-Type": "application/json",
+        })
+        self.assertEqual(status, 403)
+
 
 class TeamLookupTests(unittest.TestCase):
     """The unauthenticated no-signup lookup path added for issue #46."""
@@ -335,7 +460,7 @@ class TeamLookupTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -375,8 +500,7 @@ class TeamLookupTests(unittest.TestCase):
 
         self.assertEqual(self.lookup_calls, [364759])
         self.assertIn("BrunoMans", html)
-        self.assertIn('content="test-token"', html)
-        self.assertNotIn('content="__REFRESH_TOKEN__"', html)
+        self.assertNotIn("test-token", html)
         self.assertNotIn("__DASHBOARD_DATA__", html)
 
     def test_absent_team_id_serves_the_shared_cached_dashboard_unmodified(self):
@@ -445,7 +569,7 @@ class LookupOptOutGateTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -520,7 +644,7 @@ class CookieResolvedTeamTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -618,7 +742,7 @@ class ModelPerformanceSpliceTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -774,7 +898,7 @@ class ProfileEndpointTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -822,14 +946,17 @@ class ProfileEndpointTests(unittest.TestCase):
         )
         return request
 
-    def test_rejects_missing_token_and_saves_nothing(self):
+    def test_succeeds_without_any_refresh_token_header(self):
+        # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
+        # longer gates -- issue #45's own CooldownLimiter is the real protection here now.
         request = self._post_profile(self.VALID_PAYLOAD)
 
-        with self.assertRaises(HTTPError) as error:
-            urlopen(request, timeout=3)
+        response = urlopen(request, timeout=3)
+        payload = json.loads(response.read())
 
-        self.assertEqual(error.exception.code, 403)
-        self.assertFalse(self.db_path.exists())
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertIsNotNone(load_profile(self.db_path, 364759))
 
     def test_rejects_cross_origin_request_even_with_valid_token(self):
         request = self._post_profile(
@@ -1168,7 +1295,7 @@ class LookupOptOutEndpointTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -1299,14 +1426,17 @@ class LookupOptOutEndpointTests(unittest.TestCase):
 
         self.assertFalse(load_profile(self.db_path, 364759)["opted_out"])
 
-    def test_rejects_missing_token(self):
+    def test_succeeds_without_any_refresh_token_header(self):
+        # Issue #27: /api/lookup-opt-out is one of the four endpoints the shared refresh token
+        # no longer gates -- its own PIN check plus rate limiting are the real protection here.
         request = self._post_opt_out({"team_id": 364759, "opted_out": True, "pin": "abc123"})
 
-        with self.assertRaises(HTTPError) as error:
-            urlopen(request, timeout=3)
+        response = urlopen(request, timeout=3)
+        payload = json.loads(response.read())
 
-        self.assertEqual(error.exception.code, 403)
-        self.assertIsNone(load_profile(self.db_path, 364759))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "team_id": 364759, "opted_out": True})
+        self.assertTrue(load_profile(self.db_path, 364759)["opted_out"])
 
     def test_rejects_a_pin_that_is_too_short(self):
         request = self._post_opt_out(
@@ -1371,7 +1501,7 @@ class DraftSquadEndpointTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -1409,12 +1539,15 @@ class DraftSquadEndpointTests(unittest.TestCase):
             headers=request_headers,
         )
 
-    def test_rejects_missing_token_and_saves_nothing(self):
-        with self.assertRaises(HTTPError) as error:
-            urlopen(self._post_draft(self.valid_payload), timeout=3)
+    def test_succeeds_without_any_refresh_token_header(self):
+        # Issue #27: /api/draft-squad is one of the four endpoints the shared refresh token no
+        # longer gates -- issue #45's own CooldownLimiter is the real protection here now.
+        response = urlopen(self._post_draft(self.valid_payload), timeout=3)
+        payload = json.loads(response.read())
 
-        self.assertEqual(error.exception.code, 403)
-        self.assertFalse(self.db_path.exists())
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertIsNotNone(load_profile(self.db_path, 364759))
 
     def test_valid_legal_squad_is_saved_and_sets_the_team_cookie(self):
         request = self._post_draft(self.valid_payload, headers={"X-Refresh-Token": "test-token"})
@@ -1585,7 +1718,7 @@ class ReminderOptInEndpointTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -1725,19 +1858,22 @@ class ReminderOptInEndpointTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
-    def test_rejects_missing_token_and_saves_nothing(self):
+    def test_succeeds_without_any_refresh_token_header(self):
+        # Issue #27: /api/reminder-opt-in is one of the four endpoints the shared refresh token
+        # no longer gates -- its own two CooldownLimiters are the real protection here now.
         server, thread = self._start(reminder_email_action=self._fake_email_action())
         try:
             base_url = f"http://127.0.0.1:{server.server_port}"
             request = self._post(
                 base_url, {"team_id": 364759, "action": "enable", "email": "a@b.com", "lead_hours": 3},
             )
-            with self.assertRaises(HTTPError) as error:
-                urlopen(request, timeout=3)
+            response = urlopen(request, timeout=3)
+            payload = json.loads(response.read())
 
-            self.assertEqual(error.exception.code, 403)
-            self.assertEqual(self.sent_emails, [])
-            self.assertIsNone(load_profile(self.db_path, 364759))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload, {"status": "ok", "team_id": 364759, "reminder_status": "pending"})
+            self.assertEqual(len(self.sent_emails), 1)
+            self.assertIsNotNone(load_profile(self.db_path, 364759))
         finally:
             server.shutdown()
             server.server_close()
@@ -1920,7 +2056,7 @@ class ReminderConfirmEndpointTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
@@ -2077,7 +2213,7 @@ class ReminderProfileLeakFixTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "dashboard.html").write_text(
-            '<meta name="refresh-token" content="__REFRESH_TOKEN__"><h1>Dashboard</h1>',
+            '<h1>Dashboard</h1>',
             encoding="utf-8",
         )
         (self.root / "data").mkdir()
