@@ -171,6 +171,57 @@ for the ML minutes shadow challenger (issue #65, see [MODEL.md](MODEL.md)) offli
 pip install -r requirements.txt
 ```
 
+## Environment variables
+
+Everything below is optional for local use -- the dashboard, refresh pipeline, and tests all
+run with none of these set, exactly as `## Open the dashboard` describes. They only matter for
+specific opt-in features (LLM-based news parsing, the deadline-reminder email) or for the
+hosted deployment tracked in [issue #27](https://github.com/onkartalekar/fpl-intelligence/issues/27).
+
+### LLM-based news parsing (optional)
+
+Unset by default; the feature silently no-ops (no error) when its provider's key is missing.
+
+| Variable | Required when | Notes |
+|---|---|---|
+| `FPL_INTEL_LLM_PROVIDER` | Never | Selects `"claude"` (default) or `"openai_compatible"`. |
+| `ANTHROPIC_API_KEY` | Provider is `claude` and you want live parsing | Standard Anthropic API key. |
+| `FPL_INTEL_LLM_API_BASE` | Provider is `openai_compatible` | Base URL of any OpenAI Chat Completions-shaped endpoint -- no vendor is hardcoded. |
+| `FPL_INTEL_LLM_MODEL` | Provider is `openai_compatible` | Model name at that endpoint. |
+| `FPL_INTEL_LLM_API_KEY` | Provider is `openai_compatible` | API key for that endpoint. |
+
+### Deadline-reminder email -- offline script (`scripts/send_deadline_reminder.py`, issue #55)
+
+Not used by the dashboard server itself; only by the separate script the (currently disabled)
+`.github/workflows/deadline-reminder.yml` GitHub Actions workflow invokes.
+
+| Variable | Required when | Notes |
+|---|---|---|
+| `FPL_INTEL_REMINDER_TEAMS` | At least one of this or `FPL_INTEL_REMINDER_PROFILES_DB` must resolve at least one team, or the script raises `ConfigError` | JSON list of `{"team_id", "email", "lead_hours"}` objects, manually maintained. |
+| `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80) | Never | Path to a `profiles.db` to additionally source opted-in teams from (`reminder_status == "enabled"`). Unset by default. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`; the explicit-secret entry wins on collision. |
+| `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` | To actually send mail (a `--dry-run` flag exists for previewing without them) | Deliberately separate credentials from the server's own SMTP vars below, so each can be rotated independently. |
+| `FPL_INTEL_DASHBOARD_BASE_URL` (issue #83) | Never | Base URL used to build the email footer's "manage reminder settings" link. Defaults to `http://localhost:8877`. |
+
+### Reminder opt-in confirmation email -- live server (`src/fpl_intel/reminder_confirmation.py`, issue #79)
+
+| Variable | Required when | Notes |
+|---|---|---|
+| `FPL_INTEL_SERVER_SMTP_HOST` / `FPL_INTEL_SERVER_SMTP_PORT` / `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` | To send the double-opt-in confirmation email when a visitor enables reminders from the Profile tab | Separate credentials from the offline script's `FPL_INTEL_SMTP_*` above by design. |
+
+### Hosted deployment (issue #27 -- planned, not yet implemented)
+
+Local (`scripts/start_dashboard.py`) behavior is unaffected either way: the plan calls for these
+to default to today's localhost-only behavior when unset, so a plain local checkout keeps working
+exactly as it does now once #27 ships.
+
+| Variable | Purpose |
+|---|---|
+| `PORT` | Railway-injected; the server binds here instead of the hardcoded `8877`. |
+| `FPL_INTEL_REFRESH_TOKEN` | Operator-only secret gating `POST /api/refresh`. Read from this env var instead of the random per-process token generated today, and never rendered into any served page. |
+| Allowed-host value (exact env var name not yet finalized) | Replaces the hardcoded `127.0.0.1:{port}` check in `_has_trusted_host` / the `Origin` check, so the deployed hostname (e.g. `*.up.railway.app`) is trusted instead of only localhost. |
+
+See [plans/issue-27-cloud-hosting.md](plans/issue-27-cloud-hosting.md) for the full design.
+
 ## Tests
 
 ```bash

@@ -193,6 +193,7 @@ Revisiting the issue's original checklist against the A3 + Railway choice:
 6. A `Procfile`/Railway start command, and a volume mount at `data/`.
 7. Swap the six `print(f"...{error!r}", file=sys.stderr)` error-handling call sites for `traceback.format_exc()` (or `logging.exception`) so Railway's captured logs retain enough to debug an incident, not just confirm one happened.
 8. Config-only, no app code: point an external uptime monitor (e.g. UptimeRobot free tier) at `GET /api/status`, alerting on non-200 or on `generated_at` going stale past a threshold.
+9. Update the README's "Environment variables" section (added 2026-08-10, ahead of this issue's implementation) with the real `FPL_INTEL_REFRESH_TOKEN` and allowed-host variable names once items 2-3 above pick and land them — that section currently documents them as "planned" with a placeholder name for the latter.
 
 Each of these is small in isolation; together they're a real, self-contained implementation pass — a good candidate for its own `ship-issue` scope rather than folding into this plan doc.
 
