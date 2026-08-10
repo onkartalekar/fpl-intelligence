@@ -24,6 +24,7 @@ Input: a single GitHub issue number, e.g. `/ship-issue 42`. Nothing else should 
 
 ## 4. Test
 - Run the full suite per [[run-full-tests]]. It must pass before continuing. Do not skip this because "it's a small change."
+- If this implementation is delegated to a spawned Agent rather than done directly: that agent's prompt must state plainly that there is no external notifier for its own Bash commands, and that the suite has to run as a blocking foreground call within one tool call, followed straight through to the remaining steps without stopping to "wait." Spell this out explicitly in the prompt every time — agents in this repo's history have repeatedly ended their turn believing a notification would resume them, and it doesn't, at that level.
 
 ## 5. Verify live
 - If the change is observable in the dashboard, verify it live per [[verify-dashboard]] rather than trusting unit tests alone. Several real bugs in this repo's history were only caught this way.
@@ -40,8 +41,4 @@ Input: a single GitHub issue number, e.g. `/ship-issue 42`. Nothing else should 
 - Wait for an explicit instruction naming this PR/issue (e.g. "merge #<N>") before doing anything further.
 
 ## 8. On explicit merge instruction only
-- `gh pr merge <N> --squash --delete-branch`
-- If it conflicts with something merged in the meantime, resolve the conflict on the branch, push, re-run the full test suite, and re-request the merge instruction rather than assuming it still applies.
-- Sync main: `git fetch origin --prune && git checkout main && git reset --hard origin/main`
-- Clean up: `git worktree remove .claude/worktrees/issue-<N>-<slug> --force && git branch -D issue-<N>-<slug>`
-- If `data/official-transfers-latest.json` (or any other tracked-but-refresh-generated file) shows a diff from ad-hoc verification and isn't itself the deliverable, `git checkout -- <file>` to keep main clean.
+See [[merge-pr]].
