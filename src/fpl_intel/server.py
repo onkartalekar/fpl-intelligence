@@ -43,6 +43,21 @@ _TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
 _PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
 _TEAM_ID_REQUIRED_MESSAGE = "A team ID is required to save settings"
 _TEAM_ID_RE = re.compile(r"^[0-9]{1,8}$")
+# Issue #28: unlike every cooldown below (all keyed by source IP or team ID, protecting a
+# resource fairly attributed to one visitor/team at a time), /api/refresh refreshes one *shared*
+# generation used by everyone, and the cost being guarded against -- calling out to the real
+# FPL/Premier League APIs -- doesn't shrink just because requests arrive from different source
+# IPs. See `_REFRESH_COOLDOWN_KEY`'s comment at its point of use in `create_server` for why this
+# limiter is keyed globally instead. 90 seconds: since issue #27 this endpoint is operator-only
+# (gated by `X-Refresh-Token`, never shipped to the browser), so this cooldown isn't throttling
+# routine public traffic -- there isn't any -- it's defense-in-depth against a leaked/misused
+# token or an operator's own accidental rapid double-trigger. 90s is comfortably longer than any
+# realistic accidental double-click/retry gap, while still short enough that a legitimate operator
+# who genuinely needs to re-run a refresh isn't meaningfully inconvenienced.
+_REFRESH_COOLDOWN_SECONDS = 90
+# The single key every /api/refresh request shares, making its CooldownLimiter global instead of
+# per-source -- see the comment at its point of use in `_handle_refresh` for the full reasoning.
+_REFRESH_COOLDOWN_KEY = "refresh"
 _TEAM_LOOKUP_COOLDOWN_SECONDS = 15
 _PROFILE_WRITE_COOLDOWN_SECONDS = 5
 # Deliberately stricter than the ordinary profile-write cooldown above -- this endpoint is the
@@ -98,6 +113,17 @@ _ALLOWED_REMINDER_LEAD_HOURS = {3, 12, 24}
 _ALLOWED_REMINDER_OPT_IN_KEYS = {"team_id", "action", "email", "lead_hours"}
 _REMINDER_OPT_IN_VALIDATION_MESSAGE = "Invalid reminder opt-in payload"
 _REMINDER_EMAIL_MAX_LENGTH = 254  # RFC 5321's practical maximum total address length
+# Issue #28: bounds how long `ThreadingHTTPServer` lets one connection's thread block waiting on
+# a *socket read* (the request line, headers, or body arriving) -- set as `DashboardHandler.timeout`
+# below, the classic defense against a slow-loris connection that opens and then sends data very
+# slowly or not at all, tying up a thread indefinitely. 20 seconds is comfortably longer than any
+# legitimate client needs to finish sending a small request (this app's largest body cap is 4KB,
+# `_handle_profile`/etc.'s `max_body`) even over a slow/lossy connection, while still bounding
+# worst-case thread pileup to a low number of stalled connections at a time. This only bounds
+# socket reads -- once a full request has already been read, it does not apply to how long
+# `_handle_refresh`'s own processing (including its own separate subprocess `timeout=300` in
+# `_default_refresh_action`) takes.
+_CONNECTION_TIMEOUT_SECONDS = 20
 
 
 def _coerce_team_id(raw):
@@ -740,6 +766,7 @@ def create_server(
     model_performance_action=None,
     reminder_opt_in_action=None,
     reminder_email_action=None,
+    refresh_limiter=None,
 ):
     """Create a dashboard server with a token-protected /api/refresh and open, rate-limited
     per-team write endpoints (issue #45's model).
@@ -751,6 +778,11 @@ def create_server(
     -- see `_has_trusted_host`/`do_POST` below. Left `None` (the default, used by every existing
     caller/test), both checks fall back to today's exact `127.0.0.1:{port}` behavior, byte-for-
     byte unchanged.
+
+    `refresh_limiter`, when set, replaces the default global-cooldown `CooldownLimiter` gating
+    `/api/refresh` (issue #28) -- exists so tests can inject one built with `rate_limit.
+    CooldownLimiter`'s `clock` parameter, the same way every other dependency here is injectable,
+    without needing to wait out a real 90-second cooldown.
     """
     root = Path(root).resolve()
     token = token or secrets.token_urlsafe(32)
@@ -784,10 +816,19 @@ def create_server(
     reminder_opt_in_write_action = reminder_opt_in_action or _default_reminder_opt_in_action(
         root, reminder_send_email_action, reminder_confirm_send_limiter
     )
+    refresh_cooldown_limiter = refresh_limiter or CooldownLimiter(
+        cooldown_seconds=_REFRESH_COOLDOWN_SECONDS
+    )
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "FPLDashboard/1.0"
+        # Issue #28: bounds how long this connection's thread blocks waiting on a socket read
+        # (StreamRequestHandler.setup(), inherited via BaseHTTPRequestHandler, calls
+        # `self.connection.settimeout(self.timeout)` with this value) -- the defense against a
+        # slow-loris connection that opens and then sends data very slowly or not at all. See
+        # `_CONNECTION_TIMEOUT_SECONDS`'s comment above for why 20s.
+        timeout = _CONNECTION_TIMEOUT_SECONDS
 
         def _json(self, status, payload, extra_headers=None):
             body = json.dumps(payload).encode("utf-8")
@@ -992,6 +1033,23 @@ def create_server(
                 self._handle_reminder_opt_in(body)
 
         def _handle_refresh(self):
+            # Issue #28: keyed on a single constant, deliberately *not* `self.client_address[0]`
+            # like every other limiter in this file. Those are all keyed per-source because they
+            # each guard a resource fairly attributed to one visitor/team at a time. This one
+            # guards a *shared* resource -- one refresh generation used by everyone, backed by
+            # real calls to the FPL/Premier League APIs -- so the risk being limited doesn't
+            # shrink just because requests come from different source IPs. And since /api/refresh
+            # is operator-only now (gated by `X-Refresh-Token`, issue #27, never shipped to the
+            # browser), a per-IP-keyed cooldown here would be trivially bypassed by calling from a
+            # second IP with the same (leaked, or legitimately shared) token -- defeating the
+            # actual point of the limiter. A single constant key makes this a genuinely global
+            # cooldown, regardless of source.
+            if not refresh_cooldown_limiter.allow(_REFRESH_COOLDOWN_KEY):
+                self._json(
+                    429,
+                    {"status": "error", "message": "Refresh requested too recently. Try again shortly."},
+                )
+                return
             if not refresh_lock.acquire(blocking=False):
                 self._json(409, {"status": "busy", "message": "A refresh is already running"})
                 return
@@ -1168,6 +1226,46 @@ def create_server(
         def log_message(self, message, *args):
             print(f"[{self.log_date_time_string()}] {message % args}")
 
-    server = ThreadingHTTPServer((host, port), DashboardHandler)
+        def log_error(self, format, *args):
+            # Issue #28: this is the actual interception point for the `timeout` set above --
+            # BaseHTTPRequestHandler.handle_one_request() already catches a per-connection
+            # socket-read timeout internally (as a TimeoutError) and reports it by calling
+            # exactly this hook with `args[0]` set to the exception instance, rather than letting
+            # it propagate as an unhandled exception. That's expected, routine defensive behavior
+            # against a slow/stalled client, not a real error -- issue #27's traceback-logging
+            # fix (six `except Exception` sites now printing `traceback.format_exc()`) was about
+            # making logs more useful, and spamming a full traceback per timed-out connection
+            # under a slow-loris attempt would do the opposite. So it's downgraded here to one
+            # clearly-labeled line via log_message (the override just above) instead of the
+            # generic default message, which would otherwise read like a real per-request
+            # failure. Anything else (a genuine error) still goes through log_message unchanged.
+            if args and isinstance(args[0], TimeoutError):
+                self.log_message("connection timed out (idle/slow client, %ss limit)", self.timeout)
+                return
+            self.log_message(format, *args)
+
+    class _DashboardServer(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            # Issue #28: defense-in-depth companion to DashboardHandler.log_error above. Verified
+            # against this stdlib's actual behavior: a per-connection socket-read timeout never
+            # actually reaches this method in practice (handle_one_request's internal catch,
+            # described in log_error's comment, already handles the ordinary case) -- but
+            # ThreadingMixIn.process_request_thread routes *any* exception that does escape a
+            # request thread to here, printing a full traceback by default (BaseServer.
+            # handle_error). Should a timeout-flavored exception ever reach this level instead
+            # (a stdlib behavior change, or a timeout while writing a response rather than
+            # reading a request), it gets the same one-line quiet treatment rather than a
+            # traceback dump; every other exception still gets the full traceback via the base
+            # implementation, so a genuine unexpected bug stays fully visible.
+            if isinstance(sys.exc_info()[1], TimeoutError):
+                timestamp = datetime.now(timezone.utc).strftime("%d/%b/%Y %H:%M:%S")
+                print(
+                    f"[{timestamp}] connection timed out from {client_address} (server-level)",
+                    file=sys.stderr,
+                )
+                return
+            super().handle_error(request, client_address)
+
+    server = _DashboardServer((host, port), DashboardHandler)
     server.refresh_token = token
     return server

@@ -1,12 +1,14 @@
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import http.client
 import io
 import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -2268,6 +2270,421 @@ class ReminderProfileLeakFixTests(unittest.TestCase):
         self.assertIn("owner@example.com", html)
         self.assertIn('"reminder_status": "enabled"', html)
         self.assertIn('"reminder_lead_hours": 3', html)
+
+
+class RefreshCooldownTests(unittest.TestCase):
+    """Issue #28: /api/refresh's own time-based cooldown, checked before `_handle_refresh`
+    attempts `refresh_lock.acquire()` -- previously only concurrency-of-1 (the lock) protected
+    this endpoint, so nothing stopped immediate, repeated sequential calls once one refresh
+    finished. A fake clock is injected via `refresh_limiter` (create_server's DI hook added for
+    exactly this) so the tests don't need to wait out the real 90-second cooldown.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.calls = []
+
+        def refresh_action():
+            self.calls.append("refresh")
+            return {
+                "generated_at": "2026-07-19T12:00:00Z",
+                "confirmed_movements": 7,
+                "fpl_status": "target_season_ready",
+            }
+
+        self.refresh_action = refresh_action
+        self.clock = {"now": 0.0}
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _make_server(self, limiter):
+        server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            refresh_action=self.refresh_action,
+            refresh_limiter=limiter,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def _post_refresh(self, base_url):
+        request = Request(
+            base_url + "/api/refresh",
+            data=b"{}",
+            method="POST",
+            headers={"X-Refresh-Token": "test-token", "Content-Type": "application/json"},
+        )
+        try:
+            response = urlopen(request, timeout=3)
+            return response.status, json.loads(response.read())
+        except HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    def test_a_second_call_within_the_cooldown_returns_429_with_a_correct_token_both_times(self):
+        limiter = CooldownLimiter(cooldown_seconds=90, clock=lambda: self.clock["now"])
+        server, thread = self._make_server(limiter)
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            first_status, first_payload = self._post_refresh(base_url)
+            second_status, second_payload = self._post_refresh(base_url)
+
+            self.assertEqual(first_status, 200)
+            self.assertEqual(first_payload["status"], "ok")
+            self.assertEqual(second_status, 429)
+            self.assertEqual(second_payload["status"], "error")
+            # The lock-based concurrency guard would report 409 ("busy"), not 429 -- confirming
+            # this really is the new cooldown, not the pre-existing refresh_lock.
+            self.assertNotEqual(second_status, 409)
+            # Only the first call actually ran the (real) refresh action.
+            self.assertEqual(self.calls, ["refresh"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_first_call_is_never_blocked_and_the_cooldown_resets_after_the_window_elapses(self):
+        limiter = CooldownLimiter(cooldown_seconds=90, clock=lambda: self.clock["now"])
+        server, thread = self._make_server(limiter)
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            first_status, _ = self._post_refresh(base_url)
+            self.assertEqual(first_status, 200)
+
+            self.clock["now"] = 90.0  # exactly the cooldown window elapsed
+            second_status, second_payload = self._post_refresh(base_url)
+
+            self.assertEqual(second_status, 200)
+            self.assertEqual(second_payload["status"], "ok")
+            self.assertEqual(self.calls, ["refresh", "refresh"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_the_cooldown_is_keyed_globally_not_by_source_ip(self):
+        """Proves the mechanism that makes the cooldown global: `_handle_refresh` always checks
+        the limiter with the same fixed key, never `self.client_address[0]` -- unlike every other
+        `CooldownLimiter` in server.py. A real two-different-source-IP HTTP test isn't practical
+        in this sandboxed environment (binding a second loopback alias such as 127.0.0.2 needs
+        privileges this environment doesn't grant test processes), so this spies on the key(s)
+        actually passed to `.allow()` across two requests -- both necessarily arriving from the
+        same 127.0.0.1 test-client source at the socket level, which is exactly the point: if the
+        server were keying by `self.client_address[0]` instead, that fact would be invisible to a
+        same-source test like this one, but the *keys observed* prove it isn't happening -- the
+        same fixed key is used regardless of who's asking, which is precisely what makes two
+        genuinely different real-world source IPs share one cooldown.
+        """
+        observed_keys = []
+        real_limiter = CooldownLimiter(cooldown_seconds=90, clock=lambda: self.clock["now"])
+
+        class SpyLimiter:
+            def allow(self, key):
+                observed_keys.append(key)
+                return real_limiter.allow(key)
+
+        server, thread = self._make_server(SpyLimiter())
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            self._post_refresh(base_url)
+            self._post_refresh(base_url)
+
+            self.assertEqual(len(observed_keys), 2)
+            # The same literal key both times -- not, e.g., two different client_address values.
+            self.assertEqual(observed_keys[0], observed_keys[1])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_a_per_source_keyed_limiter_would_not_have_shared_this_cooldown(self):
+        """Contrast case, run with no HTTP layer at all: a per-source-keyed `CooldownLimiter` --
+        the pattern every *other* limiter in server.py uses, and the one this endpoint
+        deliberately does not -- allows two different source keys independently. This is the
+        behavior the global keying in `_handle_refresh` deliberately avoids.
+        """
+        per_source_limiter = CooldownLimiter(cooldown_seconds=90, clock=lambda: self.clock["now"])
+
+        self.assertTrue(per_source_limiter.allow("203.0.113.1"))
+        self.assertTrue(per_source_limiter.allow("198.51.100.7"))
+
+    def test_refresh_token_check_still_runs_before_the_cooldown_and_is_unaffected_by_it(self):
+        """An invalid token is still rejected with 403 even while a valid-token call would be
+        within the cooldown window -- the two checks are independent, and this one is unchanged
+        from before this issue's ship."""
+        limiter = CooldownLimiter(cooldown_seconds=90, clock=lambda: self.clock["now"])
+        server, thread = self._make_server(limiter)
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            self._post_refresh(base_url)  # consumes the cooldown with a valid token
+
+            request = Request(
+                base_url + "/api/refresh",
+                data=b"{}",
+                method="POST",
+                headers={"X-Refresh-Token": "wrong-token", "Content-Type": "application/json"},
+            )
+            with self.assertRaises(HTTPError) as error:
+                urlopen(request, timeout=3)
+
+            self.assertEqual(error.exception.code, 403)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class OtherEndpointsUnaffectedByRefreshCooldownTests(unittest.TestCase):
+    """Issue #28: the four already-open write endpoints (issue #45's model) must be completely
+    unaffected by the new refresh-only cooldown -- no shared limiter, no collateral effect."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_a_refresh_call_does_not_block_a_following_profile_save(self):
+        refresh_request = Request(
+            self.base_url + "/api/refresh",
+            data=b"{}",
+            method="POST",
+            headers={"X-Refresh-Token": "test-token", "Content-Type": "application/json"},
+        )
+        # No refresh_action override -- the real _default_refresh_action will fail (500) in this
+        # empty temp root (no scripts/refresh_dashboard.py), which is fine: this test only cares
+        # that the refresh *attempt*, whatever its own outcome, never gates /api/profile, an
+        # entirely separate, untouched-by-this-issue limiter.
+        with self.assertRaises(HTTPError) as error:
+            urlopen(refresh_request, timeout=5)
+        self.assertEqual(error.exception.code, 500)
+
+        profile_request = Request(
+            self.base_url + "/api/profile",
+            data=json.dumps({
+                "team_id": 364759, "timezone": "Europe/London", "confirmed_free_transfers": None,
+                "confirmed_free_transfers_event": None, "risk_profile": "balanced", "goal": "top_50k",
+            }).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        response = urlopen(profile_request, timeout=3)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["status"], "ok")
+
+
+class ConnectionTimeoutTests(unittest.TestCase):
+    """Issue #28: a per-connection socket-read timeout, the defense against a slow-loris-style
+    connection that opens and then sends data very slowly or not at all, tying up a thread
+    indefinitely. These use a real raw socket against the real running server -- not just an
+    assertion on the class attribute's value -- so the mechanism itself is proven to work, not
+    merely configured.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        # DashboardHandler is defined locally inside create_server; server.RequestHandlerClass
+        # (set by socketserver.BaseServer.__init__) is the supported way to reach it from
+        # outside. Saved/restored around each test so the fast value used here for a quick test
+        # never leaks into the production default or any other test.
+        self.handler_cls = self.server.RequestHandlerClass
+        self.original_timeout = self.handler_cls.timeout
+        self.handler_cls.timeout = 0.2
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.handler_cls.timeout = self.original_timeout
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_a_connection_that_sends_nothing_is_closed_within_the_timeout(self):
+        sock = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5)
+        try:
+            start = time.monotonic()
+            data = sock.recv(100)  # blocks until the server closes the idle connection
+            elapsed = time.monotonic() - start
+
+            self.assertEqual(data, b"")  # empty read == the peer (server) closed the connection
+            self.assertLess(elapsed, 3.0)  # comfortably bounded, nowhere near "hangs forever"
+        finally:
+            sock.close()
+
+    def test_a_connection_with_an_incomplete_request_is_also_closed(self):
+        sock = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5)
+        try:
+            sock.sendall(b"GET /dashboard.html HTTP/1.1\r\n")  # no blank line -- headers never end
+            start = time.monotonic()
+            data = sock.recv(100)
+            elapsed = time.monotonic() - start
+
+            self.assertEqual(data, b"")
+            self.assertLess(elapsed, 3.0)
+        finally:
+            sock.close()
+
+    def test_a_normal_fast_request_is_unaffected_by_the_short_timeout(self):
+        # The timeout only bounds socket *reads*; a request that arrives promptly and completely
+        # must still be served normally, even with an aggressively short 0.2s timeout.
+        response = urlopen(f"http://127.0.0.1:{self.server.server_port}/dashboard.html", timeout=3)
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("Dashboard", response.read().decode())
+
+    def test_timeout_is_logged_as_one_quiet_labeled_line_not_a_traceback(self):
+        # log_error (like this file's pre-existing log_message override it delegates to) writes
+        # to stdout -- this file's established convention for routine per-request/operational
+        # logging, e.g. the "GET /dashboard.html HTTP/1.1 200" access-log style lines every
+        # request already produces, as opposed to stderr, which every genuine-error call site in
+        # this file (`except Exception: print(..., file=sys.stderr)`) and the base
+        # `handle_error`'s traceback dump both use. So the "quiet line instead of a traceback"
+        # contrast is proven by: the quiet line appears on stdout, and stderr stays clean.
+        captured_out = io.StringIO()
+        captured_err = io.StringIO()
+        with redirect_stdout(captured_out), redirect_stderr(captured_err):
+            sock = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5)
+            try:
+                sock.recv(100)  # blocks until the server closes the idle connection
+                # The server thread's log_error print happens strictly before it actually closes
+                # the socket, but isn't guaranteed to already be flushed the instant our recv()
+                # unblocks -- poll briefly rather than a single fixed sleep, to keep this test
+                # fast on a quiet machine and non-flaky on a loaded one.
+                deadline = time.monotonic() + 2.0
+                while (
+                    "connection timed out" not in captured_out.getvalue()
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.02)
+            finally:
+                sock.close()
+
+        self.assertIn("connection timed out", captured_out.getvalue())
+        self.assertEqual(captured_err.getvalue(), "")
+
+
+class QuietTimeoutLoggingDoesNotSwallowRealErrorsTests(unittest.TestCase):
+    """Issue #28: the quiet-timeout logging change (DashboardHandler.log_error's TimeoutError
+    special case, and _DashboardServer.handle_error's matching one) must only suppress the
+    traceback for that specific timeout case -- a genuine unrelated error must still surface its
+    full traceback, exactly as issue #27's traceback-logging fix intended.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_a_genuine_refresh_failure_still_logs_its_full_traceback(self):
+        # This already exercises `_handle_refresh`'s own `except Exception` (unchanged by this
+        # issue), not the timeout path -- included here specifically to contrast against the new
+        # ConnectionTimeoutTests.test_timeout_is_logged_as_one_quiet_labeled_line_not_a_traceback,
+        # proving the two paths behave differently on purpose.
+        failing_server = create_server(
+            self.root,
+            host="127.0.0.1",
+            port=0,
+            token="test-token",
+            refresh_action=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        captured = io.StringIO()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{failing_server.server_port}/api/refresh",
+                data=b"{}",
+                method="POST",
+                headers={"X-Refresh-Token": "test-token", "Content-Type": "application/json"},
+            )
+            with redirect_stderr(captured):
+                with self.assertRaises(HTTPError):
+                    urlopen(request, timeout=3)
+            self.assertIn("Traceback", captured.getvalue())
+            self.assertIn("RuntimeError: boom", captured.getvalue())
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+    def test_a_server_level_handle_error_for_a_genuine_exception_still_prints_a_full_traceback(self):
+        # Directly exercises _DashboardServer.handle_error -- the server-level override added
+        # alongside the timeout -- since a genuine (non-timeout) exception essentially never
+        # naturally reaches this level in practice (BaseHTTPRequestHandler.handle_one_request's
+        # own except Exception* sites, unchanged by this issue, catch almost everything first).
+        # Reached instead through server.RequestHandlerClass's request/server construction, same
+        # access pattern ConnectionTimeoutTests uses to reach DashboardHandler from outside
+        # create_server.
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        try:
+            captured = io.StringIO()
+            try:
+                raise RuntimeError("a genuine unrelated bug, not a timeout")
+            except RuntimeError:
+                with redirect_stderr(captured):
+                    server.handle_error(request=None, client_address=("203.0.113.1", 12345))
+
+            output = captured.getvalue()
+            self.assertIn("Traceback", output)
+            self.assertIn("RuntimeError: a genuine unrelated bug, not a timeout", output)
+            self.assertNotIn("connection timed out", output)
+        finally:
+            server.server_close()
+
+    def test_a_server_level_handle_error_for_a_timeout_still_logs_just_one_quiet_line(self):
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        try:
+            captured = io.StringIO()
+            try:
+                raise TimeoutError("timed out")
+            except TimeoutError:
+                with redirect_stderr(captured):
+                    server.handle_error(request=None, client_address=("203.0.113.1", 12345))
+
+            output = captured.getvalue()
+            self.assertIn("connection timed out", output)
+            self.assertNotIn("Traceback", output)
+        finally:
+            server.server_close()
 
 
 if __name__ == "__main__":
