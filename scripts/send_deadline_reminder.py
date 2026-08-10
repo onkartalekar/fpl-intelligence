@@ -36,6 +36,7 @@ exception, by design, since its entire purpose is showing a human what would be 
 import argparse
 from datetime import datetime, timezone
 from email.message import EmailMessage
+import html
 import json
 import os
 from pathlib import Path
@@ -60,6 +61,20 @@ SMTP_HOST_ENV_VAR = "FPL_INTEL_SMTP_HOST"
 SMTP_PORT_ENV_VAR = "FPL_INTEL_SMTP_PORT"
 SMTP_USER_ENV_VAR = "FPL_INTEL_SMTP_USER"
 SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SMTP_PASSWORD"
+
+# Issue #83: the HTML email's footer "Manage reminder settings" link needs a base URL to point
+# at the live dashboard's Profile tab (issue #79's reminder card). server.py's own confirmation
+# link (`_default_reminder_opt_in_action`) builds this from the live request's trusted `Host`
+# header -- there is no such request here, since this script is an offline cron job, not a
+# request handler. `FPL_INTEL_DASHBOARD_BASE_URL` is this script's equivalent explicit
+# configuration knob; unset, it falls back to the dashboard's own documented local-dev default
+# port (`server.py`'s `create_server(..., port=8877)` default). A real deployment should set this
+# explicitly to the dashboard's real public origin -- the fallback exists only so `--dry-run`
+# produces a plausible, well-formed link out of the box.
+DASHBOARD_BASE_URL_ENV_VAR = "FPL_INTEL_DASHBOARD_BASE_URL"
+_DEFAULT_DASHBOARD_BASE_URL = "http://localhost:8877"
+
+_DIVIDER = "-" * 60
 
 
 class ConfigError(RuntimeError):
@@ -259,6 +274,18 @@ def _format_deadline(deadline_iso):
     return deadline.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _plain_text_action_tag(action):
+    """A short bracketed tag ([HOLD]/[ROLL]/[TRANSFER]) for the plain-text body (issue #83, item
+    (c) polish) -- a scannable equivalent of the HTML body's color-coded action badge."""
+    if action == "hold":
+        return "HOLD"
+    if action == "roll":
+        return "ROLL"
+    if action in ("single_transfer", "double_transfer"):
+        return "TRANSFER"
+    return (action or "N/A").upper()
+
+
 def _compose_gw1_section(decision_center):
     """Compose the squad-selection section for the pre-Gameweek-2 `waiting_for_gw2` state."""
     lines = [
@@ -295,6 +322,7 @@ def _compose_gw1_section(decision_center):
     profile_recommendations = decision_center.get("profile_recommendations") or []
     if profile_recommendations:
         lines.append("")
+        lines.append(_DIVIDER)
         lines.append("All risk profiles at a glance:")
         for profile in profile_recommendations:
             profile_squad = profile.get("squad") or {}
@@ -326,7 +354,8 @@ def _compose_active_section(weekly):
     recommendation = profile.get("recommendation") or {}
     label = profile.get("label") or default_profile
     action = str(recommendation.get("action") or "").replace("_", " ")
-    lines.append(f"Recommended action ({label} profile): {action}")
+    tag = _plain_text_action_tag(recommendation.get("action"))
+    lines.append(f"[{tag}] Recommended action ({label} profile): {action}")
     reason = recommendation.get("reason")
     if reason:
         lines.append(f"Reason: {reason}")
@@ -364,23 +393,439 @@ def _compose_active_section(weekly):
         )
     if profiles:
         lines.append("")
+        lines.append(_DIVIDER)
         lines.append("All risk profiles at a glance:")
         for row in profiles:
             row_recommendation = row.get("recommendation") or {}
             row_label = row.get("label") or row.get("id")
+            row_tag = _plain_text_action_tag(row_recommendation.get("action"))
             row_action = str(row_recommendation.get("action") or "").replace("_", " ")
             row_captain = row_recommendation.get("captain") or {}
             row_points = row_recommendation.get("projected_event_points_including_captain")
             lines.append(
-                f"  {row_label}: {row_action}  |  Captain: {row_captain.get('name', 'n/a')}  |  "
+                f"  [{row_tag}] {row_label}: {row_action}  |  Captain: {row_captain.get('name', 'n/a')}  |  "
                 f"Points: {row_points if row_points is not None else 'n/a'}  |  "
                 f"Cost: {row_recommendation.get('point_cost', 0)}"
             )
     return lines
 
 
+
+# ---------------------------------------------------------------------------------------------
+# HTML email body (issue #83).
+#
+# Table-based layout (candidate (a) from plans/issue-83-reminder-html-email.md) plus an inline-
+# <svg> starting-XI pitch diagram (candidate (b)), built together per the plan's "Mockup review"
+# section. No <style> block, no CSS custom properties, no flexbox/grid -- every style is an
+# inline `style=""` attribute on nested `<table role="presentation">` markup, since that is the
+# only subset every major email client (including Outlook desktop) has rendered consistently for
+# two decades. Colors are literal hex values (not CSS custom properties, which Outlook desktop
+# does not support at all).
+# ---------------------------------------------------------------------------------------------
+
+# Literal hex badge colors, reused as-is from the plan's own research and the mockup review --
+# not re-derived here. `roll` (green): banking a transfer, or transferring at zero point cost.
+# `hit` (red): a transfer that costs points. `info` (blue): a hold, or an informational header.
+_BADGE_ROLL_BG, _BADGE_ROLL_FG = "#164b3a", "#94efcb"
+_BADGE_HIT_BG, _BADGE_HIT_FG = "#573040", "#ffc1cb"
+_BADGE_INFO_BG, _BADGE_INFO_FG = "#203b59", "#b9dcff"
+
+_EMAIL_BG = "#0d1b2a"
+_CARD_BG = "#13233a"
+_CARD_BORDER = "#28405c"
+_TEXT_PRIMARY = "#f4f7fb"
+_TEXT_MUTED = "#9fb0c3"
+
+# Pitch diagram layout. Row order top-to-bottom mirrors dashboard.js's weeklyPitch()/pitch()
+# grouping exactly (`['FWD','MID','DEF','GKP'].map(...)` inside a `flex-direction: column`
+# container renders FWD first/top, GKP last/bottom) -- see dashboard.js and the mockup PDF.
+_PITCH_ROW_ORDER = ["FWD", "MID", "DEF", "GKP"]
+_PITCH_WIDTH = 400
+_PITCH_HEIGHT = 500
+_PITCH_BOX_W = 86
+_PITCH_BOX_H = 56
+
+
+def _dashboard_base_url():
+    """Resolve the base URL for the footer's "Manage reminder settings" link. See
+    `DASHBOARD_BASE_URL_ENV_VAR`'s module-level comment for why this differs from server.py's
+    live-request `Host`-header approach."""
+    raw = os.environ.get(DASHBOARD_BASE_URL_ENV_VAR)
+    if raw and raw.strip():
+        return raw.strip().rstrip("/")
+    return _DEFAULT_DASHBOARD_BASE_URL
+
+
+def _esc(value):
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _badge_for_recommendation(recommendation):
+    """Map an action + point_cost to (label, bg, fg) using the plan's literal hex badge palette.
+
+    `hold` -> info (blue). `roll`, and `single_transfer`/`double_transfer` with `point_cost == 0`
+    (an already-free transfer, no hit) -> roll (green) -- this resolves the plan doc's explicitly
+    open zero-cost-transfer badge-color question, per the plan's own stated lean: it is not
+    costing the manager anything, the same as banking the transfer. `single_transfer`/
+    `double_transfer` with `point_cost > 0` -> hit (red), labeled with the point cost exactly as
+    the mockup shows ("TRANSFER · −4").
+    """
+    action = recommendation.get("action")
+    point_cost = recommendation.get("point_cost") or 0
+    if action == "hold":
+        return "HOLD", _BADGE_INFO_BG, _BADGE_INFO_FG
+    if action == "roll":
+        return "ROLL", _BADGE_ROLL_BG, _BADGE_ROLL_FG
+    if action in ("single_transfer", "double_transfer"):
+        if point_cost > 0:
+            return f"TRANSFER · −{point_cost}", _BADGE_HIT_BG, _BADGE_HIT_FG
+        return "TRANSFER", _BADGE_ROLL_BG, _BADGE_ROLL_FG
+    label = (action or "N/A").replace("_", " ").upper()
+    return label, _BADGE_INFO_BG, _BADGE_INFO_FG
+
+
+def _badge_html(label, bg, fg):
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0"><tr>'
+        f'<td style="background:{bg};color:{fg};font-weight:bold;font-size:12px;'
+        'padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;'
+        f'letter-spacing:.3px">{_esc(label)}</td></tr></table>'
+    )
+
+
+def _profile_eyebrow(profile_id, label, default_profile_id):
+    text = (label or profile_id or "").upper()
+    if profile_id == default_profile_id:
+        text = f"{text} · DEFAULT"
+    return text
+
+
+def _pitch_svg(starting_xi, captain_id):
+    """Build the inline-<svg> starting-XI pitch diagram.
+
+    Mirrors dashboard.js's weeklyPitch()/pitch() grouping logic (one row per position, players
+    spread evenly left-to-right within a row) but emits literal SVG coordinates instead of
+    flexbox rows, since none of the dashboard's actual pitch CSS (custom properties, flexbox,
+    gradients, :before/:after pseudo-elements) is email-safe -- see
+    plans/issue-83-reminder-html-email.md. The captain is shown as an outlined/bordered box
+    rather than a filled one: an email-safe stand-in for the dashboard's box-shadow captain glow,
+    which does not survive into email.
+    """
+    starting_xi = starting_xi or []
+    row_height = _PITCH_HEIGHT / len(_PITCH_ROW_ORDER)
+    boxes = []
+    for row_index, position in enumerate(_PITCH_ROW_ORDER):
+        players = [player for player in starting_xi if player.get("position_short") == position]
+        if not players:
+            continue
+        row_center_y = row_height * row_index + row_height / 2
+        cell_width = _PITCH_WIDTH / len(players)
+        for player_index, player in enumerate(players):
+            cx = cell_width * player_index + cell_width / 2
+            x = cx - _PITCH_BOX_W / 2
+            y = row_center_y - _PITCH_BOX_H / 2
+            is_captain = player.get("id") == captain_id
+            name = _esc(player.get("name"))
+            if is_captain:
+                name = f"{name} (C)"
+                fill, stroke, stroke_width = "#0b3d24", "#94efcb", "2.5"
+            else:
+                fill, stroke, stroke_width = "#1f5c3f", "none", "0"
+            club = _esc(player.get("club_short") or player.get("club"))
+            boxes.append(
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{_PITCH_BOX_W}" height="{_PITCH_BOX_H}" '
+                f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width}"/>'
+                f'<text x="{cx:.1f}" y="{y + 23:.1f}" text-anchor="middle" font-size="13" '
+                f'font-weight="bold" fill="#ffffff" font-family="Arial,Helvetica,sans-serif">{name}</text>'
+                f'<text x="{cx:.1f}" y="{y + 41:.1f}" text-anchor="middle" font-size="11" '
+                f'fill="#c9e8d8" font-family="Arial,Helvetica,sans-serif">{club}</text>'
+            )
+    body = "".join(boxes)
+    return (
+        f'<svg viewBox="0 0 {_PITCH_WIDTH} {_PITCH_HEIGHT}" width="100%" height="auto" '
+        'xmlns="http://www.w3.org/2000/svg" role="img" '
+        'aria-label="Recommended starting XI, grouped by position, captain outlined">'
+        f'<rect x="0" y="0" width="{_PITCH_WIDTH}" height="{_PITCH_HEIGHT}" fill="#0b3d24"/>'
+        f'<line x1="0" y1="{_PITCH_HEIGHT / 2:.1f}" x2="{_PITCH_WIDTH}" y2="{_PITCH_HEIGHT / 2:.1f}" '
+        'stroke="#1f5c3f" stroke-width="2"/>'
+        f'<circle cx="{_PITCH_WIDTH / 2:.1f}" cy="{_PITCH_HEIGHT / 2:.1f}" r="45" fill="none" '
+        'stroke="#1f5c3f" stroke-width="2"/>'
+        f'{body}</svg>'
+    )
+
+
+def _pitch_section_html(starting_xi, captain_id):
+    """The "RECOMMENDED STARTING XI" section: the real inline <svg> for every client except
+    Outlook desktop, which gets an explanatory dashed-border placeholder instead of silence, via
+    MSO conditional comments (`<!--[if mso]>` / `<!--[if !mso]><!-->`) -- the standard
+    Outlook-targeting technique, since a raw <svg> tag alone only degrades to *nothing shown*,
+    not to an explanation. See the plan doc's "Mockup review" section.
+    """
+    if not starting_xi:
+        return ""
+    svg = _pitch_svg(starting_xi, captain_id)
+    placeholder = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+        '<td style="border:1px dashed #3a4a5c;border-radius:6px;padding:36px 16px;'
+        'text-align:center;font-family:Arial,Helvetica,sans-serif">'
+        '<span style="color:#8aa0b8;font-size:12px;font-style:italic">'
+        "(starting-XI diagram not shown in this client)</span></td></tr></table>"
+    )
+    return (
+        '<tr><td style="padding:16px 16px 0 16px">'
+        f'<div style="font-size:12px;font-weight:bold;color:{_TEXT_MUTED};letter-spacing:.4px;'
+        'margin-bottom:10px;font-family:Arial,Helvetica,sans-serif">RECOMMENDED STARTING XI</div>'
+        "<!--[if !mso]><!-->" + svg + "<!--<![endif]-->"
+        "<!--[if mso]>" + placeholder + "<![endif]-->"
+        "</td></tr>"
+    )
+
+
+def _transfer_row_html(out_player, in_player):
+    out_name = _esc(out_player.get("name"))
+    in_name = _esc(in_player.get("name"))
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background:#1a2c42;border-radius:4px;margin-top:10px"><tr>'
+        f'<td style="padding:8px 10px;font-size:13px;color:{_BADGE_HIT_FG};'
+        f'font-family:Arial,Helvetica,sans-serif">OUT: {out_name}</td>'
+        f'<td style="padding:8px 10px;font-size:13px;color:{_TEXT_MUTED};text-align:center;'
+        'font-family:Arial,Helvetica,sans-serif">&rarr;</td>'
+        f'<td style="padding:8px 10px;font-size:13px;color:{_BADGE_ROLL_FG};text-align:right;'
+        f'font-family:Arial,Helvetica,sans-serif">IN: {in_name}</td>'
+        "</tr></table>"
+    )
+
+
+def _kv_row_html(label, value_html, color=None):
+    value_color = color or _TEXT_PRIMARY
+    return (
+        "<tr>"
+        f'<td style="font-size:13px;color:{_TEXT_MUTED};padding:4px 0;'
+        f'border-top:1px solid {_CARD_BORDER};font-family:Arial,Helvetica,sans-serif">'
+        + _esc(label) + "</td>"
+        f'<td align="right" style="font-size:13px;font-weight:bold;color:{value_color};'
+        f'padding:4px 0;border-top:1px solid {_CARD_BORDER};'
+        'font-family:Arial,Helvetica,sans-serif">' + value_html + "</td>"
+        "</tr>"
+    )
+
+
+def _kv_table_html(rows):
+    body = "".join(_kv_row_html(label, value, color) for label, value, color in rows)
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="margin-top:10px">' + body + "</table>"
+    )
+
+
+def _profile_card_html(eyebrow, badge_html, rationale, transfer_html, kv_html):
+    rationale_html = ""
+    if rationale:
+        rationale_html = (
+            f'<p style="margin:0;font-size:13px;color:{_TEXT_PRIMARY};'
+            f'font-family:Arial,Helvetica,sans-serif;line-height:1.4">{_esc(rationale)}</p>'
+        )
+    return (
+        '<tr><td style="padding:0 16px 14px">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{_CARD_BG};border:1px solid {_CARD_BORDER};border-radius:8px">'
+        '<tr><td style="padding:14px 16px">'
+        f'<div style="font-size:11px;font-weight:bold;letter-spacing:.5px;color:{_TEXT_MUTED};'
+        f'margin-bottom:8px;font-family:Arial,Helvetica,sans-serif">{_esc(eyebrow)}</div>'
+        + badge_html + rationale_html + transfer_html + kv_html
+        + "</td></tr></table></td></tr>"
+    )
+
+
+def _gw1_profile_card_html(profile, default_profile_id):
+    """One profile card for the pre-Gameweek-2 `waiting_for_gw2` state.
+
+    Adapted from the active-state card (mockup only shows the in-season transfer-decision state):
+    there is no roll/hold/transfer action before Gameweek 2 -- a manager is picking an opening
+    squad, not reacting to a transfer decision -- so this card has no action badge and shows
+    formation/captain/points/money-remaining instead of bank-after/free-transfers/transfer rows,
+    the same field substitution the existing plain-text `_compose_gw1_section` already makes
+    versus `_compose_active_section`.
+    """
+    squad = profile.get("squad") or {}
+    eyebrow = _profile_eyebrow(profile.get("id"), profile.get("label"), default_profile_id)
+    rationale = profile.get("summary") or ""
+    captain = squad.get("captain") or {}
+    points = squad.get("projected_event_points_including_captain")
+    money_remaining = squad.get("money_remaining")
+    rows = [
+        ("Captain", _esc(captain.get("name") or "n/a"), None),
+        ("Formation", _esc(squad.get("formation") or "n/a"), None),
+        ("Projected pts (incl. captain)", _esc(points if points is not None else "n/a"), None),
+        (
+            "Money remaining",
+            _esc(f"£{money_remaining}m" if money_remaining is not None else "n/a"),
+            None,
+        ),
+    ]
+    return _profile_card_html(eyebrow, "", rationale, "", _kv_table_html(rows))
+
+
+def _active_profile_card_html(profile, default_profile_id):
+    """One profile card for the in-season `active` transfer-decision state -- the HTML
+    counterpart to issue #82's plain-text all-three-profiles change, matching the mockup exactly.
+    """
+    recommendation = profile.get("recommendation") or {}
+    eyebrow = _profile_eyebrow(profile.get("id"), profile.get("label"), default_profile_id)
+    badge_label, badge_bg, badge_fg = _badge_for_recommendation(recommendation)
+    badge_html = (
+        '<div style="margin-bottom:8px">' + _badge_html(badge_label, badge_bg, badge_fg) + "</div>"
+    )
+    rationale = recommendation.get("reason") or ""
+    transfers = recommendation.get("transfers") or []
+    transfer_html = "".join(
+        _transfer_row_html(move.get("out") or {}, move.get("in") or {}) for move in transfers
+    )
+    captain = recommendation.get("captain") or {}
+    points = recommendation.get("projected_event_points_including_captain")
+    rows = [
+        ("Captain", _esc(captain.get("name") or "n/a"), None),
+        ("Projected pts (incl. captain)", _esc(points if points is not None else "n/a"), None),
+    ]
+    if transfers:
+        net_gain = recommendation.get("net_gain_5gw")
+        if isinstance(net_gain, (int, float)):
+            color = _BADGE_ROLL_FG if net_gain >= 0 else _BADGE_HIT_FG
+            net_text = _esc(f"{net_gain:+.1f}")
+        else:
+            color, net_text = None, "n/a"
+        rows.append(("Net gain vs. holding", net_text, color))
+    bank_after = recommendation.get("bank_after")
+    rows.append(
+        ("Bank after", _esc(f"£{bank_after}m" if bank_after is not None else "n/a"), None)
+    )
+    free_transfers = recommendation.get("free_transfers_next_event")
+    rows.append(
+        (
+            "Free transfers next GW",
+            _esc(free_transfers if free_transfers is not None else "n/a"),
+            None,
+        )
+    )
+    return _profile_card_html(eyebrow, badge_html, rationale, transfer_html, _kv_table_html(rows))
+
+
+def _status_fallback_card_html(text):
+    return (
+        '<tr><td style="padding:16px">'
+        f'<div style="background:{_CARD_BG};border:1px solid {_CARD_BORDER};'
+        'border-radius:8px;padding:16px;font-size:13px;color:'
+        f'{_TEXT_PRIMARY};font-family:Arial,Helvetica,sans-serif">{_esc(text)}</div>'
+        "</td></tr>"
+    )
+
+
+def _footer_html():
+    """"Manage reminder settings" links at `<base>/#profile` -- the dashboard nav's own
+    `data-view="profile"` value (see dashboard.py's `<button data-view="profile">My Profile</button>`
+    and the `#reminder-panel` section rendered on that view). dashboard.js does not currently read
+    `location.hash` on load to auto-select a view, so this link lands a visitor on the dashboard's
+    default view today, not deep-linked directly to the reminder card; the `#profile` fragment
+    names the intended destination and costs nothing, and is forward-compatible if dashboard.js
+    later adds hash-based view routing. Documented explicitly here and in the PR description
+    rather than left as an unexplained partial link.
+    """
+    manage_url = f"{_dashboard_base_url()}/#profile"
+    return (
+        f'<tr><td style="padding:20px 16px 24px;border-top:1px solid {_CARD_BORDER}">'
+        f'<p style="font-size:11px;color:{_TEXT_MUTED};margin:0;'
+        'font-family:Arial,Helvetica,sans-serif;line-height:1.5">'
+        "You're receiving this because you opted into deadline reminders for "
+        f'FPL Intelligence. <a href="{_esc(manage_url)}" style="color:{_TEXT_MUTED};'
+        'text-decoration:underline">Manage reminder settings</a></p>'
+        "</td></tr>"
+    )
+
+
+def _assemble_email_html(event_id, lead_hours, stale, extra_top_html, body_html):
+    stale_html = ""
+    if stale:
+        stale_html = (
+            '<tr><td style="padding:16px 16px 0 16px">'
+            '<div style="background:#3a2f12;border:1px solid #6b5420;border-radius:6px;'
+            'padding:10px 12px;font-size:12px;color:#f0d98c;'
+            'font-family:Arial,Helvetica,sans-serif">'
+            "NOTE: the live FPL data fetch failed this run; these recommendations are from the "
+            "last cached refresh and may not reflect the latest prices, injuries, or news."
+            "</div></td></tr>"
+        )
+    header_label = f"GAMEWEEK {event_id} · DEADLINE IN {lead_hours}H"
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<title>FPL Intelligence deadline reminder</title></head>"
+        f'<body style="margin:0;padding:0;background:{_EMAIL_BG};'
+        'font-family:Arial,Helvetica,sans-serif">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{_EMAIL_BG}"><tr><td align="center">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="max-width:600px">'
+        '<tr><td style="padding:16px 16px 0 16px">'
+        + _badge_html(header_label, _BADGE_INFO_BG, _BADGE_INFO_FG)
+        + "</td></tr>"
+        + stale_html
+        + extra_top_html
+        + body_html
+        + _footer_html()
+        + "</table></td></tr></table></body></html>"
+    )
+
+
+def _compose_gw1_html_body(event_id, lead_hours, decision_center, stale):
+    """HTML counterpart to `_compose_gw1_section`."""
+    if not decision_center or decision_center.get("status") not in {"active_preliminary", "active"}:
+        return _assemble_email_html(
+            event_id, lead_hours, stale, "",
+            _status_fallback_card_html("Recommendations are not currently available."),
+        )
+    squad = decision_center.get("recommended_squad") or {}
+    captain = squad.get("captain") or {}
+    starting_xi = squad.get("starting_xi") or []
+    pitch_html = _pitch_section_html(starting_xi, captain.get("id"))
+    default_profile_id = decision_center.get("default_profile", "balanced")
+    profile_recommendations = decision_center.get("profile_recommendations") or []
+    cards_html = "".join(
+        _gw1_profile_card_html(profile, default_profile_id) for profile in profile_recommendations
+    )
+    return _assemble_email_html(event_id, lead_hours, stale, pitch_html, cards_html)
+
+
+def _compose_active_html_body(event_id, lead_hours, weekly, stale):
+    """HTML counterpart to `_compose_active_section`. All three profiles from `weekly["profiles"]`
+    render as stacked cards (issue #82's data, issue #83's HTML rendering); the starting-XI pitch
+    diagram uses the default profile's recommended lineup, matching the mockup.
+    """
+    default_profile_id = weekly.get("default_profile", "balanced")
+    profiles_list = weekly.get("profiles") or []
+    default_profile = next((row for row in profiles_list if row.get("id") == default_profile_id), None)
+    if default_profile is None and profiles_list:
+        default_profile = profiles_list[0]
+    if default_profile is None:
+        reason = weekly.get("reason") or f"Status: {weekly.get('status')}"
+        return _assemble_email_html(event_id, lead_hours, stale, "", _status_fallback_card_html(reason))
+    default_recommendation = default_profile.get("recommendation") or {}
+    starting_xi = default_recommendation.get("starting_xi") or []
+    captain = default_recommendation.get("captain") or {}
+    pitch_html = _pitch_section_html(starting_xi, captain.get("id"))
+    cards_html = "".join(
+        _active_profile_card_html(profile, default_profile_id) for profile in profiles_list
+    )
+    return _assemble_email_html(event_id, lead_hours, stale, pitch_html, cards_html)
+
+
 def compose_email(team, event_id, deadline_iso, hours_left, manager_view, decision_center, stale):
-    """Compose one plain-text reminder email for a single team. Returns (subject, body)."""
+    """Compose one reminder email for a single team. Returns (subject, text_body, html_body).
+
+    `text_body` is the plain-text `text/plain` fallback (sent unconditionally, per RFC 2046, as
+    the first/least-preferred part of the `multipart/alternative` message `send_email` builds).
+    `html_body` is the `text/html` alternative (issue #83).
+    """
     weekly = manager_view["weekly_decisions"]
     status = weekly.get("status")
     lines = [
@@ -395,32 +840,48 @@ def compose_email(team, event_id, deadline_iso, hours_left, manager_view, decisi
             "last cached refresh and may not reflect the latest prices, injuries, or news."
         )
         lines.append("")
+    lines.append(_DIVIDER)
+    lines.append("")
+    lead_hours = team["lead_hours"]
     if status == "waiting_for_gw2":
         lines.extend(_compose_gw1_section(decision_center))
+        html_body = _compose_gw1_html_body(event_id, lead_hours, decision_center, stale)
     elif status == "active":
         lines.extend(_compose_active_section(weekly))
+        html_body = _compose_active_html_body(event_id, lead_hours, weekly, stale)
     else:
         lines.append(f"Status: {status}")
         reason = weekly.get("reason")
         if reason:
             lines.append(reason)
+        html_body = _assemble_email_html(
+            event_id, lead_hours, stale, "",
+            _status_fallback_card_html(reason or f"Status: {status}"),
+        )
     lines.append("")
+    lines.append(_DIVIDER)
     lines.append("-- FPL Intelligence automated deadline reminder (issue #55)")
     body = "\n".join(lines)
-    subject = f"FPL reminder: GW{event_id} deadline in ~{team['lead_hours']}h"
-    return subject, body
+    subject = f"FPL reminder: GW{event_id} deadline in ~{lead_hours}h"
+    return subject, body, html_body
 
 
-def send_email(smtp_config, to_email, subject, body):
+def send_email(smtp_config, to_email, subject, text_body, html_body):
+    """Send a `multipart/alternative` message: `text/plain` first (the universal fallback per
+    RFC 2046's part-ordering convention), then `text/html` (issue #83). Call order matters --
+    `set_content` must run before `add_alternative` for `text/plain` to end up the first/
+    least-preferred part."""
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = smtp_config["user"]
     message["To"] = to_email
-    message.set_content(body)
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
     with smtplib.SMTP(smtp_config["host"], smtp_config["port"], timeout=30) as smtp:
         smtp.starttls()
         smtp.login(smtp_config["user"], smtp_config["password"])
         smtp.send_message(message)
+
 
 
 def run(teams, dry_run, smtp_config, root=ROOT, now=None):
@@ -468,7 +929,7 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
                 bootstrap, fixtures, generated_at=generated_at, recent_transfers=[],
             )
         hours_left = hours_until(deadline_iso, now)
-        subject, body = compose_email(
+        subject, body, html_body = compose_email(
             team, event_id, deadline_iso, hours_left, manager_view, decision_center, stale,
         )
         if dry_run:
@@ -477,8 +938,12 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
             print(f"Subject: {subject}")
             print()
             print(body)
+            preview_path = Path("/tmp") / f"reminder-preview-{team['team_id']}.html"
+            preview_path.write_text(html_body, encoding="utf-8")
+            print()
+            print(f"HTML preview written to {preview_path}")
         else:
-            send_email(smtp_config, team["email"], subject, body)
+            send_email(smtp_config, team["email"], subject, body, html_body)
         sent_count += 1
 
     if sent_count:

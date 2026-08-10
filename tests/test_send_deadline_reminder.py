@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 import importlib.util
 import io
 import json
@@ -195,7 +196,7 @@ class EmailCompositionTests(unittest.TestCase):
         }
         team = {"team_id": 1, "email": "manager@example.com", "lead_hours": 3}
 
-        subject, body = sdr.compose_email(
+        subject, body, html_body = sdr.compose_email(
             team, event_id=1, deadline_iso="2026-08-21T17:30:00Z", hours_left=2.7,
             manager_view=manager_view, decision_center=decision_center, stale=False,
         )
@@ -205,6 +206,7 @@ class EmailCompositionTests(unittest.TestCase):
         captain_name = decision_center["recommended_squad"]["captain"]["name"]
         self.assertIn(captain_name, body)
         self.assertNotIn("manager@example.com", body)
+        self.assertNotIn("manager@example.com", html_body)
 
         # Regression coverage for issue #82: all three risk profiles must appear in the
         # composed body, not just the default/balanced one used for the full squad detail above.
@@ -213,6 +215,17 @@ class EmailCompositionTests(unittest.TestCase):
         self.assertIn("Aggressive", body)
         for profile in decision_center["profile_recommendations"]:
             self.assertIn(profile["squad"]["captain"]["name"], body)
+
+        # Issue #83: HTML counterpart -- header badge, all three profile cards, and (since the
+        # sample decision center always has a starting XI) the inline SVG pitch diagram.
+        self.assertIn("GAMEWEEK 1", html_body)
+        self.assertIn("DEADLINE IN 3H", html_body)
+        self.assertIn("<svg", html_body)
+        self.assertIn("CONSERVATIVE", html_body)
+        self.assertIn("BALANCED", html_body)
+        self.assertIn("AGGRESSIVE", html_body)
+        for profile in decision_center["profile_recommendations"]:
+            self.assertIn(profile["squad"]["captain"]["name"], html_body)
 
     def test_active_transfer_decision_state_composes_the_recommendation(self):
         bootstrap, fixtures, manager = gw2_inputs()
@@ -223,7 +236,7 @@ class EmailCompositionTests(unittest.TestCase):
         self.assertEqual(manager_view["weekly_decisions"]["status"], "active")
         team = {"team_id": 364759, "email": "manager@example.com", "lead_hours": 3}
 
-        subject, body = sdr.compose_email(
+        subject, body, html_body = sdr.compose_email(
             team, event_id=2, deadline_iso="2026-09-02T17:30:00Z", hours_left=2.1,
             manager_view=manager_view, decision_center=None, stale=False,
         )
@@ -232,6 +245,7 @@ class EmailCompositionTests(unittest.TestCase):
         self.assertIn("Recommended action", body)
         self.assertIn("Point cost:", body)
         self.assertNotIn("manager@example.com", body)
+        self.assertNotIn("manager@example.com", html_body)
 
         # Regression coverage for issue #82: all three risk profiles must appear in the
         # composed body, not just the default/balanced one used for the full-detail section above.
@@ -244,16 +258,30 @@ class EmailCompositionTests(unittest.TestCase):
             if captain_name:
                 self.assertIn(captain_name, body)
 
+        # Issue #83: HTML counterpart, mirroring the plain-text all-three-profiles coverage above.
+        self.assertIn("GAMEWEEK 2", html_body)
+        self.assertIn("DEADLINE IN 3H", html_body)
+        self.assertIn("<svg", html_body)
+        self.assertIn("CONSERVATIVE", html_body)
+        self.assertIn("BALANCED", html_body)
+        self.assertIn("AGGRESSIVE", html_body)
+        for profile in manager_view["weekly_decisions"]["profiles"]:
+            recommendation = profile["recommendation"]
+            captain_name = (recommendation.get("captain") or {}).get("name")
+            if captain_name:
+                self.assertIn(captain_name, html_body)
+
     def test_stale_data_adds_an_explicit_staleness_line(self):
         manager_view = {"weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."}}
         team = {"team_id": 1, "email": "a@example.com", "lead_hours": 3}
 
-        _, body = sdr.compose_email(
+        _, body, html_body = sdr.compose_email(
             team, event_id=5, deadline_iso="2026-09-20T17:30:00Z", hours_left=1.0,
             manager_view=manager_view, decision_center=None, stale=True,
         )
 
         self.assertIn("last cached refresh", body)
+        self.assertIn("last cached refresh", html_body)
 
     def test_unhandled_status_falls_back_to_the_reason_text(self):
         manager_view = {
@@ -261,13 +289,124 @@ class EmailCompositionTests(unittest.TestCase):
         }
         team = {"team_id": 1, "email": "a@example.com", "lead_hours": 3}
 
-        _, body = sdr.compose_email(
+        _, body, html_body = sdr.compose_email(
             team, event_id=5, deadline_iso="2026-09-20T17:30:00Z", hours_left=1.0,
             manager_view=manager_view, decision_center=None, stale=False,
         )
 
         self.assertIn("manager_squad_unavailable", body)
         self.assertIn("Squad not published yet.", body)
+        self.assertIn("Squad not published yet.", html_body)
+
+
+class HtmlEmailTests(unittest.TestCase):
+    """Issue #83: the HTML/multimedia reminder email template."""
+
+    def _gw1_bodies(self):
+        bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
+        generated_at = "2026-08-18T12:00:00-04:00"
+        decision_center = sdr.build_gw_recommendations(bootstrap, fixtures, generated_at=generated_at)
+        manager_view = {
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+        }
+        team = {"team_id": 1, "email": "manager@example.com", "lead_hours": 3}
+        return sdr.compose_email(
+            team, event_id=1, deadline_iso="2026-08-21T17:30:00Z", hours_left=2.7,
+            manager_view=manager_view, decision_center=decision_center, stale=False,
+        )
+
+    def _active_bodies(self):
+        bootstrap, fixtures, manager = gw2_inputs()
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=_raw_manager_payload(manager)):
+            manager_view = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=364759,
+            )
+        team = {"team_id": 364759, "email": "manager@example.com", "lead_hours": 3}
+        return sdr.compose_email(
+            team, event_id=2, deadline_iso="2026-09-02T17:30:00Z", hours_left=2.1,
+            manager_view=manager_view, decision_center=None, stale=False,
+        )
+
+    def test_sent_message_is_multipart_alternative_with_both_parts_present(self):
+        """Mirrors the plan doc's own stdlib sanity check: set_content() then add_alternative()
+        produces a multipart/alternative message with text/plain first, text/html second."""
+        for bodies_factory in (self._gw1_bodies, self._active_bodies):
+            with self.subTest(factory=bodies_factory.__name__):
+                subject, text_body, html_body = bodies_factory()
+                message = EmailMessage()
+                message["Subject"] = subject
+                message["From"] = "sender@example.com"
+                message["To"] = "recipient@example.com"
+                message.set_content(text_body)
+                message.add_alternative(html_body, subtype="html")
+
+                self.assertTrue(message.is_multipart())
+                self.assertEqual(message.get_content_type(), "multipart/alternative")
+                part_types = [part.get_content_type() for part in message.iter_parts()]
+                self.assertEqual(part_types, ["text/plain", "text/html"])
+                self.assertEqual(
+                    message.get_body(preferencelist=("plain",)).get_content().strip(),
+                    text_body.strip(),
+                )
+                self.assertIn(
+                    "<svg", message.get_body(preferencelist=("html",)).get_content(),
+                )
+
+    def test_badge_mapping_hold_is_info_blue(self):
+        label, bg, fg = sdr._badge_for_recommendation({"action": "hold", "point_cost": 0})
+        self.assertEqual(label, "HOLD")
+        self.assertEqual((bg, fg), (sdr._BADGE_INFO_BG, sdr._BADGE_INFO_FG))
+
+    def test_badge_mapping_roll_is_green(self):
+        label, bg, fg = sdr._badge_for_recommendation({"action": "roll", "point_cost": 0})
+        self.assertEqual(label, "ROLL")
+        self.assertEqual((bg, fg), (sdr._BADGE_ROLL_BG, sdr._BADGE_ROLL_FG))
+
+    def test_badge_mapping_transfer_with_a_hit_is_red(self):
+        label, bg, fg = sdr._badge_for_recommendation({"action": "single_transfer", "point_cost": 4})
+        self.assertIn("4", label)
+        self.assertEqual((bg, fg), (sdr._BADGE_HIT_BG, sdr._BADGE_HIT_FG))
+
+    def test_badge_mapping_zero_cost_transfer_is_green(self):
+        """Resolves the plan doc's explicitly open item: a single/double transfer that costs no
+        points (an already-free transfer, no hit) gets the roll/green badge, not the hit/red one,
+        per the plan's own stated lean."""
+        for action in ("single_transfer", "double_transfer"):
+            with self.subTest(action=action):
+                label, bg, fg = sdr._badge_for_recommendation({"action": action, "point_cost": 0})
+                self.assertEqual((bg, fg), (sdr._BADGE_ROLL_BG, sdr._BADGE_ROLL_FG))
+                self.assertNotIn("-", label)
+
+    def test_mso_conditional_comment_structure_is_present_when_a_starting_xi_exists(self):
+        for bodies_factory in (self._gw1_bodies, self._active_bodies):
+            with self.subTest(factory=bodies_factory.__name__):
+                _, _, html_body = bodies_factory()
+                self.assertIn("<!--[if !mso]><!-->", html_body)
+                self.assertIn("<!--<![endif]-->", html_body)
+                self.assertIn("<!--[if mso]>", html_body)
+                self.assertIn("<![endif]-->", html_body)
+                self.assertIn("starting-XI diagram not shown in this client", html_body)
+
+    def test_all_three_profile_cards_appear_in_the_html_body(self):
+        """HTML counterpart to #82's plain-text all-three-profiles tests, for both states."""
+        for bodies_factory in (self._gw1_bodies, self._active_bodies):
+            with self.subTest(factory=bodies_factory.__name__):
+                _, _, html_body = bodies_factory()
+                self.assertIn("CONSERVATIVE", html_body)
+                self.assertIn("BALANCED", html_body)
+                self.assertIn("AGGRESSIVE", html_body)
+
+    def test_footer_manage_link_uses_the_configured_dashboard_base_url(self):
+        with patch.dict("os.environ", {sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://fpl-intel.example.com"}, clear=False):
+            _, _, html_body = self._active_bodies()
+        self.assertIn('href="https://fpl-intel.example.com/#profile"', html_body)
+
+    def test_footer_manage_link_falls_back_to_the_documented_default(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(sdr.DASHBOARD_BASE_URL_ENV_VAR, None)
+            _, _, html_body = self._active_bodies()
+        self.assertIn(f'href="{sdr._DEFAULT_DASHBOARD_BASE_URL}/#profile"', html_body)
 
 
 class RunLoopTests(unittest.TestCase):
