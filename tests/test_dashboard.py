@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 import re
 import unittest
 
@@ -530,6 +531,149 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertNotIn('id="refresh-now"', html)
         self.assertNotIn('meta[name="refresh-token"]', html)
         self.assertNotIn("X-Refresh-Token", html)
+
+
+class ProfileGatedTabsTests(unittest.TestCase):
+    """Issue #108: Decision Center and Model Performance are each gated, at the tab level,
+    behind an empty-state panel linking to My Profile when no profile is resolved for the
+    visitor."""
+
+    def test_decisions_and_performance_tabs_have_an_empty_state_and_a_content_wrapper(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="decisions-empty-state" class="placeholder" hidden', html)
+        self.assertIn('id="decisions-content"', html)
+        self.assertIn('id="performance-empty-state" class="placeholder" hidden', html)
+        self.assertIn('id="performance-content"', html)
+
+        # The empty-state wrapper opens right after the tab's own <section>, and the tab's
+        # normal content is nested one level inside it -- so the gate can hide/show the whole
+        # tab body in one place instead of every render function separately.
+        decisions_start = html.index('<section id="view-decisions"')
+        self.assertLess(
+            decisions_start, html.index('id="decisions-empty-state"'),
+        )
+        self.assertLess(
+            html.index('id="decisions-empty-state"'), html.index('id="decisions-content"'),
+        )
+        performance_start = html.index('<section id="view-performance"')
+        self.assertLess(
+            performance_start, html.index('id="performance-empty-state"'),
+        )
+        self.assertLess(
+            html.index('id="performance-empty-state"'), html.index('id="performance-content"'),
+        )
+
+    def test_empty_states_link_clearly_to_my_profile(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn(
+            '<button class="refresh-button" type="button" data-go="profile" '
+            'style="margin-top:12px">Go to My Profile</button></div><div id="decisions-content">',
+            html,
+        )
+        self.assertIn(
+            '<button class="refresh-button" type="button" data-go="profile" '
+            'style="margin-top:12px">Go to My Profile</button></div><div id="performance-content">',
+            html,
+        )
+        self.assertIn(
+            "Decision Center recommendations are personalized to your team", html,
+        )
+        self.assertIn(
+            "Model Performance tracks how this season's recommendations for your team compared "
+            "with real results",
+            html,
+        )
+
+    def test_gate_toggles_the_content_wrapper_off_the_same_not_configured_signal_used_elsewhere(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn("function applyProfileGates()", html)
+        self.assertIn(
+            "const gated=(state.manager||{}).connection_status==='not_configured';", html,
+        )
+        self.assertIn("byId('decisions-content').hidden=gated;", html)
+        self.assertIn("byId('decisions-empty-state').hidden=!gated;", html)
+        self.assertIn("byId('performance-content').hidden=gated;", html)
+        self.assertIn("byId('performance-empty-state').hidden=!gated;", html)
+        self.assertIn("applyProfileGates();setupDecisionSubnav();", html)
+
+    def test_team_lookup_panel_on_my_team_is_untouched(self):
+        """Issue #46's zero-commitment "Look up a team" form is explicitly out of scope."""
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('id="team-lookup-panel"', html)
+        self.assertNotIn('id="team-lookup-panel" class="placeholder"', html)
+        # Not wrapped or hidden by anything -- still a direct child of view-squad, same as before.
+        squad_start = html.index('<section id="view-squad"')
+        lookup_start = html.index('id="team-lookup-panel"')
+        between = html[squad_start:lookup_start]
+        self.assertNotIn("empty-state", between)
+
+    def test_profile_independent_tabs_have_no_gate(self):
+        """Player Explorer, Fixtures, Transfers & News, and Model Status stay ungated."""
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertNotIn('id="players-empty-state"', html)
+        self.assertNotIn('id="fixtures-empty-state"', html)
+        self.assertNotIn('id="transfers-empty-state"', html)
+        self.assertNotIn('id="model-empty-state"', html)
+
+    def test_document_tags_stay_properly_nested_around_the_new_gate_wrappers(self):
+        """Regression guard: an earlier version of this gate closed the new
+        #decisions-content/#performance-content wrapper divs with a mismatched extra
+        </div></section> pair, which silently popped </main>/.app/</body> closed early in real
+        browser parsing (view-performance ended up a direct child of <body>, outside the
+        sidebar layout entirely, rendering blank) while every plain substring-membership
+        assertion above still passed. This walks the actual tag tree with html.parser and fails
+        loudly on any open/close mismatch anywhere in the document, not just near the gate."""
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+        void_elements = {
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr",
+        }
+
+        class NestingChecker(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+                self.errors = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag not in void_elements:
+                    self.stack.append((tag, self.getpos()))
+
+            def handle_endtag(self, tag):
+                if not self.stack:
+                    self.errors.append(f"Unexpected closing </{tag}> at {self.getpos()}")
+                    return
+                top_tag, pos = self.stack[-1]
+                if top_tag == tag:
+                    self.stack.pop()
+                else:
+                    self.errors.append(
+                        f"Expected </{top_tag}> (opened at {pos}) but got </{tag}> at {self.getpos()}"
+                    )
+                    for i in range(len(self.stack) - 1, -1, -1):
+                        if self.stack[i][0] == tag:
+                            self.stack = self.stack[:i]
+                            break
+
+        checker = NestingChecker()
+        checker.feed(html)
+
+        self.assertEqual(checker.errors, [])
+        self.assertEqual(checker.stack, [])
+
+        # And specifically: both view sections stay nested inside main.content, not popped out
+        # to be direct children of <body> the way the mismatched-tag bug produced.
+        main_start = html.index('<main class="content">')
+        main_end = html.index("</main>")
+        self.assertGreater(html.index('<section id="view-decisions"'), main_start)
+        self.assertLess(html.index('<section id="view-decisions"'), main_end)
+        self.assertGreater(html.index('<section id="view-performance"'), main_start)
+        self.assertLess(html.index('<section id="view-performance"'), main_end)
 
 
 if __name__ == "__main__":

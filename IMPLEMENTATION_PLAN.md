@@ -1250,3 +1250,36 @@ compute choice is deliberately open; GitHub Actions provides the
 always-on property with zero new infrastructure, and the reminder
 script migrates unchanged onto the #27 host's scheduler when that
 lands. Full analysis in `plans/issue-55-deadline-email-reminder.md`.
+
+## Considered and declined — GitHub Pages / GitHub Releases for release notes (2026-08-10)
+
+**Context:** issue #112 asked where to publish an alpha feature
+inventory / release notes doc. The user specifically proposed GitHub
+Pages; GitHub Releases was evaluated alongside it as the other
+GitHub-native option. See `plans/issue-112-release-notes-hosting.md` for
+full reasoning.
+
+**Findings:**
+- GitHub Pages was never enabled on this repo (`gh api
+  repos/.../pages` returns 404) and would require either a one-time
+  manual Settings step (`docs/`-on-`main`) or a new `gh-pages` branch
+  plus build workflow — new infrastructure this repo's stated posture
+  (stdlib-only app, `plans/issue-27-cloud-hosting.md`'s explicit
+  "not recommended at this scale" calls on observability tooling) has
+  consistently avoided until the project's actual scale needs it. It
+  would also stand up a second public URL distinct from the Railway-
+  hosted dashboard (issue #27), a minor discoverability cost for a small
+  alpha group.
+- GitHub Releases is a strong semantic fit for the phrase "release
+  notes" but a poor fit for this specific ask: issue #112 wants a living
+  feature inventory (what the tool does right now), not a per-version
+  changelog of deltas — and this project doesn't tag versions today, so
+  adopting Releases would mean introducing versioning as a prerequisite.
+
+**Decision:** publish `RELEASE_NOTES.md` at the repo root instead (see
+"## Recommendation" in `plans/issue-112-release-notes-hosting.md`) —
+zero new infrastructure, matches how `MODEL.md`/`SPECIFICATION.md`/
+`IMPLEMENTATION_PLAN.md` already ship. **Update (2026-08-10):** the user
+confirmed the plain-Markdown file for now, with GitHub Pages to be set
+up separately later, at which point this entry should be revisited
+rather than treated as a final no.
