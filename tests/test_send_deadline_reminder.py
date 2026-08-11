@@ -85,6 +85,24 @@ class SendWindowArithmeticTests(unittest.TestCase):
         self.assertAlmostEqual(sdr.hours_until(self.deadline, now), 5.0)
 
 
+class LoadBootstrapAndFixturesWrapperTests(unittest.TestCase):
+    """Issue #101: load_bootstrap_and_fixtures moved to fpl_intel.deadline_windows, with this
+    script keeping a thin local wrapper (so patch.object(sdr, "load_bootstrap_and_fixtures", ...)
+    used throughout this file keeps working) that translates the shared module's generic
+    DeadlineDataError into this script's own ConfigError, unchanged from before the extraction."""
+
+    def test_deadline_data_error_becomes_config_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+
+            with patch(
+                "fpl_intel.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down"),
+            ):
+                with self.assertRaises(sdr.ConfigError):
+                    sdr.load_bootstrap_and_fixtures(root)
+
+
 class ReminderTeamsParsingTests(unittest.TestCase):
     def test_missing_or_empty_env_var_fails_loudly(self):
         with self.assertRaises(sdr.ConfigError):

@@ -59,7 +59,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from fpl_intel import profiles
-from fpl_intel.fpl_data import fetch_bootstrap, fetch_fixtures
+from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
+from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
 
 
 DEFAULT_LEAD_HOURS = 3
@@ -93,13 +94,6 @@ _DIVIDER = "-" * 60
 
 class ConfigError(RuntimeError):
     """Malformed or missing configuration. Messages never include the parsed email addresses."""
-
-
-def _load_json_or(path, default):
-    path = Path(path)
-    if not path.exists():
-        return default
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def parse_reminder_teams(raw_value):
@@ -241,23 +235,16 @@ def load_bootstrap_and_fixtures(root):
 
     Returns `(bootstrap, fixtures, stale)`. `stale` is True if either fetch fell back to disk, so
     the composed email can carry an explicit staleness line.
+
+    Issue #101: thin wrapper around the shared `fpl_intel.deadline_windows` implementation,
+    translating its generic `DeadlineDataError` into this script's own `ConfigError` -- kept as a
+    local module-level function (rather than a bare re-export) so `patch.object(sdr,
+    "load_bootstrap_and_fixtures", ...)` in tests keeps working unchanged.
     """
-    stale = False
     try:
-        bootstrap = fetch_bootstrap()
-    except Exception:
-        bootstrap = _load_json_or(root / "data" / "fpl-bootstrap-latest.json", None)
-        stale = True
-        if bootstrap is None:
-            raise ConfigError(
-                "Live bootstrap fetch failed and no cached data/fpl-bootstrap-latest.json exists."
-            )
-    try:
-        fixtures = fetch_fixtures()
-    except Exception:
-        fixtures = _load_json_or(root / "data" / "fpl-fixtures-latest.json", [])
-        stale = True
-    return bootstrap, fixtures, stale
+        return _shared_load_bootstrap_and_fixtures(root)
+    except DeadlineDataError as error:
+        raise ConfigError(str(error)) from error
 
 
 def fetch_shared_state(base_url, timeout=30):
@@ -295,29 +282,6 @@ def fetch_manager_view(base_url, team_id, token, timeout=30):
     )
     with urlopen(request, timeout=timeout) as response:
         return json.loads(response.read())
-
-
-def next_unfinished_event(bootstrap):
-    """The next gameweek event dict (with `deadline_time`) the same way `_next_event_id` resolves it."""
-    events = bootstrap.get("events", [])
-    explicit = next((event for event in events if event.get("is_next")), None)
-    if explicit is not None:
-        return explicit
-    unfinished = [event for event in events if event.get("id") and not event.get("finished")]
-    if not unfinished:
-        return None
-    return min(unfinished, key=lambda event: event["id"])
-
-
-def hours_until(deadline_iso, now):
-    deadline = datetime.fromisoformat(deadline_iso.replace("Z", "+00:00"))
-    return (deadline - now).total_seconds() / 3600
-
-
-def in_send_window(deadline_iso, now, lead_hours):
-    """True for exactly one hourly tick per gameweek: `(lead_hours - 1, lead_hours]` hours out."""
-    hours_left = hours_until(deadline_iso, now)
-    return (lead_hours - 1) < hours_left <= lead_hours
 
 
 def _format_deadline(deadline_iso):
