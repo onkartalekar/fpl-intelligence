@@ -1133,6 +1133,9 @@ dd {
   color: var(--pitch-projection);
   font-weight: 800;
 }
+.pitch-player .projection-compact {
+  display: none;
+}
 .decision-hero {
   border-color: var(--hero-border);
   background: linear-gradient(135deg,var(--hero-grad-a),var(--panel));
@@ -1695,6 +1698,27 @@ footer {
   }
   .pitch-player span {
     font-size: 9px;
+  }
+  /* Issue 133: the full "1gw / 3gw / 5gw" string truncates mid-number at this width -- show
+     just the 1-gameweek figure instead of an arbitrary mid-string cut. The 3/5-gameweek numbers
+     stay one tap away (see attachBreakdownHandlers in dashboard.js): a data-player-id card is
+     already wired to open the full per-player breakdown on click, and click fires from a tap on
+     every mobile browser -- verified live, not just inferred from the JS. */
+  .pitch-player .projection-full {
+    display: none;
+  }
+  .pitch-player .projection-compact {
+    display: block;
+  }
+  /* A static (not hover-only) visual cue that a card with data-player-id is tappable -- without
+     this, a compact card with only one number reads as a dead end rather than an entry point to
+     the full breakdown. `--pitch-projection` (already the truncated number's own color) ties the
+     cue to "there's more projection detail here" rather than reusing `--accent`, which
+     `.pitch-player.captain`/`.pitch-player.selected` already use for a different meaning. Cards
+     without data-player-id (e.g. #weekly-pitch, not yet wired to the breakdown panel) are left
+     unstyled here so this never implies an affordance that isn't real. */
+  .pitch-player[data-player-id] {
+    border-bottom: 2px solid var(--pitch-projection);
   }
   .fixture-row {
     grid-template-columns: 1fr;
