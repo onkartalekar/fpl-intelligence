@@ -27,4 +27,4 @@ git fetch origin --prune && git checkout main && git reset --hard origin/main
 
 ## 4. Keep main clean
 
-If `data/official-transfers-latest.json` (or any other tracked-but-refresh-generated file) shows a diff from ad-hoc verification during this work and isn't itself the deliverable of the merged PR, `git checkout -- <file>`.
+If a genuinely tracked-but-refresh-generated file shows a diff from ad-hoc verification during this work and isn't itself the deliverable of the merged PR, `git checkout -- <file>`. Note: `data/official-transfers-latest.json`, `data/confirmed-transfers.json`, and `data/fpl-fixtures-latest.json` are gitignored as of the volume-shadowed-seed-files bugfix (their tracked reference copies now live at `data-seed/`), so a refresh during this work no longer produces a diff for those three specifically.

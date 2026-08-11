@@ -25,6 +25,7 @@ from fpl_intel.server import (
     ReminderOptInCooldownError,
     _default_refresh_action,
     _default_reminder_opt_in_action,
+    _default_team_view_action,
     _default_visitor_profile_action,
     build_refresh_result,
     create_server,
@@ -562,6 +563,40 @@ class TeamLookupTests(unittest.TestCase):
             urlopen(self.base_url + "/?team_id=364759", timeout=3)
 
         self.assertEqual(error.exception.code, 404)
+
+
+class VolumeShadowedTeamLookupTests(unittest.TestCase):
+    """Regression coverage for the live Railway bug: a volume mounted at `data/` shadows the
+    git-tracked seed files that used to live directly under it. `_default_team_view_action`'s
+    per-request closure reads `fpl-fixtures-latest.json`/`official-transfers-latest.json` off
+    disk with no existence check -- this exercises that read against a `data/` directory built to
+    look exactly like a freshly mounted (nothing seeded) volume, and would have raised
+    `FileNotFoundError` against the pre-fix code.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "fpl-bootstrap-latest.json").write_text(
+            json.dumps(sample_bootstrap()), encoding="utf-8"
+        )
+        # Deliberately no fpl-fixtures-latest.json / official-transfers-latest.json here.
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_team_lookup_against_a_shadowed_data_dir_degrades_gracefully(self):
+        with patch(
+            "fpl_intel.refresh.collect_public_manager",
+            return_value={"entry": {"id": 364759, "name": "BrunoMans"}, "picks": []},
+        ):
+            result = _default_team_view_action(self.root)(364759)
+
+        # No FileNotFoundError raised -- fixtures/transfers both degraded to empty defaults, and
+        # the rest of compute_manager_view still ran to completion on top of them.
+        self.assertIn("manager", result)
+        self.assertIn("weekly_decisions", result)
 
 
 class LookupOptOutGateTests(unittest.TestCase):

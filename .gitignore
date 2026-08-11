@@ -243,4 +243,13 @@ data/fpl-manager-latest.json
 data/current-generation.json
 data/fpl-bootstrap-latest.json
 data/generations/
-:
+
+# Bugfix (volume-shadowed seed files): these three used to be git-tracked directly at data/,
+# but a Railway volume mounted at data/ shadows tracked files at runtime. Pristine reference
+# copies now live at data-seed/ (still git-tracked) and get copied to data/<filename> on first
+# boot by scripts/start_dashboard.py's seed_missing_data_files, then kept current by every
+# successful refresh from then on -- so the data/ copy is runtime-generated, same as the rest
+# of this block, and shouldn't be tracked at its data/ path anymore.
+data/confirmed-transfers.json
+data/official-transfers-latest.json
+data/fpl-fixtures-latest.json

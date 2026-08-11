@@ -47,15 +47,29 @@ and they aren't exposed in the in-UI form.
 ## Open the dashboard
 
 `dashboard.html` and everything under `data/` except `data/history/` and
-the `backtest-baseline-*`/`confirmed-transfers.json` fixtures are generated
-locally and gitignored -- a fresh clone won't have them yet. Run a refresh
-once to create them:
+the `backtest-baseline-*` fixtures are generated locally and gitignored --
+a fresh clone won't have them yet. Run a refresh once to create them:
 
 (`data/history/` -- four seasons of prior-year data, committed in full --
 is not one of those generated files, but you don't need to do anything
 with it either. It exists solely so `config/model-coefficients.json` can
 be re-fitted and backtested by someone changing the model; the live
 dashboard never reads it. See [MODEL.md](MODEL.md#coefficients-and-validation).)
+
+**`data-seed/`** holds a handful of git-tracked starter copies of files
+that otherwise live at `data/<filename>` and are gitignored
+(`confirmed-transfers.json`, `official-transfers-latest.json`,
+`fpl-fixtures-latest.json`). `scripts/start_dashboard.py` copies each one
+into `data/` on startup, but only if it isn't already there -- so a fresh
+local clone gets something reasonable to start from before the first
+refresh runs, and so does a fresh Railway deploy, where a persistent
+volume mounted at `data/` shadows the whole directory (including these
+git-tracked files, which are still in the image layer but unreachable
+from that path once the volume takes over). Once a real refresh has run,
+the files in `data/` are the live ones and `data-seed/`'s copies are no
+longer consulted. See `scripts/start_dashboard.py`'s
+`seed_missing_data_files` and `plans/issue-27-cloud-hosting.md`'s
+2026-08-10 addendum for the full mechanism.
 
 ```bash
 cd <path-to-clone>/fpl-intelligence

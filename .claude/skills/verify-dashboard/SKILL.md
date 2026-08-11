@@ -22,7 +22,7 @@ Use whenever a change to `src/fpl_intel/dashboard.py`, `server.py`, or any data-
 
 ## Refreshing data
 - To pick up backend changes, run `python3 scripts/refresh_dashboard.py` from the repo root (or worktree) and check its printed summary (movements count, feed status).
-- `data/official-transfers-latest.json` is tracked in git but gets rewritten as a side effect of any refresh. After ad-hoc verification, run `git checkout -- data/official-transfers-latest.json` to keep the branch clean — unless the refreshed content is itself the deliverable for the change being validated.
+- `data/official-transfers-latest.json` (along with `data/confirmed-transfers.json` and `data/fpl-fixtures-latest.json`) is gitignored and rewritten as a side effect of any refresh — a git-tracked reference copy lives at `data-seed/`, seeded into `data/` on first boot only if missing (see the volume-shadowed-seed-files bugfix). No `git checkout` cleanup is needed after ad-hoc verification; the `data/` copy isn't tracked, so a refresh during this work never shows up as a diff.
 
 ## Cleanup
 - Stop any background server process you started (`preview_stop`, or kill the backgrounded shell) once verification is done, so it doesn't linger as a stray process across the session.

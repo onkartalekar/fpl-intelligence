@@ -322,7 +322,15 @@ def _refresh_project_unlocked(
                 "confirmed_free_transfers_event"
             )
 
-    transfer_payload = _load_json(root / "data" / "confirmed-transfers.json")
+    # Defense-in-depth (see `scripts/start_dashboard.py`'s `seed_missing_data_files`, the primary
+    # fix): this file is meant to always exist -- either seeded on first boot from `data-seed/`
+    # or git-tracked in a plain local checkout -- so this fallback should essentially never fire
+    # in practice. It exists only to keep a refresh from hard-failing if it's ever transiently
+    # missing anyway (a corrupted volume, a manual `rm`, ...), same tolerance already given to a
+    # missing `fpl-fixtures-latest.json` a few lines below.
+    transfer_payload = _load_json_or(
+        root / "data" / "confirmed-transfers.json", {"schema_version": 1, "transfers": []}
+    )
     candidates = list(transfer_payload.get("transfers", []))
     if source_errors.get("transfers"):
         candidates.extend(previous_state.get("transfers", []))
