@@ -11,6 +11,7 @@ actually use `/api/refresh` and so the Host/Origin allowlist matches the real de
 import argparse
 import os
 from pathlib import Path
+import shutil
 import sys
 import webbrowser
 
@@ -24,6 +25,44 @@ DEFAULT_PORT = 8877
 PORT_ENV_VAR = "PORT"  # Railway's own convention -- injected automatically, no setup needed.
 REFRESH_TOKEN_ENV_VAR = "FPL_INTEL_REFRESH_TOKEN"
 ALLOWED_ORIGIN_ENV_VAR = "FPL_INTEL_ALLOWED_ORIGIN"
+
+# Files that legitimately live at `data/<filename>` (read there by `refresh.py`/`server.py`
+# via `resolve_artifact`) but are also git-tracked seed data. A Railway volume mounted at
+# `data/` shadows the whole directory at runtime -- the tracked copies are still in the image
+# layer, just unreachable from `data/` once the volume takes over -- so a fresh volume (or a
+# fresh local clone, which never had these gitignored files either) needs them copied in from
+# `data-seed/`, a sibling directory the volume mount does not shadow, before the server starts
+# accepting requests.
+SEEDED_DATA_FILENAMES = (
+    "confirmed-transfers.json",
+    "official-transfers-latest.json",
+    "fpl-fixtures-latest.json",
+)
+
+
+def seed_missing_data_files(root):
+    """Copy each seeded file from `data-seed/` to `data/` the first time it's missing.
+
+    Idempotent and non-destructive: never overwrites a `data/<filename>` that already exists,
+    whether that's because a previous boot already seeded it or because a refresh has since
+    written a real value over it -- once that happens the seed copy is irrelevant going
+    forward. Silent when there's nothing to do (every ordinary local dev boot after the first,
+    and every warm redeploy with an already-populated volume), one line printed per file
+    actually seeded.
+    """
+    root = Path(root)
+    data_dir = root / "data"
+    seed_dir = root / "data-seed"
+    for filename in SEEDED_DATA_FILENAMES:
+        target = data_dir / filename
+        if target.exists():
+            continue
+        source = seed_dir / filename
+        if not source.exists():
+            continue
+        data_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        print(f"Seeded data/{filename} from data-seed/ (first boot)")
 
 
 def resolve_server_config(env, cli_port=None):
@@ -64,6 +103,7 @@ def main():
     args = parser.parse_args()
 
     config = resolve_server_config(os.environ, cli_port=args.port)
+    seed_missing_data_files(ROOT)
     server = create_server(
         ROOT,
         host=config["host"],

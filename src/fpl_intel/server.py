@@ -185,11 +185,24 @@ def _default_team_view_action(root):
         bootstrap = json.loads(
             resolve_artifact(root, "fpl-bootstrap-latest.json").read_text(encoding="utf-8")
         )
-        raw_fixtures = json.loads(
-            resolve_artifact(root, "fpl-fixtures-latest.json").read_text(encoding="utf-8")
+        # Defense-in-depth (see `scripts/start_dashboard.py`'s `seed_missing_data_files`, the
+        # primary fix): both files are meant to always exist -- either seeded on first boot from
+        # `data-seed/` or git-tracked in a plain local checkout, then kept current by every
+        # successful refresh -- so these fallbacks should essentially never fire in practice.
+        # They exist only so a team lookup degrades gracefully rather than hard-failing if one is
+        # ever transiently missing anyway (a corrupted volume, a manual `rm`, ...). Fallback
+        # shapes match `refresh.py`'s own: `[]` mirrors `_load_current_json(root,
+        # "fpl-fixtures-latest.json", [])` in `_refresh_project_unlocked`; `{"transfers": []}`
+        # mirrors what `transfers_artifact.get("transfers", [])` below already treats a missing
+        # key as.
+        fixtures_path = resolve_artifact(root, "fpl-fixtures-latest.json")
+        raw_fixtures = (
+            json.loads(fixtures_path.read_text(encoding="utf-8")) if fixtures_path.exists() else []
         )
-        transfers_artifact = json.loads(
-            resolve_artifact(root, "official-transfers-latest.json").read_text(encoding="utf-8")
+        transfers_path = resolve_artifact(root, "official-transfers-latest.json")
+        transfers_artifact = (
+            json.loads(transfers_path.read_text(encoding="utf-8"))
+            if transfers_path.exists() else {"transfers": []}
         )
         saved = profiles.load_profile(_profiles_db_path(root), team_id)
         generated_at = datetime.now(timezone.utc).isoformat()

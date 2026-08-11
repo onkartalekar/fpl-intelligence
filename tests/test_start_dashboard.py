@@ -6,8 +6,12 @@ independently testable without spinning up a process (see `tests/test_send_deadl
 for the same pattern applied to `scripts/send_deadline_reminder.py`).
 """
 
+from contextlib import redirect_stdout
 import importlib.util
+import io
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 # scripts/ is not a package (no __init__.py, matching the rest of this repo's scripts/), so the
@@ -98,6 +102,123 @@ class ResolveServerConfigTests(unittest.TestCase):
                 "allowed_origin": "https://fpl-intelligence.up.railway.app",
             },
         )
+
+
+class SeedMissingDataFilesTests(unittest.TestCase):
+    """Fix for the live Railway bug: a volume mounted at `data/` shadows the git-tracked seed
+    files that used to live directly under it. `seed_missing_data_files` is the primary fix --
+    copying each one in from the sibling `data-seed/` directory (which the volume mount does not
+    shadow) the first time `data/<filename>` is missing, whether that's a freshly mounted volume
+    or a fresh local clone that never had these gitignored files either.
+    """
+
+    def _make_seed_dir(self, root):
+        seed_dir = root / "data-seed"
+        seed_dir.mkdir()
+        for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+            (seed_dir / filename).write_text(
+                json.dumps({"seed": filename}), encoding="utf-8"
+            )
+        return seed_dir
+
+    def test_copies_each_seeded_file_when_data_dir_is_missing_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_seed_dir(root)
+
+            start_dashboard.seed_missing_data_files(root)
+
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+                target = root / "data" / filename
+                self.assertTrue(target.exists())
+                self.assertEqual(
+                    json.loads(target.read_text(encoding="utf-8")), {"seed": filename}
+                )
+
+    def test_is_a_no_op_and_does_not_overwrite_an_existing_target_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_seed_dir(root)
+            data_dir = root / "data"
+            data_dir.mkdir()
+            existing_filename = start_dashboard.SEEDED_DATA_FILENAMES[0]
+            (data_dir / existing_filename).write_text(
+                json.dumps({"real": "refreshed-value"}), encoding="utf-8"
+            )
+
+            start_dashboard.seed_missing_data_files(root)
+
+            self.assertEqual(
+                json.loads((data_dir / existing_filename).read_text(encoding="utf-8")),
+                {"real": "refreshed-value"},
+            )
+            # The other two were still missing, so they *should* have been seeded.
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES[1:]:
+                self.assertTrue((data_dir / filename).exists())
+
+    def test_logs_one_line_per_file_actually_seeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_seed_dir(root)
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                start_dashboard.seed_missing_data_files(root)
+
+            output = buffer.getvalue()
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+                self.assertIn(f"Seeded data/{filename} from data-seed/ (first boot)", output)
+            self.assertEqual(len(output.strip().splitlines()), len(start_dashboard.SEEDED_DATA_FILENAMES))
+
+    def test_prints_nothing_when_every_target_file_already_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_seed_dir(root)
+            data_dir = root / "data"
+            data_dir.mkdir()
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+                (data_dir / filename).write_text(json.dumps({"real": True}), encoding="utf-8")
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                start_dashboard.seed_missing_data_files(root)
+
+            self.assertEqual(buffer.getvalue(), "")
+
+    def test_is_a_no_op_when_the_seed_dir_itself_does_not_exist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # No data-seed/ at all -- should not raise, should not create data/.
+
+            start_dashboard.seed_missing_data_files(root)
+
+            self.assertFalse((root / "data").exists())
+
+    def test_creates_the_data_dir_if_it_does_not_exist_yet(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_seed_dir(root)
+            # No data/ directory at all yet -- a genuinely fresh clone/volume.
+
+            start_dashboard.seed_missing_data_files(root)
+
+            self.assertTrue((root / "data").is_dir())
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+                self.assertTrue((root / "data" / filename).exists())
+
+    def test_real_data_seed_directory_actually_seeds_the_real_repo_files(self):
+        """End-to-end sanity check against this repo's real `data-seed/`, not a synthetic one."""
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data-seed").symlink_to(repo_root / "data-seed", target_is_directory=True)
+
+            start_dashboard.seed_missing_data_files(root)
+
+            for filename in start_dashboard.SEEDED_DATA_FILENAMES:
+                target = root / "data" / filename
+                self.assertTrue(target.exists())
+                json.loads(target.read_text(encoding="utf-8"))  # still valid JSON
 
 
 if __name__ == "__main__":

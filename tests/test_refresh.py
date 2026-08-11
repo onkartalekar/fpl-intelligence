@@ -788,6 +788,57 @@ class RefreshProjectTests(unittest.TestCase):
             self.assertEqual(comparison["actual_points"], 6)
 
 
+class VolumeShadowedSeedFilesRegressionTests(unittest.TestCase):
+    """Regression coverage for the live Railway bug: a volume mounted at `data/` shadows the
+    git-tracked seed files that used to live directly under it (`confirmed-transfers.json`,
+    `official-transfers-latest.json`, `fpl-fixtures-latest.json`), leaving `data/` looking exactly
+    like these tests' `root / "data"` -- present, but with none of those three files in it.
+
+    These tests build that same "freshly mounted, nothing seeded" `data/` directly (no
+    `data-seed/` involved -- that's the primary fix, covered separately in
+    `tests/test_start_dashboard.py`) so they exercise the defense-in-depth fallback on its own and
+    would have failed against the pre-fix code with a raw `FileNotFoundError`.
+    """
+
+    def _bootstrap(self):
+        return {
+            "events": [{"id": 1, "deadline_time": "2025-08-15T17:30:00Z"}],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+
+    def test_refresh_no_longer_raises_filenotfounderror_for_missing_confirmed_transfers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            # Deliberately no data/confirmed-transfers.json -- simulates the shadowed volume.
+            (root / "config" / "sources.json").write_text(
+                json.dumps({"sources": []}), encoding="utf-8"
+            )
+
+            state = refresh_project(
+                root, bootstrap_payload=self._bootstrap(), generated_at="2026-08-10T12:00:00Z"
+            )
+
+            self.assertEqual(state["transfers"], [])
+
+    def test_missing_confirmed_transfers_falls_back_to_an_empty_transfers_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "config" / "sources.json").write_text(
+                json.dumps({"sources": []}), encoding="utf-8"
+            )
+
+            state = refresh_project(
+                root, bootstrap_payload=self._bootstrap(), generated_at="2026-08-10T12:00:00Z"
+            )
+
+            self.assertEqual(state["transfer_summary"]["total"], 0)
+
+
 class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
     """Issue #64: the refresh loop iterates every saved #45 profile's team, capped per run (C1)."""
 
