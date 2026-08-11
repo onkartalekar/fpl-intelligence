@@ -174,6 +174,27 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="fixture-gameweek-value"', html)
         self.assertIn('<select id="fixture-gameweek" hidden', html)
 
+    def test_pitch_card_projection_swaps_to_a_single_number_below_the_mobile_breakpoint(self):
+        """Issue 133: the mobile @media(max-width:760px) block must hide the full 1/3/5-GW
+        string and show the compact single-number fallback -- the CSS-side half of the fix
+        (test_renders_active_gw1_decision_center's markup assertions cover the JS-side half)."""
+        state = {
+            "generated_at": "2026-07-18T12:00:00-04:00",
+            "timezone": "America/New_York",
+            "fpl": {"season_status": "prior_season_data", "ready_for_2026_27": False, "player_count": 0, "team_count": 20},
+            "players": [], "fixtures": [], "fixture_summary": {"status": "not_active"},
+            "manager": {"connection_status": "not_configured", "squad": []},
+            "transfers": [], "club_summaries": [], "sources": [],
+        }
+
+        html = render_dashboard(state)
+        style_block = html[html.index(":root {"):html.index("</style>")]
+        breakpoint_block = style_block[style_block.index("@media(max-width:760px)"):]
+
+        self.assertIn(".pitch-player .projection-full {", breakpoint_block)
+        self.assertIn(".pitch-player .projection-compact {", breakpoint_block)
+        self.assertIn(".pitch-player[data-player-id] {", breakpoint_block)
+
     def test_renders_light_dark_theme_toggle(self):
         state = {
             "generated_at": "2026-07-18T12:00:00-04:00",
@@ -290,6 +311,11 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("pitch-player", html)
         self.assertIn("Number(player.xp_3).toFixed(1)", html)
         self.assertNotIn("1 / 3 / 5 GW xPts", html)
+        # Issue 133: a compact, single-number fallback exists alongside the full 1/3/5-GW string,
+        # so a narrow viewport can show one complete number instead of truncating the full string
+        # mid-digit -- both classes must be present in the pitch-card markup.
+        self.assertIn('class="projection projection-full"', html)
+        self.assertIn('class="projection projection-compact"', html)
         self.assertIn('id="recommended-bench"', html)
         self.assertIn('id="captaincy-list"', html)
         self.assertIn('id="profile-options"', html)
