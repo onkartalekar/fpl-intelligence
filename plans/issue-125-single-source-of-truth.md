@@ -93,38 +93,58 @@ collapses to one compute path, reuses every existing precedent (#46's public+rat
 class of bug from recurring for any future GitHub-Actions-hosted script (including anything #101
 or a future issue might need).
 
-### Open questions for the user (genuinely undecided, not a default-and-move-on)
+## Decided (2026-08-11)
 
-1. **Endpoint shape**: one endpoint (`GET /api/manager-view?team_id=<id>`, shared data folded into
-   its response even for anonymous/no-team_id calls) vs. two separate endpoints (a shared-state
-   endpoint plus a per-team one). Two separate endpoints avoids re-sending the (larger, mostly
-   static) shared payload on every per-team call in a loop over N reminder recipients -- likely
-   the better shape, but worth confirming rather than assuming.
-2. **Rate-limiting mechanics for script callers specifically**: `lookup_limiter` is keyed per
-   source IP (`server.py:1078`), tuned for real visitors. GitHub Actions runners don't have a
-   stable IP (shared, rotating egress ranges) -- reusing the same per-IP limiter unmodified could
-   make a legitimate scheduled job flaky (a coincidental IP collision with unrelated traffic) or,
-   if the limiter is too permissive to accommodate that, weaken the protection it exists for. Needs
-   its own decision: a separate, token-authenticated path exempt from the visitor rate limit (bear
-   in mind `FPL_INTEL_REFRESH_TOKEN` is operator-only and reused elsewhere; a new dedicated
-   read-token might be cleaner than overloading that one), vs. accepting the existing per-IP limiter
-   as-is and treating any flakiness as acceptable for a best-effort scheduled job.
-3. **Scope relative to #105**: #105's team-*list* discovery (which team_ids are opted into
-   reminders) is a different shape of data than a single team's public recommendation -- a roster
-   of who's opted in is arguably more sensitive than any one team's already-public lookup result.
-   This plan doesn't resolve #105 by itself; worth deciding whether to fold a roster-read endpoint
-   into this same effort (reusing whatever auth model gets chosen above) or keep it a fully
-   separate follow-up.
+**1. Two endpoints, split on "same for everyone" vs. "varies by `team_id`" -- not "raw FPL data vs.
+system-generated," which doesn't cleanly apply (the shared bucket already includes real
+system-generated output, e.g. `decision_center`'s generic GW1 recommendation -- it just isn't
+personalized to any one team).**
+
+- `GET /api/shared-state` -- the *entire* base `dashboard-state.json` as JSON, unfiltered. This is
+  not new exposure: it's byte-for-byte what a no-`team_id` visitor already gets embedded in the
+  rendered page since #120's fix (fresh per request), and the shared refresh's default `manager`
+  state on the hosted deployment is always `{"status": "not_configured", ...}` (`refresh.py:193`)
+  -- no per-visitor PII is ever baked into the shared state to begin with, on the multi-tenant
+  hosted deployment #108's profile-gating already assumes. No new filtering logic needed; reuse
+  `resolve_artifact(root, "dashboard-state.json")` directly.
+- `GET /api/manager-view?team_id=<id>` -- the personalized half. Factor `_serve_dashboard`'s
+  existing team-lookup block (opt-out check, `compute_manager_view` call, #79's PII-field filter)
+  out of its current HTML-only code path into a shared helper, reused by both the existing
+  `?team_id=` HTML lookup and this new JSON endpoint -- so the two never drift on what they filter
+  or how they honor opt-out, and the fix applies to both automatically if either is ever changed.
+
+**2. Rate-limiting: reuse the existing per-IP `lookup_limiter` by default (real risk, but a
+one-line fix, not a new system) -- exempt calls carrying a valid `X-Refresh-Token` header from
+that specific check.** No new secret: the same operator token already deployed as a Railway env
+var and already a GitHub Actions secret (from #101's workflow) is sufficient -- the token here
+isn't gating the *data* (already public either way), only whether the visitor-tuned per-IP
+cooldown applies. A trusted script making several sequential per-team calls in one run would
+otherwise trip its own limiter on the very first loop with more than one team configured -- a real
+functional bug, not a hypothetical one, and this closes it with the smallest possible change.
+
+**3. #105 (team-list discovery) stays a separate, later issue.** This plan builds the foundation
+(the read-endpoint pattern, the token-exemption mechanism) that a future #105 fix can reuse, but
+does not implement a roster-listing endpoint now -- a list of who's opted into reminders is a
+different, more sensitive shape of data than any one team's already-public lookup result, and
+deserves its own explicit decision rather than being bundled in here by default.
+
+**Also decided: rewire `send_deadline_reminder.py` to actually use these endpoints, in this same
+piece of work.** Building the endpoints without also switching the one real consumer over to them
+would leave the original problem (the transfer/profile data never reaching reminder emails on
+GitHub Actions -- the reason this whole investigation started) still unsolved in production.
+`run()`'s `load_bootstrap_and_fixtures`/`load_official_transfers`/local `profiles.load_profile`
+calls are replaced by one `GET /api/shared-state` call plus one `GET /api/manager-view?team_id=`
+call per in-window team, using the same `FPL_INTEL_DASHBOARD_BASE_URL`/`FPL_INTEL_REFRESH_TOKEN`
+env vars issue #101's trigger script already established as the pattern for this class of script.
 
 ## Not in scope
 
-- Issue #101's scheduled-refresh trigger's own bootstrap-fetch design -- unaffected, see above.
-- Deciding #105's team-list-discovery mechanism outright -- flagged as an open question (#3 above),
-  not decided here.
-- Any change to `_serve_dashboard`'s existing HTML-embedded response shape -- this is additive (a
-  new JSON-returning read path), not a replacement for how the dashboard itself is served.
+- Issue #101's scheduled-refresh trigger's own bootstrap-fetch design -- unaffected, see above
+  (it answers a different question -- "should Railway's state be refreshed at all" -- that can't
+  be answered by reading Railway's own state).
+- #105's team-list-discovery mechanism -- deliberately deferred, decision #3 above.
+- Any change to `_serve_dashboard`'s existing HTML-embedded response shape -- additive only.
 
 ## Dependency
 
-None remaining to *start* this (the code paths to reuse already exist and are well understood).
-Whether it also resolves #105 depends on the answer to open question #3 above.
+None remaining.
