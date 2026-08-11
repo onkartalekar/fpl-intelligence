@@ -10,7 +10,6 @@ import sys
 from zoneinfo import ZoneInfo
 
 from .catalog import build_fixture_catalog, build_player_catalog
-from .dashboard import render_dashboard
 from .fpl_data import (
     fetch_bootstrap,
     fetch_event_live,
@@ -465,7 +464,6 @@ def _refresh_project_unlocked(
         root,
         generated_at=generated_at,
         json_artifacts=json_artifacts,
-        dashboard_html=render_dashboard(state),
     )
     return state
 

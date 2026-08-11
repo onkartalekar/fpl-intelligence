@@ -159,10 +159,6 @@ class DashboardServerTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -201,6 +197,23 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertNotIn("test-token", html)
         self.assertNotIn("refresh-token", html)
+
+    def test_no_team_id_view_reflects_a_state_change_with_no_republish_step(self):
+        """Issue #120: before this fix, a no-team_id visitor was served a static dashboard.html
+        baked at the last /api/refresh -- updating dashboard-state.json alone (what a fresh code
+        deploy's next refresh, or in this test, a direct rewrite, produces) would not have been
+        picked up without also regenerating that file. Now the no-team_id path renders fresh from
+        dashboard-state.json on every request, so a state change alone is enough."""
+        first = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', first)
+
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-20T09:00:00Z"}), encoding="utf-8"
+        )
+
+        second = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+        self.assertIn('"generated_at": "2026-07-20T09:00:00Z"', second)
+        self.assertNotIn('"generated_at": "2026-07-18T12:00:00Z"', second)
 
     def test_rejects_untrusted_host_before_serving_dashboard(self):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
@@ -384,7 +397,6 @@ class AllowedOriginTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text("<h1>Dashboard</h1>", encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -466,10 +478,6 @@ class TeamLookupTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z", "profile": {"team_id": None}}),
@@ -510,23 +518,23 @@ class TeamLookupTests(unittest.TestCase):
         self.assertNotIn("test-token", html)
         self.assertNotIn("__DASHBOARD_DATA__", html)
 
-    def test_absent_team_id_serves_the_shared_cached_dashboard_unmodified(self):
+    def test_absent_team_id_serves_the_shared_dashboard_state_unmodified(self):
         html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
 
         self.assertEqual(self.lookup_calls, [])
-        self.assertIn("<h1>Dashboard</h1>", html)
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', html)
 
-    def test_malformed_team_id_falls_back_to_the_shared_cached_dashboard(self):
+    def test_malformed_team_id_falls_back_to_the_shared_dashboard_state(self):
         html = urlopen(self.base_url + "/?team_id=not-a-number", timeout=3).read().decode()
 
         self.assertEqual(self.lookup_calls, [])
-        self.assertIn("<h1>Dashboard</h1>", html)
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', html)
 
-    def test_out_of_range_team_id_falls_back_to_the_shared_cached_dashboard(self):
+    def test_out_of_range_team_id_falls_back_to_the_shared_dashboard_state(self):
         html = urlopen(self.base_url + "/?team_id=999999999", timeout=3).read().decode()
 
         self.assertEqual(self.lookup_calls, [])
-        self.assertIn("<h1>Dashboard</h1>", html)
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', html)
 
     def test_repeated_lookups_from_the_same_source_are_rate_limited(self):
         first = urlopen(self.base_url + "/?team_id=364759", timeout=3)
@@ -565,6 +573,17 @@ class TeamLookupTests(unittest.TestCase):
 
         with self.assertRaises(HTTPError) as error:
             urlopen(self.base_url + "/?team_id=364759", timeout=3)
+
+        self.assertEqual(error.exception.code, 404)
+
+    def test_missing_dashboard_state_returns_404_with_no_team_id(self):
+        """Issue #120: the no-team_id path renders dashboard-state.json fresh on every request
+        now, instead of serving a static dashboard.html -- it must 404 the same way the
+        team_id-resolved path already does when that state hasn't been generated yet."""
+        (self.root / "data" / "dashboard-state.json").unlink()
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/dashboard.html", timeout=3)
 
         self.assertEqual(error.exception.code, 404)
 
@@ -609,10 +628,6 @@ class LookupOptOutGateTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z", "profile": {"team_id": None}}),
@@ -684,10 +699,6 @@ class CookieResolvedTeamTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -763,11 +774,11 @@ class CookieResolvedTeamTests(unittest.TestCase):
         self.assertEqual(self.lookup_calls, [99])
         self.assertIn('"lookup":', html.replace(" ", ""))
 
-    def test_malformed_cookie_falls_back_to_the_shared_cached_dashboard(self):
+    def test_malformed_cookie_falls_back_to_the_shared_dashboard_state(self):
         html = self._get_with_cookie("/", "not-a-number").read().decode()
 
         self.assertEqual(self.lookup_calls, [])
-        self.assertIn("<h1>Dashboard</h1>", html)
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', html)
 
     def test_saved_profile_is_spliced_in_and_drives_the_default_risk_profile(self):
         html = self._get_with_cookie("/", "42").read().decode()
@@ -787,18 +798,18 @@ class ConnectionStatusResolutionTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        # The shared, pre-generated dashboard.html is exactly what a visitor with no team_id at
-        # all (no cookie, no query param) is served, byte-for-byte -- built at refresh time by
-        # `_refresh_project_unlocked`, which sets `connection_status: "not_configured"` (see
-        # refresh.py) whenever no team is configured for that shared refresh. This fixture stands
-        # in for that pre-generated artifact.
-        (self.root / "dashboard.html").write_text(
-            json.dumps({"manager": {"connection_status": "not_configured", "squad": []}}),
-            encoding="utf-8",
-        )
+        # Issue #120: a visitor with no team_id at all (no cookie, no query param) is now
+        # rendered fresh from dashboard-state.json on every request, not served a pre-generated
+        # dashboard.html. `_refresh_project_unlocked` sets `connection_status: "not_configured"`
+        # (see refresh.py) whenever no team is configured for that shared refresh -- this
+        # fixture stands in for that shared state.
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
-            json.dumps({"generated_at": "2026-08-10T12:00:00Z"}), encoding="utf-8"
+            json.dumps({
+                "generated_at": "2026-08-10T12:00:00Z",
+                "manager": {"connection_status": "not_configured", "squad": []},
+            }),
+            encoding="utf-8",
         )
 
         def team_view_action(team_id):
@@ -855,10 +866,6 @@ class ModelPerformanceSpliceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({
@@ -968,11 +975,11 @@ class ModelPerformanceSpliceTests(unittest.TestCase):
             server_b.server_close()
             thread_b.join(timeout=2)
 
-    def test_absent_team_id_serves_the_cached_dashboard_without_computing_performance(self):
+    def test_absent_team_id_serves_the_dashboard_state_without_computing_performance(self):
         html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
 
         self.assertEqual(self.performance_calls, [])
-        self.assertIn("<h1>Dashboard</h1>", html)
+        self.assertIn('"status": "waiting_for_results"', html)
 
     def test_model_performance_failure_is_reported_cleanly_instead_of_a_server_error(self):
         failing_server = create_server(
@@ -1011,10 +1018,6 @@ class ProfileEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -1408,10 +1411,6 @@ class LookupOptOutEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -1614,10 +1613,6 @@ class DraftSquadEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -1831,10 +1826,6 @@ class ReminderOptInEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2169,10 +2160,6 @@ class ReminderConfirmEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2326,10 +2313,6 @@ class ReminderProfileLeakFixTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text(
-            '<h1>Dashboard</h1>',
-            encoding="utf-8",
-        )
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2395,7 +2378,6 @@ class ContactEndpointTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2671,7 +2653,6 @@ class RefreshCooldownTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2838,7 +2819,6 @@ class OtherEndpointsUnaffectedByRefreshCooldownTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2896,7 +2876,6 @@ class ConnectionTimeoutTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
@@ -2950,7 +2929,7 @@ class ConnectionTimeoutTests(unittest.TestCase):
         response = urlopen(f"http://127.0.0.1:{self.server.server_port}/dashboard.html", timeout=3)
 
         self.assertEqual(response.status, 200)
-        self.assertIn("Dashboard", response.read().decode())
+        self.assertIn('"generated_at": "2026-07-18T12:00:00Z"', response.read().decode())
 
     def test_timeout_is_logged_as_one_quiet_labeled_line_not_a_traceback(self):
         # log_error (like this file's pre-existing log_message override it delegates to) writes
@@ -2993,7 +2972,6 @@ class QuietTimeoutLoggingDoesNotSwallowRealErrorsTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        (self.root / "dashboard.html").write_text('<h1>Dashboard</h1>', encoding="utf-8")
         (self.root / "data").mkdir()
         (self.root / "data" / "dashboard-state.json").write_text(
             json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"

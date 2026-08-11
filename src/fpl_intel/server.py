@@ -1061,14 +1061,20 @@ def create_server(
                 self.headers.get("Cookie")
             )
             if team_id is None:
-                dashboard = resolve_artifact(root, "dashboard.html")
-                if not dashboard.exists():
+                # Issue #120: render fresh from the persisted dashboard-state.json on every
+                # request, exactly like the team_id-resolved path below, rather than serving a
+                # static dashboard.html baked at the last /api/refresh. A code deploy alone (no
+                # refresh) used to leave every no-team_id visitor on stale markup/CSS/JS -- this
+                # closes that gap structurally instead of adding a staleness check.
+                state_path = resolve_artifact(root, "dashboard-state.json")
+                if not state_path.exists():
                     self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                     return
-                self._send_html(dashboard.read_text(encoding="utf-8"))
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self._send_html(render_dashboard(state))
                 return
             # Compute this one team's view at request time and splice it into a copy of the
-            # shared state, without touching the persisted dashboard-state.json/dashboard.html.
+            # shared state, without touching the persisted dashboard-state.json.
             if not lookup_limiter.allow(self.client_address[0]):
                 self._json(429, {"status": "error", "message": "Too many team lookups. Try again shortly."})
                 return

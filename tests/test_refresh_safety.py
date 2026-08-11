@@ -28,7 +28,8 @@ class RefreshSafetyTests(unittest.TestCase):
 
             pointer = json.loads((root / "data" / "current-generation.json").read_text())
             self.assertTrue(pointer["generation_id"])
-            self.assertTrue(resolve_artifact(root, "dashboard.html").exists())
+            # Issue #120: dashboard.html is no longer published as a static artifact -- the
+            # server renders it fresh per-request from dashboard-state.json instead.
             self.assertTrue(resolve_artifact(root, "dashboard-state.json").exists())
 
 
