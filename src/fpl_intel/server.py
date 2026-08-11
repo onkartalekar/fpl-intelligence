@@ -1050,6 +1050,78 @@ def create_server(
             self.end_headers()
             self.wfile.write(body)
 
+        def _rate_limit_exempt(self):
+            """Issue #125: a caller holding the operator token is exempt from the visitor-tuned
+            per-IP `lookup_limiter` cooldown -- otherwise a trusted script looping over several
+            teams in one run (e.g. the deadline reminder) would trip its own limiter on the very
+            first repeat call from its own IP. Reuses the existing operator secret rather than
+            adding a new one: it isn't gating the *data* here (already publicly reachable via
+            `?team_id=` either way), only whether the visitor-facing throttle applies."""
+            return secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token)
+
+        def _team_lookup_opted_out(self, team_id):
+            """Issue #62: True if this team has opted out of being looked up by ID. Shared by
+            `_serve_dashboard`'s explicit `?team_id=` lookup and `/api/manager-view` -- both
+            represent "looking up someone else's team," unlike a cookie-resolved own-team view,
+            which never checks this."""
+            saved_profile = profiles.load_profile(_profiles_db_path(root), team_id)
+            return bool(saved_profile and saved_profile.get("opted_out"))
+
+        def _resolve_team_lookup(self, team_id):
+            """Issue #125: the exception-handled `lookup_action` call, shared by
+            `_serve_dashboard`'s team_id-resolved HTML path and `/api/manager-view`'s JSON
+            equivalent, so the two computations can never drift. Returns `(manager,
+            weekly_decisions)` on success, or `(None, None)` on failure (already logged here)."""
+            try:
+                lookup_result = lookup_action(team_id)
+                return lookup_result["manager"], lookup_result["weekly_decisions"]
+            except Exception as error:
+                print(f"Team lookup failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                return None, None
+
+        def _handle_shared_state(self):
+            """Issue #125: JSON equivalent of the no-team_id dashboard view -- the entire base
+            `dashboard-state.json`, unfiltered. Not new exposure: byte-for-byte what a no-team_id
+            visitor already gets embedded in the rendered page (fresh per request since #120), and
+            the shared refresh's default `manager` state on the hosted deployment is always
+            `{"status": "not_configured", ...}` (`refresh.py:193`) -- no per-visitor PII is ever
+            baked into the shared state to begin with. Public, no rate limit: identical cost/
+            exposure profile to the existing public `/`/`/dashboard.html` route."""
+            state_path = resolve_artifact(root, "dashboard-state.json")
+            if not state_path.exists():
+                self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
+                return
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self._json(200, state)
+
+        def _handle_manager_view(self, query_string):
+            """Issue #125: JSON equivalent of `_serve_dashboard`'s explicit `?team_id=` lookup --
+            same opt-out (#62) and rate-limiting (#46) rules, minus the HTML-only splices
+            (`visitor_profile`/`model_performance`) that carry PII #79 already had to filter for
+            the HTML path; this endpoint never returns those fields at all, so there's nothing to
+            filter. Built so `send_deadline_reminder.py` (and any future GitHub-Actions-hosted
+            script) can fetch exactly what `compute_manager_view` already computes server-side --
+            including profile overrides read from Railway's real `profiles.db` -- instead of
+            trying to read local files that don't exist wherever the script happens to run."""
+            team_id = _parse_team_id(query_string)
+            if team_id is None:
+                self._json(400, {"status": "error", "message": "A valid team_id query parameter is required."})
+                return
+            if not self._rate_limit_exempt() and not lookup_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many team lookups. Try again shortly."})
+                return
+            if self._team_lookup_opted_out(team_id):
+                self._json(200, {"status": "opted_out", "team_id": team_id})
+                return
+            manager, weekly_decisions = self._resolve_team_lookup(team_id)
+            if manager is None:
+                self._json(500, {"status": "error", "message": "Team lookup failed"})
+                return
+            self._json(
+                200,
+                {"status": "ok", "team_id": team_id, "manager": manager, "weekly_decisions": weekly_decisions},
+            )
+
         def _serve_dashboard(self, query_string):
             query_team_id = _parse_team_id(query_string)
             # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
@@ -1087,51 +1159,60 @@ def create_server(
             # anyone who looks it up by ID. Checked only for the explicit query-param lookup path
             # (never the visitor's own cookie-driven view) and before `lookup_action` -- a local
             # `profiles.load_profile` read, not the live-FPL-API-hitting call it would otherwise
-            # trigger, per issue #28's already-flagged unthrottled-lookup-cost risk.
-            if is_explicit_lookup:
-                saved_profile = profiles.load_profile(_profiles_db_path(root), team_id)
-                if saved_profile and saved_profile.get("opted_out"):
-                    state["lookup"] = {"active": True, "team_id": team_id, "status": "opted_out"}
-                    self._send_html(render_dashboard(state))
-                    return
+            # trigger, per issue #28's already-flagged unthrottled-lookup-cost risk. Issue #125:
+            # shares `_team_lookup_opted_out` with `/api/manager-view`, which always applies this
+            # check (an API caller is always "looking up a team," equivalent to an explicit lookup).
+            if is_explicit_lookup and self._team_lookup_opted_out(team_id):
+                state["lookup"] = {"active": True, "team_id": team_id, "status": "opted_out"}
+                self._send_html(render_dashboard(state))
+                return
             try:
-                lookup_result = lookup_action(team_id)
-                state["manager"] = lookup_result["manager"]
-                decision_center = dict(state.get("decision_center") or {})
-                decision_center["weekly_decisions"] = lookup_result["weekly_decisions"]
-                state["decision_center"] = decision_center
-                if is_explicit_lookup:
-                    state["lookup"] = {"active": True, "team_id": team_id, "status": "ok"}
-                visitor_profile = visitor_profile_action(team_id)
-                # Issue #79: email/reminder_status/reminder_lead_hours/reminder_pending_email are
-                # personal contact information, unlike every other field this splice carries
-                # (timezone, risk_profile, draft_squad, goal) -- they must never be visible to an
-                # explicit ?team_id= lookup of someone else's team, only the visitor's own
-                # cookie-resolved team. Filtered here, at the single splice site, rather than in
-                # `_default_visitor_profile_action` (or any injected replacement of it) so the fix
-                # applies uniformly regardless of which reader produced `visitor_profile`.
-                if is_explicit_lookup:
-                    visitor_profile = {
-                        key: value for key, value in visitor_profile.items()
-                        if key not in {
-                            "email", "reminder_status", "reminder_lead_hours",
-                            "reminder_pending_email",
+                # Issue #125: shares `_resolve_team_lookup` with `/api/manager-view`'s JSON
+                # equivalent, so the two computations can never drift.
+                manager, weekly_decisions = self._resolve_team_lookup(team_id)
+                if manager is None:
+                    if is_explicit_lookup:
+                        state["lookup"] = {"active": True, "team_id": team_id, "status": "error"}
+                else:
+                    state["manager"] = manager
+                    decision_center = dict(state.get("decision_center") or {})
+                    decision_center["weekly_decisions"] = weekly_decisions
+                    state["decision_center"] = decision_center
+                    if is_explicit_lookup:
+                        state["lookup"] = {"active": True, "team_id": team_id, "status": "ok"}
+                    visitor_profile = visitor_profile_action(team_id)
+                    # Issue #79: email/reminder_status/reminder_lead_hours/reminder_pending_email
+                    # are personal contact information, unlike every other field this splice
+                    # carries (timezone, risk_profile, draft_squad, goal) -- they must never be
+                    # visible to an explicit ?team_id= lookup of someone else's team, only the
+                    # visitor's own cookie-resolved team. Filtered here, at the single splice site,
+                    # rather than in `_default_visitor_profile_action` (or any injected replacement
+                    # of it) so the fix applies uniformly regardless of which reader produced
+                    # `visitor_profile`. `/api/manager-view` never returns this field at all, so it
+                    # has nothing to filter.
+                    if is_explicit_lookup:
+                        visitor_profile = {
+                            key: value for key, value in visitor_profile.items()
+                            if key not in {
+                                "email", "reminder_status", "reminder_lead_hours",
+                                "reminder_pending_email",
+                            }
                         }
-                    }
-                state["profile"] = visitor_profile
-                risk = visitor_profile.get("risk_profile")
-                if risk in _ALLOWED_RISK_PROFILES:
-                    if decision_center.get("profile_recommendations"):
-                        decision_center["default_profile"] = risk
-                    weekly = decision_center.get("weekly_decisions")
-                    if isinstance(weekly, dict) and weekly.get("profiles"):
-                        weekly["default_profile"] = risk
-                # Issue #64: this team's team_performance/player_performance, computed fresh from
-                # the shared model-performance.json at request time -- same splice pattern as
-                # state["manager"]/state["profile"] above, not precomputed for every saved profile.
-                model_performance = dict(state.get("model_performance") or {})
-                model_performance.update(performance_action(team_id))
-                state["model_performance"] = model_performance
+                    state["profile"] = visitor_profile
+                    risk = visitor_profile.get("risk_profile")
+                    if risk in _ALLOWED_RISK_PROFILES:
+                        if decision_center.get("profile_recommendations"):
+                            decision_center["default_profile"] = risk
+                        weekly = decision_center.get("weekly_decisions")
+                        if isinstance(weekly, dict) and weekly.get("profiles"):
+                            weekly["default_profile"] = risk
+                    # Issue #64: this team's team_performance/player_performance, computed fresh
+                    # from the shared model-performance.json at request time -- same splice
+                    # pattern as state["manager"]/state["profile"] above, not precomputed for
+                    # every saved profile.
+                    model_performance = dict(state.get("model_performance") or {})
+                    model_performance.update(performance_action(team_id))
+                    state["model_performance"] = model_performance
             except Exception as error:
                 print(f"Team lookup failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 if is_explicit_lookup:
@@ -1161,6 +1242,12 @@ def create_server(
                 return
             if path == "/api/reminder-confirm":
                 self._handle_reminder_confirm(split_path.query)
+                return
+            if path == "/api/shared-state":
+                self._handle_shared_state()
+                return
+            if path == "/api/manager-view":
+                self._handle_manager_view(split_path.query)
                 return
             if path == "/favicon.ico":
                 self.send_response(204)
