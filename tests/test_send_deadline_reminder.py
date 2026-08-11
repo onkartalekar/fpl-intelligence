@@ -8,8 +8,10 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 
 from fpl_intel import profiles
+from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import compute_manager_view
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 from tests.test_transfer_decisions import gw2_inputs
@@ -81,34 +83,6 @@ class SendWindowArithmeticTests(unittest.TestCase):
     def test_hours_until_is_positive_before_the_deadline(self):
         now = self.deadline_dt - timedelta(hours=5)
         self.assertAlmostEqual(sdr.hours_until(self.deadline, now), 5.0)
-
-
-class LoadOfficialTransfersTests(unittest.TestCase):
-    """Issue #122: mirrors server.py's `_default_team_view_action` handling of the exact same
-    `official-transfers-latest.json` artifact -- resolve_artifact-based read, `{"transfers": []}`
-    shaped fallback when the file is missing."""
-
-    def test_reads_the_transfers_list_from_the_artifact(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "data").mkdir()
-            (root / "data" / "official-transfers-latest.json").write_text(
-                json.dumps({"transfers": [{"player": "Example Player", "to_club": "Arsenal"}]}),
-                encoding="utf-8",
-            )
-
-            transfers = sdr.load_official_transfers(root)
-
-        self.assertEqual(transfers, [{"player": "Example Player", "to_club": "Arsenal"}])
-
-    def test_missing_file_falls_back_to_an_empty_list(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "data").mkdir()
-
-            transfers = sdr.load_official_transfers(root)
-
-        self.assertEqual(transfers, [])
 
 
 class LoadBootstrapAndFixturesWrapperTests(unittest.TestCase):
@@ -235,7 +209,7 @@ class EmailCompositionTests(unittest.TestCase):
     def test_waiting_for_gw2_state_composes_the_recommended_squad(self):
         bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
         generated_at = "2026-08-18T12:00:00-04:00"
-        decision_center = sdr.build_gw_recommendations(bootstrap, fixtures, generated_at=generated_at)
+        decision_center = build_gw_recommendations(bootstrap, fixtures, generated_at=generated_at)
         manager_view = {
             "manager": {"connection_status": "connected"},
             "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
@@ -351,7 +325,7 @@ class HtmlEmailTests(unittest.TestCase):
     def _gw1_bodies(self):
         bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
         generated_at = "2026-08-18T12:00:00-04:00"
-        decision_center = sdr.build_gw_recommendations(bootstrap, fixtures, generated_at=generated_at)
+        decision_center = build_gw_recommendations(bootstrap, fixtures, generated_at=generated_at)
         manager_view = {
             "manager": {"connection_status": "connected"},
             "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
@@ -456,7 +430,15 @@ class HtmlEmailTests(unittest.TestCase):
 
 
 class RunLoopTests(unittest.TestCase):
-    """Exercises `run()` (the internals `main()` delegates to) with all network calls mocked."""
+    """Exercises `run()` (the internals `main()` delegates to) with all network calls mocked.
+
+    Issue #125: `compute_manager_view`/`build_gw_recommendations`/local `profiles.load_profile`
+    are gone from this script entirely, replaced by `fetch_manager_view`/`fetch_shared_state`
+    HTTP calls against the hosted dashboard -- these tests mock those two functions instead.
+    """
+
+    _DASHBOARD_BASE_URL = "https://example.up.railway.app"
+    _REFRESH_TOKEN = "test-refresh-token"
 
     def _bootstrap_with_deadline(self, hours_from_now, now):
         bootstrap = sample_bootstrap()
@@ -466,18 +448,26 @@ class RunLoopTests(unittest.TestCase):
         ]
         return bootstrap
 
+    def _run(self, teams, dry_run, smtp_config, now):
+        return sdr.run(
+            teams, dry_run=dry_run, smtp_config=smtp_config, now=now,
+            dashboard_base_url=self._DASHBOARD_BASE_URL, refresh_token=self._REFRESH_TOKEN,
+        )
+
     def test_outside_window_exits_quietly_with_no_sends(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=10, now=now)
         teams = [{"team_id": 1, "email": "a@example.com", "lead_hours": 3}]
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view") as mock_fetch, \
              patch.object(sdr, "send_email") as mock_send:
             captured = io.StringIO()
             with patch("sys.stdout", captured):
-                exit_code = sdr.run(teams, dry_run=False, smtp_config=None, now=now)
+                exit_code = self._run(teams, dry_run=False, smtp_config=None, now=now)
 
         self.assertEqual(exit_code, 0)
+        mock_fetch.assert_not_called()
         mock_send.assert_not_called()
         self.assertIn("outside window", captured.getvalue())
 
@@ -487,14 +477,15 @@ class RunLoopTests(unittest.TestCase):
         teams = [{"team_id": 999999, "email": "secret@example.com", "lead_hours": 3}]
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr, "compute_manager_view", return_value={
+             patch.object(sdr, "fetch_manager_view", return_value={
+                 "status": "ok",
                  "manager": {"connection_status": "lookup_failed"},
                  "weekly_decisions": {"status": "team_not_found", "reason": "Team not found."},
              }), \
              patch.object(sdr, "send_email") as mock_send:
             captured_out, captured_err = io.StringIO(), io.StringIO()
             with patch("sys.stdout", captured_out), patch("sys.stderr", captured_err):
-                exit_code = sdr.run(teams, dry_run=False, smtp_config=None, now=now)
+                exit_code = self._run(teams, dry_run=False, smtp_config=None, now=now)
 
         self.assertEqual(exit_code, 0)
         mock_send.assert_not_called()
@@ -506,18 +497,19 @@ class RunLoopTests(unittest.TestCase):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
         teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
-        manager_view = {
+        lookup = {
+            "status": "ok",
             "manager": {"connection_status": "connected"},
             "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
         }
         smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
              patch.object(sdr, "send_email") as mock_send:
             captured = io.StringIO()
             with patch("sys.stdout", captured):
-                exit_code = sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
+                exit_code = self._run(teams, dry_run=False, smtp_config=smtp_config, now=now)
 
         self.assertEqual(exit_code, 0)
         mock_send.assert_called_once()
@@ -526,30 +518,84 @@ class RunLoopTests(unittest.TestCase):
         self.assertNotIn("manager@example.com", captured.getvalue())
         self.assertIn("reminder sent for GW1 to 1 team(s)", captured.getvalue())
 
-    def test_real_transfer_data_is_forwarded_to_compute_manager_view_and_recommendations(self):
-        """Issue #122 regression: run() must not silently compute recommendations with an empty
-        transfers list -- confirms load_official_transfers's result reaches both
-        compute_manager_view (every team) and build_gw_recommendations (the waiting_for_gw2
-        path), the exact coverage gap that let issue #122 go unnoticed."""
+    def test_manager_view_is_fetched_with_the_configured_base_url_team_id_and_token(self):
+        """Issue #125 regression: confirms fetch_manager_view actually receives the dashboard
+        base URL, the team's own team_id, and the refresh token -- the exact wiring that replaced
+        the old local compute_manager_view call."""
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
         teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
-        real_transfers = [{"player": "Example Player", "to_club": "Arsenal"}]
-        manager_view = {
+        lookup = {
+            "status": "ok",
             "manager": {"connection_status": "connected"},
-            "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
         }
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr, "load_official_transfers", return_value=real_transfers), \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_view, \
-             patch.object(sdr, "build_gw_recommendations", return_value={"status": "active"}) as mock_recs, \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup) as mock_fetch, \
              patch.object(sdr, "send_email"):
             with patch("sys.stdout", io.StringIO()):
-                sdr.run(teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now)
+                self._run(teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now)
 
-        self.assertEqual(mock_view.call_args.args[2], real_transfers)
-        self.assertEqual(mock_recs.call_args.kwargs["recent_transfers"], real_transfers)
+        mock_fetch.assert_called_once_with(self._DASHBOARD_BASE_URL, 42, self._REFRESH_TOKEN)
+
+    def test_waiting_for_gw2_fetches_shared_state_for_the_generic_recommendation(self):
+        """Issue #125 regression: the pre-Gameweek-2 fallback now comes from GET /api/shared-state
+        (fetched once per run, not recomputed locally with build_gw_recommendations)."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+        lookup = {
+            "status": "ok",
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+        }
+        shared_state = {"decision_center": {"status": "active", "recommended_squad": {"formation": "3-4-3"}}}
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
+             patch.object(sdr, "fetch_shared_state", return_value=shared_state) as mock_shared, \
+             patch.object(sdr, "send_email"):
+            with patch("sys.stdout", io.StringIO()):
+                self._run(teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now)
+
+        mock_shared.assert_called_once_with(self._DASHBOARD_BASE_URL)
+
+    def test_manager_view_fetch_failure_is_skipped_with_a_warning(self):
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", side_effect=URLError("connection refused")), \
+             patch.object(sdr, "send_email") as mock_send:
+            captured_err = io.StringIO()
+            with patch("sys.stdout", io.StringIO()), patch("sys.stderr", captured_err):
+                exit_code = self._run(
+                    teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now,
+                )
+
+        self.assertEqual(exit_code, 0)
+        mock_send.assert_not_called()
+        self.assertIn("42", captured_err.getvalue())
+
+    def test_opted_out_team_is_skipped_with_a_warning_not_an_email(self):
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", return_value={"status": "opted_out", "team_id": 42}), \
+             patch.object(sdr, "send_email") as mock_send:
+            captured_err = io.StringIO()
+            with patch("sys.stdout", io.StringIO()), patch("sys.stderr", captured_err):
+                exit_code = self._run(
+                    teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now,
+                )
+
+        self.assertEqual(exit_code, 0)
+        mock_send.assert_not_called()
+        self.assertIn("42", captured_err.getvalue())
 
     def test_different_lead_hours_are_evaluated_independently(self):
         """Two teams configured with different lead_hours: only the in-window one is emailed."""
@@ -559,95 +605,39 @@ class RunLoopTests(unittest.TestCase):
             {"team_id": 1, "email": "three-hour@example.com", "lead_hours": 3},
             {"team_id": 2, "email": "one-hour@example.com", "lead_hours": 1},
         ]
-        manager_view = {
+        lookup = {
+            "status": "ok",
             "manager": {"connection_status": "connected"},
             "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
         }
         smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
              patch.object(sdr, "send_email") as mock_send:
             captured = io.StringIO()
             with patch("sys.stdout", captured):
-                sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
+                self._run(teams, dry_run=False, smtp_config=smtp_config, now=now)
 
         mock_send.assert_called_once()
         self.assertEqual(mock_send.call_args.args[1], "three-hour@example.com")
-
-    def test_saved_profile_overrides_are_passed_through_to_compute_manager_view(self):
-        """Issue #81 regression: a team with a saved confirmed-free-transfer/draft-squad
-        profile must have those values reach `compute_manager_view`, not silently be
-        dropped in favor of whatever the public FPL API currently reports."""
-        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
-        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
-        manager_view = {
-            "manager": {"connection_status": "connected"},
-            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
-        }
-        saved_profile = {
-            "team_id": 42, "confirmed_free_transfers": 2, "confirmed_free_transfers_event": 3,
-            "draft_squad": [1, 2, 3],
-        }
-        smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
-
-        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr.profiles, "load_profile", return_value=saved_profile) as mock_load_profile, \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_compute, \
-             patch.object(sdr, "send_email"):
-            captured = io.StringIO()
-            with patch("sys.stdout", captured):
-                sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
-
-        mock_load_profile.assert_called_once()
-        self.assertEqual(mock_load_profile.call_args.args[1], 42)
-        mock_compute.assert_called_once()
-        self.assertEqual(mock_compute.call_args.kwargs["confirmed_free_transfers"], 2)
-        self.assertEqual(mock_compute.call_args.kwargs["confirmed_free_transfers_event"], 3)
-        self.assertEqual(mock_compute.call_args.kwargs["draft_squad_ids"], [1, 2, 3])
-
-    def test_no_saved_profile_passes_none_overrides_matching_prior_behavior(self):
-        """Regression for the "must not change existing no-profile behavior" requirement:
-        a team that has never saved a profile (`load_profile` returns None) must still pass
-        all three overrides as None, exactly as before this fix."""
-        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
-        teams = [{"team_id": 999, "email": "manager@example.com", "lead_hours": 3}]
-        manager_view = {
-            "manager": {"connection_status": "connected"},
-            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
-        }
-        smtp_config = {"host": "smtp.gmail.com", "port": 587, "user": "u@example.com", "password": "x"}
-
-        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr.profiles, "load_profile", return_value=None), \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_compute, \
-             patch.object(sdr, "send_email"):
-            captured = io.StringIO()
-            with patch("sys.stdout", captured):
-                sdr.run(teams, dry_run=False, smtp_config=smtp_config, now=now)
-
-        mock_compute.assert_called_once()
-        self.assertIsNone(mock_compute.call_args.kwargs["confirmed_free_transfers"])
-        self.assertIsNone(mock_compute.call_args.kwargs["confirmed_free_transfers_event"])
-        self.assertIsNone(mock_compute.call_args.kwargs["draft_squad_ids"])
 
     def test_dry_run_prints_composed_email_and_never_calls_smtp(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
         teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
-        manager_view = {
+        lookup = {
+            "status": "ok",
             "manager": {"connection_status": "connected"},
             "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
         }
 
         with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
-             patch.object(sdr, "compute_manager_view", return_value=manager_view), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
              patch.object(sdr, "send_email") as mock_send:
             captured = io.StringIO()
             with patch("sys.stdout", captured):
-                exit_code = sdr.run(teams, dry_run=True, smtp_config=None, now=now)
+                exit_code = self._run(teams, dry_run=True, smtp_config=None, now=now)
 
         self.assertEqual(exit_code, 0)
         mock_send.assert_not_called()
@@ -781,6 +771,38 @@ class CollectTeamsTests(unittest.TestCase):
 
 
 class MainCliTests(unittest.TestCase):
+    def test_missing_dashboard_base_url_exits_non_zero_even_in_dry_run(self):
+        """Issue #125: unlike SMTP config, the dashboard URL/token are required in --dry-run too
+        -- they're plain reads used for a genuine preview, not a mutating action to skip idly."""
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}]),
+            sdr.REFRESH_TOKEN_ENV_VAR: "test-refresh-token",
+        }
+        with patch.dict("os.environ", env_updates, clear=False):
+            os.environ.pop(sdr.DASHBOARD_BASE_URL_ENV_VAR, None)
+            captured_err = io.StringIO()
+            with patch("sys.stderr", captured_err):
+                exit_code = sdr.main(["--dry-run"])
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("Configuration error", captured_err.getvalue())
+        self.assertIn(sdr.DASHBOARD_BASE_URL_ENV_VAR, captured_err.getvalue())
+
+    def test_missing_refresh_token_exits_non_zero_even_in_dry_run(self):
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}]),
+            sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://example.up.railway.app",
+        }
+        with patch.dict("os.environ", env_updates, clear=False):
+            os.environ.pop(sdr.REFRESH_TOKEN_ENV_VAR, None)
+            captured_err = io.StringIO()
+            with patch("sys.stderr", captured_err):
+                exit_code = sdr.main(["--dry-run"])
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("Configuration error", captured_err.getvalue())
+        self.assertIn(sdr.REFRESH_TOKEN_ENV_VAR, captured_err.getvalue())
+
     def test_malformed_reminder_teams_env_var_exits_non_zero(self):
         with patch.dict("os.environ", {sdr.REMINDER_TEAMS_ENV_VAR: "{not json"}, clear=False):
             captured_err = io.StringIO()
@@ -790,7 +812,11 @@ class MainCliTests(unittest.TestCase):
         self.assertIn("Configuration error", captured_err.getvalue())
 
     def test_dry_run_does_not_require_smtp_env_vars(self):
-        env_updates = {sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}])}
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}]),
+            sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://example.up.railway.app",
+            sdr.REFRESH_TOKEN_ENV_VAR: "test-refresh-token",
+        }
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = sample_bootstrap()
         bootstrap["events"] = [

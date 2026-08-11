@@ -693,6 +693,197 @@ class LookupOptOutGateTests(unittest.TestCase):
         self.assertIn('"status": "ok"', html)
 
 
+class SharedStateApiTests(unittest.TestCase):
+    """Issue #125: GET /api/shared-state -- the JSON equivalent of the no-team_id dashboard view,
+    for GitHub-Actions-hosted scripts that can't reach Railway's local filesystem."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_returns_the_full_dashboard_state_as_json(self):
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({
+                "generated_at": "2026-08-11T12:00:00Z",
+                "decision_center": {"status": "active", "recommended_squad": {"formation": "3-4-3"}},
+            }),
+            encoding="utf-8",
+        )
+
+        response = urlopen(self.base_url + "/api/shared-state", timeout=3)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers.get("Content-Type"), "application/json; charset=utf-8")
+        self.assertEqual(payload["generated_at"], "2026-08-11T12:00:00Z")
+        self.assertEqual(payload["decision_center"]["recommended_squad"]["formation"], "3-4-3")
+
+    def test_missing_dashboard_state_returns_404(self):
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/api/shared-state", timeout=3)
+
+        self.assertEqual(error.exception.code, 404)
+
+    def test_is_not_rate_limited(self):
+        """Plain file read, same cost profile as the existing public / route -- no per-request
+        cost to protect, unlike the live-FPL-API-hitting team lookup."""
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-08-11T12:00:00Z"}), encoding="utf-8",
+        )
+
+        for _ in range(5):
+            response = urlopen(self.base_url + "/api/shared-state", timeout=3)
+            self.assertEqual(response.status, 200)
+
+
+class ManagerViewApiTests(unittest.TestCase):
+    """Issue #125: GET /api/manager-view?team_id=<id> -- the JSON equivalent of the explicit
+    ?team_id= HTML lookup (#46), sharing the same opt-out (#62) and rate-limiting rules, minus the
+    HTML-only profile splice (#79) this endpoint never returns in the first place."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-08-11T12:00:00Z"}), encoding="utf-8",
+        )
+        self.db_path = self.root / "data" / "profiles.db"
+        self.lookup_calls = []
+
+        def team_view_action(team_id):
+            self.lookup_calls.append(team_id)
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "team_name": "BrunoMans", "squad": []},
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        self.team_view_action = team_view_action
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_valid_team_id_returns_manager_and_weekly_decisions(self):
+        response = urlopen(self.base_url + "/api/manager-view?team_id=364759", timeout=3)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.lookup_calls, [364759])
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["manager"]["team_name"], "BrunoMans")
+        self.assertEqual(payload["weekly_decisions"]["status"], "waiting_for_gw2")
+        # Never returns the HTML path's separate visitor_profile splice -- nothing to filter.
+        self.assertNotIn("profile", payload)
+
+    def test_missing_team_id_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/api/manager-view", timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.lookup_calls, [])
+
+    def test_malformed_team_id_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/api/manager-view?team_id=not-a-number", timeout=3)
+
+        self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.lookup_calls, [])
+
+    def test_opted_out_team_blocks_the_lookup_without_calling_the_live_action(self):
+        set_lookup_opt_out(
+            self.db_path, team_id=364759, opted_out=True, pin_hash="some-hash",
+            now="2026-08-08T00:00:00Z",
+        )
+
+        response = urlopen(self.base_url + "/api/manager-view?team_id=364759", timeout=3)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.lookup_calls, [])
+        self.assertEqual(payload, {"status": "opted_out", "team_id": 364759})
+
+    def test_lookup_failure_is_a_500(self):
+        def failing_team_view_action(team_id):
+            raise RuntimeError("upstream unavailable")
+
+        failing_server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=failing_team_view_action,
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(HTTPError) as error:
+                urlopen(f"http://127.0.0.1:{failing_server.server_port}/api/manager-view?team_id=364759", timeout=3)
+            self.assertEqual(error.exception.code, 500)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+    def test_repeated_calls_from_the_same_source_are_rate_limited(self):
+        first = urlopen(self.base_url + "/api/manager-view?team_id=364759", timeout=3)
+        self.assertEqual(first.status, 200)
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base_url + "/api/manager-view?team_id=100001", timeout=3)
+
+        self.assertEqual(error.exception.code, 429)
+        self.assertEqual(self.lookup_calls, [364759])
+
+    def test_a_valid_refresh_token_is_exempt_from_the_rate_limit(self):
+        """Issue #125: a trusted script (e.g. the deadline reminder, looping over several teams
+        in one run) must not trip the visitor-tuned per-IP cooldown on its own repeat calls."""
+        first = urlopen(
+            Request(self.base_url + "/api/manager-view?team_id=364759", headers={"X-Refresh-Token": "test-token"}),
+            timeout=3,
+        )
+        second = urlopen(
+            Request(self.base_url + "/api/manager-view?team_id=100001", headers={"X-Refresh-Token": "test-token"}),
+            timeout=3,
+        )
+
+        self.assertEqual(first.status, 200)
+        self.assertEqual(second.status, 200)
+        self.assertEqual(self.lookup_calls, [364759, 100001])
+
+    def test_an_invalid_refresh_token_does_not_exempt_from_the_rate_limit(self):
+        first = urlopen(
+            Request(self.base_url + "/api/manager-view?team_id=364759", headers={"X-Refresh-Token": "wrong-token"}),
+            timeout=3,
+        )
+        self.assertEqual(first.status, 200)
+
+        with self.assertRaises(HTTPError) as error:
+            urlopen(
+                Request(self.base_url + "/api/manager-view?team_id=100001", headers={"X-Refresh-Token": "wrong-token"}),
+                timeout=3,
+            )
+
+        self.assertEqual(error.exception.code, 429)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

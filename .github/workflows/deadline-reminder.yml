@@ -34,6 +34,11 @@ jobs:
       FPL_INTEL_SMTP_PORT: ${{ secrets.FPL_INTEL_SMTP_PORT }}
       FPL_INTEL_SMTP_USER: ${{ secrets.FPL_INTEL_SMTP_USER }}
       FPL_INTEL_SMTP_PASSWORD: ${{ secrets.FPL_INTEL_SMTP_PASSWORD }}
+      # Issue #125: recommendations are now fetched live from the hosted dashboard's
+      # /api/manager-view and /api/shared-state, instead of computed locally from files this
+      # runner never had access to -- same two secrets scheduled-refresh.yml already uses.
+      FPL_INTEL_DASHBOARD_BASE_URL: ${{ secrets.FPL_INTEL_DASHBOARD_BASE_URL }}
+      FPL_INTEL_REFRESH_TOKEN: ${{ secrets.FPL_INTEL_REFRESH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout

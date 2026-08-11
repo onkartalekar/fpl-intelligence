@@ -27,6 +27,16 @@ pattern in `src/fpl_intel/news_signals.py`:
 - `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD`:
   SMTP credentials (e.g. Gmail's `smtp.gmail.com:587` with an app password). Not required when
   `--dry-run` is passed.
+- `FPL_INTEL_DASHBOARD_BASE_URL` (issue #125): the live dashboard's public origin, e.g.
+  `https://web-production-1b285.up.railway.app`. Required in both real and `--dry-run` runs --
+  each in-window team's recommendation is now fetched live from the hosted dashboard's
+  `/api/manager-view`/`/api/shared-state` (not computed locally; a GitHub Actions runner has no
+  shared filesystem with Railway to compute it from, see issues #105/#122's findings), and these
+  are plain reads, so `--dry-run` still makes them for a genuine preview.
+- `FPL_INTEL_REFRESH_TOKEN` (issue #125): the same operator secret `/api/refresh` already requires
+  (issue #27) -- reused here, not a new secret, to exempt this script's per-team
+  `/api/manager-view` calls from the visitor-tuned rate limit that would otherwise trip on the
+  second team in a loop of more than one.
 
 Log hygiene: this script never prints recipient email addresses or SMTP credentials to stdout or
 stderr during normal (non-dry-run) operation -- only generic status lines. `--dry-run` is the one
@@ -42,6 +52,8 @@ import os
 from pathlib import Path
 import smtplib
 import sys
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -49,9 +61,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from fpl_intel import profiles
 from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
 from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
-from fpl_intel.generation import resolve_artifact
-from fpl_intel.recommendations import build_gw_recommendations
-from fpl_intel.refresh import compute_manager_view
 
 
 DEFAULT_LEAD_HOURS = 3
@@ -75,6 +84,10 @@ SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SMTP_PASSWORD"
 # produces a plausible, well-formed link out of the box.
 DASHBOARD_BASE_URL_ENV_VAR = "FPL_INTEL_DASHBOARD_BASE_URL"
 _DEFAULT_DASHBOARD_BASE_URL = "http://localhost:8877"
+
+# Issue #125: the same operator secret `/api/refresh` already requires (issue #27) -- see
+# `_require_refresh_token`'s docstring for why this script now needs it too.
+REFRESH_TOKEN_ENV_VAR = "FPL_INTEL_REFRESH_TOKEN"
 
 _DIVIDER = "-" * 60
 
@@ -234,24 +247,41 @@ def load_bootstrap_and_fixtures(root):
         raise ConfigError(str(error)) from error
 
 
-def load_official_transfers(root):
-    """Read `official-transfers-latest.json`'s current confirmed-transfer list (issue #122).
-
-    Mirrors `server.py`'s `_default_team_view_action` exactly (`resolve_artifact` -- the
-    generation-aware helper, not a raw file read that could resolve the wrong generation -- with
-    the same `{"transfers": []}`-shaped fallback) so this script's recommendations are computed
-    with the same transfer-signal awareness the live dashboard's per-team lookup always has.
-    A missing file is not treated as `stale` the way a failed live bootstrap fetch is -- this is a
-    local artifact read, not a live-fetch failure, a different failure mode with a different
-    likely cause (an unrefreshed/fresh checkout, not an upstream outage) -- so it degrades
-    silently to `[]`, matching `server.py`'s own "should essentially never fire in practice,
-    defense-in-depth only" treatment of the identical file.
+def fetch_shared_state(base_url, timeout=30):
+    """GET /api/shared-state (issue #125): the shared dashboard state, including
+    `decision_center`'s generic recommendation used for the pre-Gameweek-2 email fallback below.
+    No token needed -- this returns exactly what a no-team_id dashboard visitor already sees,
+    publicly, since #120. Supersedes issue #122's `load_official_transfers`, which read
+    `official-transfers-latest.json` from the local filesystem -- correct for `server.py` (runs on
+    Railway, shares its volume) but never actually reachable from wherever this script runs (a
+    GitHub Actions runner has no shared filesystem with Railway at all, issue #105's same finding).
     """
-    transfers_path = resolve_artifact(root, "official-transfers-latest.json")
-    if not transfers_path.exists():
-        return []
-    transfers_artifact = json.loads(transfers_path.read_text(encoding="utf-8"))
-    return transfers_artifact.get("transfers", [])
+    request = Request(f"{base_url}/api/shared-state", method="GET")
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
+
+
+def fetch_manager_view(base_url, team_id, token, timeout=30):
+    """GET /api/manager-view?team_id=<id> (issue #125): the JSON equivalent of a `?team_id=`
+    dashboard lookup, already incorporating this team's saved profile overrides (issue #81)
+    server-side -- reading Railway's *real* `profiles.db`, unlike the local
+    `profiles.load_profile(root / "data" / "profiles.db", ...)` call this replaces, which could
+    never resolve real data on a GitHub Actions runner for the same reason `fetch_shared_state`'s
+    docstring names. The `X-Refresh-Token` header exempts this call from the visitor-tuned per-IP
+    rate limit (`server.py`'s `_rate_limit_exempt`) -- this script calls it once per in-window
+    team, in a tight loop, from one IP, which would otherwise trip the limiter on its own second
+    call.
+
+    Returns the parsed JSON body: `{"status": "ok"/"opted_out"/"error", "team_id": ...,
+    "manager": ..., "weekly_decisions": ...}` (the latter two present only when `status == "ok"`).
+    """
+    request = Request(
+        f"{base_url}/api/manager-view?team_id={team_id}",
+        method="GET",
+        headers={"X-Refresh-Token": token},
+    )
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
 
 
 def _format_deadline(deadline_iso):
@@ -439,6 +469,29 @@ def _dashboard_base_url():
     if raw and raw.strip():
         return raw.strip().rstrip("/")
     return _DEFAULT_DASHBOARD_BASE_URL
+
+
+def _require_dashboard_base_url():
+    """Issue #125: unlike `_dashboard_base_url()` above (a cosmetic email-footer link, safe to
+    fall back to a placeholder), `run()` now actually calls this URL to fetch live recommendations
+    -- there's no safe default for that, so it's required, with no fallback."""
+    raw = os.environ.get(DASHBOARD_BASE_URL_ENV_VAR)
+    if not raw or not raw.strip():
+        raise ConfigError(
+            f"{DASHBOARD_BASE_URL_ENV_VAR} is required (used to fetch live recommendations from "
+            "the hosted dashboard's /api/shared-state and /api/manager-view)."
+        )
+    return raw.strip().rstrip("/")
+
+
+def _require_refresh_token():
+    """Issue #125: the same operator secret `/api/refresh` already requires (issue #27) -- reused
+    here, not a new secret, to exempt `fetch_manager_view`'s per-team calls from the visitor-tuned
+    rate limit (see `fetch_manager_view`'s docstring)."""
+    raw = os.environ.get(REFRESH_TOKEN_ENV_VAR)
+    if not raw or not raw.strip():
+        raise ConfigError(f"{REFRESH_TOKEN_ENV_VAR} is required (used to fetch live recommendations).")
+    return raw.strip()
 
 
 def _esc(value):
@@ -869,11 +922,18 @@ def send_email(smtp_config, to_email, subject, text_body, html_body):
 
 
 
-def run(teams, dry_run, smtp_config, root=ROOT, now=None):
-    """Core run loop, factored out of `main` so tests can inject `now` and avoid argv/env parsing."""
+def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=None, refresh_token=None):
+    """Core run loop, factored out of `main` so tests can inject `now` and avoid argv/env parsing.
+
+    Issue #125: `dashboard_base_url`/`refresh_token` are only used for the two live fetches below
+    (`fetch_manager_view`/`fetch_shared_state`) -- the deadline-window resolution above still uses
+    this script's own independent live bootstrap fetch (`load_bootstrap_and_fixtures`), by design:
+    that's answering "how many hours until the next deadline," which can't be answered by asking
+    Railway's own (possibly-not-yet-refreshed) state, the same reasoning issue #101's scheduled-
+    refresh trigger already established for the identical question.
+    """
     now = now or datetime.now(timezone.utc)
     bootstrap, fixtures, stale = load_bootstrap_and_fixtures(root)
-    transfers = load_official_transfers(root)
     event = next_unfinished_event(bootstrap)
     if event is None or not event.get("deadline_time"):
         print("checked: no upcoming gameweek deadline found")
@@ -892,17 +952,26 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
         return 0
 
     in_window_teams = [team for team in teams if team["lead_hours"] in in_window_lead_hours]
-    generated_at = now.isoformat()
     decision_center = None
+    decision_center_fetch_attempted = False
     sent_count = 0
     for team in in_window_teams:
-        saved = profiles.load_profile(root / "data" / "profiles.db", team["team_id"])
-        manager_view = compute_manager_view(
-            bootstrap, fixtures, transfers, generated_at, team["team_id"],
-            confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
-            confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
-            draft_squad_ids=saved["draft_squad"] if saved else None,
-        )
+        try:
+            lookup = fetch_manager_view(dashboard_base_url, team["team_id"], refresh_token)
+        except (HTTPError, URLError, OSError, ValueError) as error:
+            print(
+                f"warning: manager-view fetch failed for team {team['team_id']} ({error!r}), skipping",
+                file=sys.stderr,
+            )
+            continue
+        lookup_status = lookup.get("status")
+        if lookup_status == "opted_out":
+            print(f"warning: team {team['team_id']} has opted out of lookups, skipping", file=sys.stderr)
+            continue
+        if lookup_status != "ok":
+            print(f"warning: manager-view lookup failed server-side for team {team['team_id']}, skipping", file=sys.stderr)
+            continue
+        manager_view = {"manager": lookup["manager"], "weekly_decisions": lookup["weekly_decisions"]}
         status = manager_view["weekly_decisions"].get("status")
         if status == "team_not_found":
             print(
@@ -910,10 +979,16 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
                 file=sys.stderr,
             )
             continue
-        if status == "waiting_for_gw2" and decision_center is None:
-            decision_center = build_gw_recommendations(
-                bootstrap, fixtures, generated_at=generated_at, recent_transfers=transfers,
-            )
+        if status == "waiting_for_gw2" and not decision_center_fetch_attempted:
+            decision_center_fetch_attempted = True
+            try:
+                decision_center = fetch_shared_state(dashboard_base_url).get("decision_center")
+            except (HTTPError, URLError, OSError, ValueError) as error:
+                print(
+                    f"warning: shared-state fetch failed ({error!r}), recommendations unavailable this run",
+                    file=sys.stderr,
+                )
+                decision_center = None
         hours_left = hours_until(deadline_iso, now)
         subject, body, html_body = compose_email(
             team, event_id, deadline_iso, hours_left, manager_view, decision_center, stale,
@@ -965,8 +1040,22 @@ def main(argv=None):
             print(f"Configuration error: {error}", file=sys.stderr)
             return 1
 
+    # Issue #125: required in both --dry-run and real runs -- unlike /api/refresh (a mutating
+    # action, unsafe to run idly), these are plain reads, so --dry-run still makes them for a
+    # genuine preview, exactly as it always has for the (now-replaced) local compute_manager_view
+    # call.
     try:
-        return run(teams, args.dry_run, smtp_config)
+        dashboard_base_url = _require_dashboard_base_url()
+        refresh_token = _require_refresh_token()
+    except ConfigError as error:
+        print(f"Configuration error: {error}", file=sys.stderr)
+        return 1
+
+    try:
+        return run(
+            teams, args.dry_run, smtp_config,
+            dashboard_base_url=dashboard_base_url, refresh_token=refresh_token,
+        )
     except ConfigError as error:
         print(f"Configuration error: {error}", file=sys.stderr)
         return 1
