@@ -113,6 +113,28 @@ _ALLOWED_REMINDER_LEAD_HOURS = {3, 12, 24}
 _ALLOWED_REMINDER_OPT_IN_KEYS = {"team_id", "action", "email", "lead_hours"}
 _REMINDER_OPT_IN_VALIDATION_MESSAGE = "Invalid reminder opt-in payload"
 _REMINDER_EMAIL_MAX_LENGTH = 254  # RFC 5321's practical maximum total address length
+# Issue #110: category is a fixed, closed option set, mirroring the profile form's `risk_profile`/
+# `goal` selects -- matches the Contact Us form's `#contact-category` <option>s.
+_ALLOWED_CONTACT_CATEGORIES = {"bug", "feature_request", "feedback", "other"}
+_ALLOWED_CONTACT_KEYS = {"category", "message", "reply_to"}
+# Generous for free-text feedback while comfortably fitting inside `do_POST`'s shared 4096-byte
+# `max_body` cap even after JSON escaping/multi-byte UTF-8 overhead (unlike `_REMINDER_EMAIL_MAX_
+# LENGTH` above, which bounds an address, this bounds a whole message body, so it stays well
+# under 4096 rather than up against it).
+_CONTACT_MESSAGE_MAX_LENGTH = 2000
+_CONTACT_VALIDATION_MESSAGE = "Invalid contact payload"
+# Issue #110: this is the app's one endpoint reachable by any visitor with nothing to identify
+# them by (no team ID, no PIN, no account) and a free-text body -- the shape most attractive to
+# automated spam. Stricter than the ordinary profile-write cooldown (`_PROFILE_WRITE_COOLDOWN_
+# SECONDS`, 5s) for that reason, but shorter than `_LOOKUP_OPT_OUT_COOLDOWN_SECONDS` (30s, guards
+# a PIN-guessing surface, a different threat model entirely) -- a genuine visitor submitting one
+# piece of feedback is not meaningfully inconvenienced by a 30s per-source cooldown, while it
+# still caps a single source's submission rate at a low, unautomatable-feeling pace.
+_CONTACT_COOLDOWN_SECONDS = 30
+# Issue #110's local-log durability backstop -- see `_append_contact_log`. Plain-text, gitignored
+# (matches this repo's existing blanket `*.log` .gitignore rule), append-only, never served over
+# HTTP by any route.
+_CONTACT_LOG_FILENAME = "contact-submissions.log"
 # Issue #28: bounds how long `ThreadingHTTPServer` lets one connection's thread block waiting on
 # a *socket read* (the request line, headers, or body arriving) -- set as `DashboardHandler.timeout`
 # below, the classic defense against a slow-loris connection that opens and then sends data very
@@ -222,6 +244,10 @@ def _default_team_view_action(root):
 
 def _profiles_db_path(root):
     return Path(root) / "data" / "profiles.db"
+
+
+def _contact_log_path(root):
+    return Path(root) / "data" / _CONTACT_LOG_FILENAME
 
 
 def _default_model_performance_action(root):
@@ -696,6 +722,129 @@ def _default_reminder_opt_in_action(root, send_email_action, confirm_send_limite
     return action
 
 
+class ContactValidationError(Exception):
+    """Raised when a submitted /api/contact payload fails validation."""
+
+
+def _validate_contact_payload(payload):
+    """Validate and normalize a /api/contact request body (issue #110).
+
+    Returns a cleaned dict with exactly `category`/`message`/`reply_to`, or raises
+    ContactValidationError with a fixed, input-free message -- same shape-only-error posture as
+    `_validate_profile_payload`/`_validate_reminder_opt_in_payload`: every error path returns
+    one fixed message, never reflecting any part of the submitted payload back to the caller.
+    """
+    if not isinstance(payload, dict):
+        raise ContactValidationError(_CONTACT_VALIDATION_MESSAGE)
+    if not set(payload.keys()) <= _ALLOWED_CONTACT_KEYS:
+        raise ContactValidationError(_CONTACT_VALIDATION_MESSAGE)
+
+    category = payload.get("category")
+    if category not in _ALLOWED_CONTACT_CATEGORIES:
+        raise ContactValidationError(_CONTACT_VALIDATION_MESSAGE)
+
+    message = payload.get("message")
+    if (
+        not isinstance(message, str) or not message.strip()
+        or len(message) > _CONTACT_MESSAGE_MAX_LENGTH
+    ):
+        raise ContactValidationError(_CONTACT_VALIDATION_MESSAGE)
+
+    reply_to = payload.get("reply_to")
+    if reply_to is None or reply_to == "":
+        cleaned_reply_to = None
+    else:
+        # Same "presence of '@', bounded length" rigor as `_validate_reminder_opt_in_payload`'s
+        # own `email` check above -- not attempting full RFC 5322 validation, and reusing the
+        # same length cap since this is the same kind of field (a visitor-supplied address).
+        if (
+            not isinstance(reply_to, str) or "@" not in reply_to or not reply_to.strip()
+            or len(reply_to) > _REMINDER_EMAIL_MAX_LENGTH
+        ):
+            raise ContactValidationError(_CONTACT_VALIDATION_MESSAGE)
+        cleaned_reply_to = reply_to.strip()
+
+    return {"category": category, "message": message.strip(), "reply_to": cleaned_reply_to}
+
+
+def _append_contact_log(root, cleaned, now):
+    """Append one JSON line to the local durability-backstop log (issue #110).
+
+    Deliberately a plain `open(path, "a")` append, not `fpl_data.atomic_write_text` -- that
+    helper does a whole-file atomic *replace* (write a temp file, fsync, `os.replace`), the right
+    tool for a file with one current value (e.g. `dashboard-state.json`), but the wrong one here:
+    applying it to a log meant to grow one line per submission over the life of a deployment
+    would mean reading and rewriting the entire file on every single submission, an unbounded and
+    ever-growing cost. A plain append avoids that, and POSIX guarantees a `write()` of a
+    line-sized payload to a file opened in append mode (`O_APPEND`) is atomic against
+    interleaving from other writers -- sufficient for "one JSON line per submission", which is
+    all this backstop needs to be (per the plan doc: no query capability, no review UI, just a
+    plain-text safety net an operator can `cat`/`grep` by hand).
+    """
+    path = _contact_log_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(
+        {
+            "timestamp": now,
+            "category": cleaned["category"],
+            "message": cleaned["message"],
+            "reply_to": cleaned["reply_to"],
+        },
+        ensure_ascii=False,
+    )
+    with open(path, "a", encoding="utf-8") as log_file:
+        log_file.write(line + "\n")
+
+
+def _default_contact_email_action():
+    """Build the default Contact Us notification-email sender, thin wrapper over
+    `reminder_confirmation` so `create_server` can inject a fake for tests without ever touching
+    real SMTP/`smtplib` -- same role as `_default_reminder_email_action` above.
+    """
+
+    def action(category, message, reply_to):
+        reminder_confirmation.send_contact_email(category, message, reply_to)
+
+    return action
+
+
+def _default_contact_action(root, send_email_action):
+    """Build the default /api/contact write action (issue #110).
+
+    Order matters, and is the entire point of the local-log durability backstop (see the plan
+    doc's "Decided" section): validate the payload, then *always* append it to the local log
+    first, and only after that succeeds attempt the operator-notification email -- never the
+    reverse, and the local-log write is never skipped or made conditional on the email send
+    succeeding. This is the deliberate mirror image of `_default_reminder_opt_in_action`'s
+    "enable" path above, which sends its email BEFORE writing to the DB (so a failed send never
+    leaves a dangling, un-deliverable confirmation token); here, an email failure must never
+    lose a visitor's already-submitted feedback, so the durable record is written first and the
+    notification is best-effort on top of it.
+
+    A `ReminderEmailError` from the email attempt is caught here, not re-raised: the visitor's
+    submission was already captured in the local log by this point, so from the visitor's
+    perspective this is still a successful submission -- surfacing a failure here would only
+    invite a confusing, unnecessary resubmission. The failure is still logged to stderr (matching
+    every other `except Exception as error: print(f"...{error!r}...", file=sys.stderr)` site in
+    this file) so the operator can notice a broken SMTP configuration via Railway's logs.
+    """
+
+    def action(payload):
+        cleaned = _validate_contact_payload(payload)
+        now = datetime.now(timezone.utc).isoformat()
+        _append_contact_log(root, cleaned, now)
+        try:
+            send_email_action(cleaned["category"], cleaned["message"], cleaned["reply_to"])
+        except reminder_confirmation.ReminderEmailError as error:
+            print(
+                f"Contact notification email failed (submission was still logged): {error!r}",
+                file=sys.stderr,
+            )
+        return {"status": "ok"}
+
+    return action
+
+
 def _render_reminder_confirm_page(ok, message):
     """A small, self-contained HTML confirmation page (issue #79) -- reached by clicking a link
     from an email client, not a fetch call, so unlike every other endpoint in this file it can't
@@ -780,6 +929,9 @@ def create_server(
     reminder_opt_in_action=None,
     reminder_email_action=None,
     refresh_limiter=None,
+    contact_action=None,
+    contact_email_action=None,
+    contact_limiter=None,
 ):
     """Create a dashboard server with a token-protected /api/refresh and open, rate-limited
     per-team write endpoints (issue #45's model).
@@ -796,6 +948,12 @@ def create_server(
     `/api/refresh` (issue #28) -- exists so tests can inject one built with `rate_limit.
     CooldownLimiter`'s `clock` parameter, the same way every other dependency here is injectable,
     without needing to wait out a real 90-second cooldown.
+
+    `contact_action`/`contact_email_action`/`contact_limiter` are the equivalent DI hooks for
+    `/api/contact` (issue #110), mirroring `reminder_opt_in_action`/`reminder_email_action`
+    above's roles for `/api/reminder-opt-in` -- `contact_limiter` in particular exists so tests
+    can inject a fake-clock `CooldownLimiter` for `/api/contact`'s own cooldown, same reasoning
+    as `refresh_limiter`.
     """
     root = Path(root).resolve()
     token = token or secrets.token_urlsafe(32)
@@ -832,6 +990,14 @@ def create_server(
     refresh_cooldown_limiter = refresh_limiter or CooldownLimiter(
         cooldown_seconds=_REFRESH_COOLDOWN_SECONDS
     )
+    # Issue #110: own per-source cooldown for the Contact Us endpoint -- same tier-2 write-safety
+    # posture as every other open endpoint's limiter above, a separate instance so submitting
+    # feedback doesn't compete with, e.g., a profile save's own cooldown window.
+    contact_write_limiter = contact_limiter or CooldownLimiter(
+        cooldown_seconds=_CONTACT_COOLDOWN_SECONDS
+    )
+    contact_send_email_action = contact_email_action or _default_contact_email_action()
+    contact_write_action = contact_action or _default_contact_action(root, contact_send_email_action)
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -1007,16 +1173,17 @@ def create_server(
             path = self.path.split("?", 1)[0]
             if path not in {
                 "/api/refresh", "/api/profile", "/api/draft-squad", "/api/lookup-opt-out",
-                "/api/reminder-opt-in",
+                "/api/reminder-opt-in", "/api/contact",
             }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
             # Issue #27: the shared bearer token now gates only /api/refresh, an operator-only
-            # action never shipped to the browser (see _serve_dashboard). The other four paths
-            # are open, rate-limited per-team writes by design (issue #45) -- each already has
-            # its own CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so
-            # re-gating them behind one shared secret was redundant and, once public, actively
-            # broken (the token was visible via view-source on every served page).
+            # action never shipped to the browser (see _serve_dashboard). The other five paths
+            # (issue #110 adds /api/contact to the original four) are open, rate-limited
+            # per-visitor writes by design (issue #45) -- each already has its own
+            # CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so re-gating
+            # them behind one shared secret was redundant and, once public, actively broken (the
+            # token was visible via view-source on every served page).
             if path == "/api/refresh":
                 if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
                     self._json(403, {"status": "error", "message": "Invalid refresh token"})
@@ -1042,8 +1209,10 @@ def create_server(
                 self._handle_draft_squad(body)
             elif path == "/api/lookup-opt-out":
                 self._handle_lookup_opt_out(body)
-            else:
+            elif path == "/api/reminder-opt-in":
                 self._handle_reminder_opt_in(body)
+            else:
+                self._handle_contact(body)
 
         def _handle_refresh(self):
             # Issue #28: keyed on a single constant, deliberately *not* `self.client_address[0]`
@@ -1196,6 +1365,35 @@ def create_server(
             except Exception as error:
                 print(f"Reminder opt-in update failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Reminder opt-in update failed"})
+
+        def _handle_contact(self, body):
+            # Open endpoint (issue #110, following issue #45's model, same as the other four
+            # open write endpoints above) -- no X-Refresh-Token, own per-source CooldownLimiter
+            # guards against automated abuse.
+            if not contact_write_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many messages sent. Try again shortly."})
+                return
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": _CONTACT_VALIDATION_MESSAGE})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": _CONTACT_VALIDATION_MESSAGE})
+                return
+            try:
+                contact_write_action(payload)
+                # Deliberately always this same success response once validation and the local
+                # log write succeed, regardless of whether the notification email itself
+                # succeeded -- see `_default_contact_action`'s docstring for the full reasoning:
+                # the visitor's submission is durably captured either way, so a failed email is
+                # never surfaced here as a reason to resubmit.
+                self._json(200, {"status": "ok", "message": "Thanks -- your message has been received."})
+            except ContactValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+            except Exception as error:
+                print(f"Contact submission failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Could not process your message. Try again shortly."})
 
         def _handle_reminder_confirm(self, query_string):
             # Defense-in-depth per-source cooldown (see _REMINDER_CONFIRM_COOLDOWN_SECONDS's
