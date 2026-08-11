@@ -506,7 +506,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   letter-spacing: .06em;
   margin: 0 0 4px;
 }
-.field input,.field select {
+.field input,.field select,.field textarea {
   width: 100%;
   min-height: 44px;
   background: var(--panel2);
@@ -514,6 +514,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   color: var(--text);
   border-radius: 8px;
   padding: 9px 10px;
+  font: inherit;
+}
+.field textarea {
+  min-height: 120px;
+  resize: vertical;
 }
 .more-filters {
   margin-top: 9px;
