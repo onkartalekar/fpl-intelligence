@@ -229,9 +229,6 @@ def check_profile_endpoint(base_url):
         body={
             "team_id": SYNTHETIC_TEAM_ID_PROFILE, "timezone": "America/New_York",
             "risk_profile": "balanced",
-            # TODO(#117): drop once issue #117's goal-field removal (PR #130) merges -- as of
-            # this script's own merge base, `goal` is still a required /api/profile key.
-            "goal": "top_50k",
             "confirmed_free_transfers": None,
             "confirmed_free_transfers_event": None,
         },
