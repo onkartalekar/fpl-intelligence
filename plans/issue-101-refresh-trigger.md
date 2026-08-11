@@ -65,44 +65,91 @@ merits. The issue itself asks to revisit this explicitly now that "on-demand" in
 keeping `/api/refresh` operator-only-and-token-gated conflicts with also triggering it on a
 schedule from a trusted, secret-holding caller.
 
-## Ask 1: scheduled/automatic refresh -- candidates
+## Ask 1: scheduled/automatic refresh
 
-**(A) Railway cron service sharing the volume.** Would require a second Railway service in the
-same project on a cron schedule. Since ask 1 doesn't need volume access at all (see above), this
-adds real infrastructure (a second service to configure, monitor, and pay for) for no capability
-a simple HTTP call doesn't already have. Not worth it.
+### Revised requirement: deadline-relative, not flat-interval
 
-**(B) A new scheduled GitHub Actions workflow calling `POST /api/refresh`.** Same shape as
-`.github/workflows/deadline-reminder.yml`: `on: schedule`, a `curl`/small script hitting the
-public Railway URL with `FPL_INTEL_REFRESH_TOKEN` from a GitHub secret. Zero new infrastructure,
-reuses a pattern already proven in this exact repo, matches `SPECIFICATION.md`'s
-externally-triggered-only posture, and sidesteps #105's constraint entirely since it's an HTTP
-call, not a file read. GitHub's schedule cron is best-effort (documented delays of minutes under
-load) -- fine here, since a refresh cadence has no deadline-precision requirement the way #55's
-reminder does.
+The user wants fresh data at four specific checkpoints relative to each gameweek's own deadline
+-- T-2d, T-1d, T-12h, T-3h -- not a flat "every N hours." This is a materially different
+scheduling shape than a plain interval: the deadline moves every gameweek, so "am I at T-3h right
+now" can't be answered by a fixed clock time, it needs to be computed against the live deadline
+each time the check runs.
 
-**(C) A third-party scheduler (cron-job.org, EasyCron, etc.) hitting the same endpoint.** Same
-mechanism as (B) with a real third-party dependency and no offsetting benefit -- (B) is already
-free, in-repo, and battle-tested.
+**This exact problem is already solved in this repo**, for the same reason, one lead-time at a
+time: `scripts/send_deadline_reminder.py`'s `in_send_window(deadline_iso, now, lead_hours)`
+(`send_deadline_reminder.py:266-269`) is a **stateless**, single-tick window check -- true for
+exactly one hourly tick per gameweek, `(lead_hours - 1, lead_hours]` hours out. It already
+supports multiple simultaneous lead times per run (`distinct_lead_hours`,
+`send_deadline_reminder.py:899-903`, since different teams can have different
+`reminder_lead_hours`). And critically, it resolves the deadline itself via a **live, unauthenticated
+`fetch_bootstrap()` call** (`load_bootstrap_and_fixtures`, `send_deadline_reminder.py:225-244`,
+with a cached-file fallback if that live call fails) -- so the caller never needs to trust
+Railway's own (possibly stale) data to know when the next deadline is. The whole "am I in a
+trigger window" decision is self-contained and requires nothing from the app being refreshed.
 
-### Recommendation: (B).
+This directly resolves the GH-Actions-vs-Railway-cron question, addressed below.
 
-New workflow (not folded into `deadline-reminder.yml` -- different purpose, different cost
-profile, keep them independently schedulable/disableable), calling `POST /api/refresh` with
-`FPL_INTEL_REFRESH_TOKEN` as a repo secret, on a coarser cadence than the reminder's hourly check
--- proposing every 4 hours as a starting point (frequent enough to catch same-day price changes
-and injury news without meaningfully increasing load on FPL's/the transfer sources' APIs, given
-each run costs a real subprocess up to 5 minutes). This is a tunable default, not a researched
-optimum -- easy to change once real usage shows whether 4h is too eager or too lax.
+### Candidates
+
+**(A) Railway cron service sharing the volume.** To hit deadline-relative windows, this service
+would still need to independently fetch live bootstrap data and run the same window-check logic
+above -- volume access buys it nothing, since the deadline-resolution step doesn't touch the
+volume either. So (A) either duplicates (B)'s exact mechanism on a second, separately-billed
+Railway service for no benefit, or -- if it instead computed the check in-process on the same box
+as the dashboard server -- reintroduces precisely the "in-process scheduler thread" pattern
+`IMPLEMENTATION_PLAN.md` already declined for issue #55, breaching `SPECIFICATION.md`'s
+never-self-triggering posture and tying trigger reliability to the dashboard process's own uptime
+(a crash or redeploy near a window could silently miss it, where an independent GitHub Actions
+run cannot).
+
+**(B) A new scheduled GitHub Actions workflow, hourly, reusing `in_send_window`'s window-check
+logic for four lead times (48, 24, 12, 3).** Same hourly cadence `deadline-reminder.yml` already
+runs at (`cron: "0 * * * *"`), for the same reason: hourly ticks are the natural resolution for a
+`(lead_hours - 1, lead_hours]`-style window check. Each tick: fetch live bootstrap (cheap, public,
+no auth), resolve the next deadline, check whether now falls in any of the four windows, and if
+so call `POST /api/refresh` with `FPL_INTEL_REFRESH_TOKEN`. Zero new infrastructure, reuses an
+exact in-repo pattern, sidesteps #105's volume-access wall entirely (the window check needs no
+Railway data at all, and the refresh trigger itself is just one HTTP call).
+
+**(C) A third-party scheduler.** Same objection as before -- a real third-party dependency
+buying nothing (B) doesn't already provide for free.
+
+### Recommendation: (B), decisively over Railway cron.
+
+Two implementation options worth deciding between, not four-way-open:
+
+1. **A new standalone script** (e.g. `scripts/trigger_scheduled_refresh.py`) with its own copy of
+   the window-check logic, run by a new workflow (e.g.
+   `.github/workflows/scheduled-refresh.yml`).
+2. **Factor `hours_until`/`in_send_window`/`next_unfinished_event`/`load_bootstrap_and_fixtures`
+   out of `send_deadline_reminder.py`** into a small shared module (e.g.
+   `fpl_intel/deadline_windows.py`), imported by both the reminder script and the new trigger
+   script. Avoids duplicating the window-check logic in two places that would otherwise need to
+   stay in sync by hand.
+
+Leaning toward (2) -- it's a small, mechanical extraction (four pure functions, no behavior
+change to the existing reminder), and duplicating deadline-window arithmetic across two scripts
+is exactly the kind of drift that's cheap to prevent now and annoying to catch later. Worth
+confirming before implementation, not a blocker to the overall recommendation.
+
+Either way: a new workflow (not folded into `deadline-reminder.yml` -- different purpose,
+independently schedulable/disableable), `on: schedule: cron: "0 * * * *"`, calling `POST
+/api/refresh` with `FPL_INTEL_REFRESH_TOKEN` as a repo secret whenever the live-resolved deadline
+falls in the T-2d/T-1d/T-12h/T-3h window. No new dedup-marker layer is needed the way the
+reminder's has one (`REMINDER_LAST_EVENT_ID`) -- that marker exists to stop a human from being
+emailed twice, a much worse failure than a refresh firing twice, and the existing 90-second
+`_REFRESH_COOLDOWN_SECONDS` global cooldown on `/api/refresh` itself already absorbs any
+duplicate call within the same hour for free.
 
 ## Ask 2: a safe, self-serve visitor-triggered refresh -- findings and recommendation
 
-Weighed against what ask 1 actually leaves unsolved: once a scheduled refresh runs every few
-hours, the shared-data staleness window this issue opened with shrinks to "at most ~4 hours old,"
+Weighed against what ask 1 actually leaves unsolved: once a deadline-relative scheduled refresh
+runs at T-2d/T-1d/T-12h/T-3h, the shared-data staleness window this issue opened with shrinks to
+"at most 12 hours old at any point, and 3 hours old right before the moment it matters most,"
 and per-team recommendations were never stale to begin with (see above). The remaining case ask 2
-would serve is narrow: a visitor wants shared market data that's less than 4 hours old, right now,
-badly enough to justify exposing a real, expensive, external-API-calling operation to public
-unauthenticated traffic (global-cooldown-gated or not).
+would serve is narrower still: a visitor wants shared market data fresher than the nearest
+scheduled checkpoint, right now, badly enough to justify exposing a real, expensive,
+external-API-calling operation to public unauthenticated traffic (global-cooldown-gated or not).
 
 Building it would mean real new design surface the issue itself flags as unresolved: a new
 open endpoint, a much longer global cooldown than the operator path's 90s (public traffic changes
@@ -113,10 +160,10 @@ closes the gap that motivated it.
 
 **Recommendation: decline, given ask 1 ships.** If (B) is built, ask 2 isn't solving a problem
 that still exists at meaningful scale -- it would be new public attack surface on an expensive
-endpoint, justified only by shrinking an already-small staleness window further. Worth building
-later only if real usage shows 4-hourly staleness is genuinely a problem for visitors near a
-deadline -- at that point, tightening ask 1's cadence (or scheduling extra runs around gameweek
-deadlines specifically) is a smaller, safer change than opening a new public endpoint.
+endpoint, justified only by shrinking an already-small staleness window further, and the window
+is already narrowest exactly when it matters most (T-3h). Worth building later only if real usage
+shows the deadline-relative cadence is genuinely insufficient -- at that point, adding a fifth
+checkpoint (e.g. T-1h) is a smaller, safer change than opening a new public endpoint.
 
 ### If declined: text for `IMPLEMENTATION_PLAN.md`
 
@@ -127,12 +174,13 @@ A new, unauthenticated `POST /api/refresh-request` endpoint (rate-limited by a l
 cooldown, coexisting with the existing `refresh_lock`) was considered as a safe way for any
 visitor to request a shared-data refresh without reintroducing #28's leaked-token problem.
 Declined once issue #101's automatic scheduled refresh (a GitHub Actions workflow calling the
-existing operator-only `/api/refresh` every 4 hours) shipped: per-team decision-center output was
-already always computed live (#46) and never subject to staleness, so the only thing a self-serve
-trigger would freshen is the shared market data underneath it -- and a 4-hourly scheduled refresh
-already bounds that staleness to a small window. Building a new public endpoint that calls a real,
+existing operator-only `/api/refresh` at T-2d/T-1d/T-12h/T-3h before each gameweek deadline)
+shipped: per-team decision-center output was already always computed live (#46) and never subject
+to staleness, so the only thing a self-serve trigger would freshen is the shared market data
+underneath it -- and the deadline-relative schedule already bounds that staleness to at most 3
+hours at the moment it matters most. Building a new public endpoint that calls a real,
 external-API-hitting, up-to-5-minute operation to shrink an already-small window further wasn't
-worth the added attack surface. Revisit if real usage shows the scheduled cadence is genuinely
-insufficient near gameweek deadlines specifically -- tightening the schedule is the smaller change
-to reach for first. See `plans/issue-101-refresh-trigger.md`.
+worth the added attack surface. Revisit if real usage shows the scheduled checkpoints are
+genuinely insufficient -- adding a finer-grained checkpoint is the smaller change to reach for
+first. See `plans/issue-101-refresh-trigger.md`.
 ```
