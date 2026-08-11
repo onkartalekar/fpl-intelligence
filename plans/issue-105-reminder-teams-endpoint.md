@@ -101,6 +101,15 @@ I'd lean towards the dedicated token, given the issue's own emphasis that this i
 (strictly worse than any single leaked token exposing one team's already-public lookup), but this
 is the kind of call that's genuinely the user's to make, not mine to default on.
 
+## Decided (2026-08-11)
+
+**Dedicated token.** A new `FPL_INTEL_REMINDER_TEAMS_TOKEN` env var/secret gates
+`/api/reminder-teams` unconditionally -- distinct from `FPL_INTEL_REFRESH_TOKEN`, so a leak of
+either token compromises only what that token actually gates (refresh-triggering +
+`/api/manager-view` rate-limit exemption on one side, the bulk opted-in roster on the other), never
+both at once. Provisioned on Railway and added to `deadline-reminder.yml`'s existing secrets list
+alongside the two #125 already added.
+
 ## Not in scope
 
 - Any change to `collect_teams()`'s union-by-`team_id` behavior with `FPL_INTEL_REMINDER_TEAMS`, or

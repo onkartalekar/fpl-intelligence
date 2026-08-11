@@ -6,6 +6,9 @@ opens the browser, refresh token is a fresh random-per-process value nobody can 
 band. Hosted use (Railway injects `PORT`) binds `0.0.0.0`, skips opening a browser, and reads
 `FPL_INTEL_REFRESH_TOKEN`/`FPL_INTEL_ALLOWED_ORIGIN` from the environment so an operator can
 actually use `/api/refresh` and so the Host/Origin allowlist matches the real deployed hostname.
+Also reads `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105) -- a separate secret gating
+`/api/reminder-teams`, deliberately not `FPL_INTEL_REFRESH_TOKEN` reused, so a leak of either
+token compromises only what that token actually gates (see `server.py`'s `create_server` docstring).
 """
 
 import argparse
@@ -24,6 +27,7 @@ from fpl_intel.server import create_server
 DEFAULT_PORT = 8877
 PORT_ENV_VAR = "PORT"  # Railway's own convention -- injected automatically, no setup needed.
 REFRESH_TOKEN_ENV_VAR = "FPL_INTEL_REFRESH_TOKEN"
+REMINDER_TEAMS_TOKEN_ENV_VAR = "FPL_INTEL_REMINDER_TEAMS_TOKEN"
 ALLOWED_ORIGIN_ENV_VAR = "FPL_INTEL_ALLOWED_ORIGIN"
 
 # Files that legitimately live at `data/<filename>` (read there by `refresh.py`/`server.py`
@@ -92,6 +96,7 @@ def resolve_server_config(env, cli_port=None):
         "host": "0.0.0.0" if hosted else "127.0.0.1",
         "port": port,
         "token": env.get(REFRESH_TOKEN_ENV_VAR),
+        "reminder_teams_token": env.get(REMINDER_TEAMS_TOKEN_ENV_VAR),
         "allowed_origin": env.get(ALLOWED_ORIGIN_ENV_VAR),
     }
 
@@ -109,6 +114,7 @@ def main():
         host=config["host"],
         port=config["port"],
         token=config["token"],
+        reminder_teams_token=config["reminder_teams_token"],
         allowed_origin=config["allowed_origin"],
     )
     bound_host, bound_port = config["host"], server.server_port

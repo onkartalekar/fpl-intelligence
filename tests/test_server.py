@@ -884,6 +884,105 @@ class ManagerViewApiTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 429)
 
 
+def _enable_reminder(db_path, team_id, email, lead_hours, now):
+    """Drive a team to a genuine `reminder_status='enabled'` row via #79's real write path
+    (`set_reminder_pending` then `confirm_reminder`), rather than hand-writing SQL that bypasses
+    it -- exercises the real schema and the real column semantics `_handle_reminder_teams`
+    depends on."""
+    set_reminder_pending(
+        db_path, team_id, pending_email=email, lead_hours=lead_hours,
+        token_hash="deadbeef", expires_at="2099-01-01T00:00:00Z", now=now,
+    )
+    result = confirm_reminder(db_path, team_id, now)
+    assert result is not None, "confirm_reminder unexpectedly found nothing pending"
+    return result
+
+
+class ReminderTeamsApiTests(unittest.TestCase):
+    """Issue #105: GET /api/reminder-teams -- the opted-in reminder roster, for GitHub-Actions-
+    hosted scripts that can't reach Railway's local profiles.db. Unlike /api/manager-view, there
+    is no safe unauthenticated response at all (real PII in bulk), gated by its own dedicated
+    reminder_teams_token, never token (/api/refresh's)."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "profiles.db"
+        self.now = "2026-08-11T12:00:00Z"
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            reminder_teams_token="reminder-secret",
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _get(self, token="reminder-secret"):
+        headers = {"X-Reminder-Teams-Token": token} if token is not None else {}
+        return urlopen(Request(self.base_url + "/api/reminder-teams", headers=headers), timeout=3)
+
+    def test_missing_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._get(token=None)
+
+        self.assertEqual(error.exception.code, 403)
+
+    def test_invalid_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._get(token="wrong-token")
+
+        self.assertEqual(error.exception.code, 403)
+
+    def test_a_valid_refresh_token_does_not_substitute_for_the_reminder_teams_token(self):
+        """This endpoint's PII exposure is strictly greater than /api/manager-view's -- the
+        ordinary operator refresh token must not double as a bypass for it."""
+        with self.assertRaises(HTTPError) as error:
+            urlopen(
+                Request(self.base_url + "/api/reminder-teams", headers={"X-Refresh-Token": "test-token"}),
+                timeout=3,
+            )
+
+        self.assertEqual(error.exception.code, 403)
+
+    def test_returns_only_enabled_rows_with_email_and_lead_hours(self):
+        # Never decided: a plain profile save never touches reminder_status, so it stays NULL.
+        save_profile(self.db_path, 100, "America/New_York", "balanced", None, None, self.now, "top_50k")
+        # Pending: confirmation email sent, link not yet clicked.
+        set_reminder_pending(
+            self.db_path, 200, pending_email="pending@example.com", lead_hours=3,
+            token_hash="hash", expires_at="2099-01-01T00:00:00Z", now=self.now,
+        )
+        # Enabled: the only row that should surface.
+        _enable_reminder(self.db_path, 300, "enabled@example.com", 6, self.now)
+
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "teams": [{"team_id": 300, "email": "enabled@example.com", "lead_hours": 6}]})
+
+    def test_no_profiles_at_all_yields_an_empty_list(self):
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {"status": "ok", "teams": []})
+
+    def test_is_not_rate_limited(self):
+        """Unlike /api/manager-view, this endpoint has no unauthenticated path at all to rate-
+        limit -- a valid token is already the full gate, so repeat calls with it are never
+        throttled."""
+        for _ in range(5):
+            response = self._get()
+            self.assertEqual(response.status, 200)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

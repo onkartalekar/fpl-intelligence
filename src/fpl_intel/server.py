@@ -59,6 +59,11 @@ _REFRESH_COOLDOWN_SECONDS = 90
 # per-source -- see the comment at its point of use in `_handle_refresh` for the full reasoning.
 _REFRESH_COOLDOWN_KEY = "refresh"
 _TEAM_LOOKUP_COOLDOWN_SECONDS = 15
+# Issue #105: same fallback `send_deadline_reminder.py`'s old `load_teams_from_profiles_db` used
+# for `/api/reminder-teams`'s `lead_hours` field -- `reminder_lead_hours` is always set alongside
+# `reminder_status='enabled'` by issue #79's write path, so this is defensive, not expected to
+# trigger in practice.
+_DEFAULT_REMINDER_LEAD_HOURS = 3
 _PROFILE_WRITE_COOLDOWN_SECONDS = 5
 # Deliberately stricter than the ordinary profile-write cooldown above -- this endpoint is the
 # one PIN-guessing surface in the app (issue #62), so a would-be attacker gets far fewer
@@ -918,6 +923,7 @@ def create_server(
     host="127.0.0.1",
     port=8877,
     token=None,
+    reminder_teams_token=None,
     allowed_origin=None,
     refresh_action=None,
     profile_action=None,
@@ -954,9 +960,18 @@ def create_server(
     above's roles for `/api/reminder-opt-in` -- `contact_limiter` in particular exists so tests
     can inject a fake-clock `CooldownLimiter` for `/api/contact`'s own cooldown, same reasoning
     as `refresh_limiter`.
+
+    `reminder_teams_token` (issue #105) gates `/api/reminder-teams` -- a **separate** secret from
+    `token`, not another use of the existing operator token. That endpoint returns every opted-in
+    manager's email address in bulk, a strictly more sensitive shape of data than anything `token`
+    already gates (triggering a refresh, or exempting one already-public per-team lookup from rate
+    limiting) -- a leaked `token` must not also hand over the whole reminder roster. Defaults to a
+    fresh random-per-process value, same pattern as `token` itself, so the endpoint is never
+    reachable by anyone who wasn't handed the real configured value.
     """
     root = Path(root).resolve()
     token = token or secrets.token_urlsafe(32)
+    reminder_teams_token = reminder_teams_token or secrets.token_urlsafe(32)
     action = refresh_action or (lambda: _default_refresh_action(root))
     profile_write_action = profile_action or (lambda payload: _default_profile_action(root, payload))
     lookup_action = team_view_action or _default_team_view_action(root)
@@ -1122,6 +1137,38 @@ def create_server(
                 {"status": "ok", "team_id": team_id, "manager": manager, "weekly_decisions": weekly_decisions},
             )
 
+        def _handle_reminder_teams(self):
+            """Issue #105: JSON roster of every team with a confirmed, live reminder opt-in
+            (`reminder_status == 'enabled'`, non-empty `email`), read straight from `profiles.db`
+            by the one process that already has legitimate access to it -- the server-side
+            equivalent of `send_deadline_reminder.py`'s old `load_teams_from_profiles_db`, which
+            could only ever work when run on Railway itself, never on a GitHub Actions runner
+            with no shared filesystem (same root cause as #101/#122/#125).
+
+            Unlike `/api/manager-view`, there is no safe unauthenticated response here at all --
+            this returns real PII (every opted-in manager's email) in bulk, not one already-public
+            team's lookup result -- so a missing/invalid token always 403s outright rather than
+            falling through to a rate-limited public path. Gated by its own dedicated
+            `reminder_teams_token`, deliberately not `token` (`/api/refresh`'s), so a leak of
+            either secret compromises only what that secret actually gates."""
+            if not secrets.compare_digest(
+                self.headers.get("X-Reminder-Teams-Token", ""), reminder_teams_token
+            ):
+                self._json(403, {"status": "error", "message": "Invalid reminder-teams token"})
+                return
+            db_path = _profiles_db_path(root)
+            teams = []
+            for team_id in profiles.list_team_ids(db_path):
+                profile = profiles.load_profile(db_path, team_id)
+                if profile is None or profile.get("reminder_status") != "enabled":
+                    continue
+                email = profile.get("email")
+                if not email:
+                    continue
+                lead_hours = profile.get("reminder_lead_hours") or _DEFAULT_REMINDER_LEAD_HOURS
+                teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
+            self._json(200, {"status": "ok", "teams": teams})
+
         def _serve_dashboard(self, query_string):
             query_team_id = _parse_team_id(query_string)
             # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
@@ -1248,6 +1295,9 @@ def create_server(
                 return
             if path == "/api/manager-view":
                 self._handle_manager_view(split_path.query)
+                return
+            if path == "/api/reminder-teams":
+                self._handle_reminder_teams()
                 return
             if path == "/favicon.ico":
                 self.send_response(204)
