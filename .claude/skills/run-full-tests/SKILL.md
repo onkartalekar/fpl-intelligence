@@ -5,7 +5,7 @@ description: Run this repo's full test suite the standard way and handle the pre
 
 # run-full-tests
 
-Always run the **full** suite before considering an implementation done — not just the test file for the module you touched.
+Always run the **full** suite before considering an implementation done — not just the test file for the module you touched. The one narrow exception (a doc-only diff, every changed file `.md`) is defined in [[ship-issue]] step 4, not here — don't invent other exceptions by analogy.
 
 ```bash
 PYTHONPATH=src /Users/onkartalekar/.local/bin/python3.11 -m unittest discover -s tests -p "test_*.py"

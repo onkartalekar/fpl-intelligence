@@ -23,7 +23,8 @@ Input: a single GitHub issue number, e.g. `/ship-issue 42`. Nothing else should 
 - Add or extend regression tests that would actually have caught the bug/would lock in the new behavior.
 
 ## 4. Test
-- Run the full suite per [[run-full-tests]]. It must pass before continuing. Do not skip this because "it's a small change."
+- Run the full suite per [[run-full-tests]]. It must pass before continuing. Do not skip this because "it's a small change" — that's a judgment call, not a rule, and it's exactly the rationalization this line exists to block.
+- **Narrow, mechanical exception:** check `git diff --name-only` (or the base branch's equivalent) against the current diff. If every changed file is documentation — `.md` files, nothing else — the suite is skippable, because a doc-only diff cannot regress runtime behavior and the run would prove nothing for it. This is a file-extension check, not a vibe: the moment a single non-`.md` file is touched (`.py`, `.js`, `.css`, anything under `config/`, `data-seed/`, `scripts/`, etc.), the exception no longer applies and the full suite runs as normal. State explicitly in the report which case applied and why (e.g. "docs-only diff, `git diff --name-only` shows only `.md` files, suite skipped").
 - If this implementation is delegated to a spawned Agent rather than done directly: that agent's prompt must state plainly that there is no external notifier for its own Bash commands, and that the suite has to run as a blocking foreground call within one tool call, followed straight through to the remaining steps without stopping to "wait." Spell this out explicitly in the prompt every time — agents in this repo's history have repeatedly ended their turn believing a notification would resume them, and it doesn't, at that level.
 
 ## 5. Verify live
