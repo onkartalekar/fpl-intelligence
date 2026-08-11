@@ -89,6 +89,50 @@ this warrants its own focused pass rather than folding into this already-long se
 for your decision on how to proceed rather than guessing at the remaining specifics and shipping
 something under-verified.
 
+## Decided and implemented (2026-08-11)
+
+Resumed in a fresh session, on top of #105/#125 (both merged since this doc was first written).
+
+- **New function `archive_team_forecast`** (`model_performance.py`), not a generalization of
+  `archive_forecast` -- confirmed the two decision shapes really can't share one function (see
+  the structural finding above). Gated on `weekly_decisions.status == "active"`, key
+  `f"gw{event}:{lead_hours}"`, first-checkpoint-wins, stores player IDs not full objects.
+- **New store shape**: `store["team_forecasts"] = {team_id: {checkpoint_key: {...}}}`, mirroring
+  `manager_picks`' own `{team_id: {...}}` shape (issue #64's precedent), left entirely separate
+  from `forecasts`/`champion_forecasts` (`archive_forecast`'s own store keys, untouched).
+- **New write endpoint `POST /api/archive-team-forecast`**: computes `weekly_decisions` via the
+  exact same `_resolve_team_lookup` helper `/api/manager-view` uses (so this can never drift from
+  what a visitor's own dashboard or a script's `/api/manager-view` call would see), then writes
+  under `project_refresh_lock` -- the same cross-process file lock `/api/refresh`'s subprocess
+  acquires via `refresh_project`, preventing a concurrent full refresh from silently clobbering
+  this endpoint's incremental update (or vice versa). Gated by the same `X-Refresh-Token`
+  `/api/refresh` already requires -- not a dedicated token like #105's `/api/reminder-teams`,
+  since this endpoint exposes no PII at all (only player IDs and recommendation metadata),
+  carrying the same sensitivity as `/api/refresh` itself.
+- **New read endpoint `GET /api/registered-teams`**: found during implementation that "every
+  registered team" (this issue's own scope) has no existing way to be discovered from a
+  GitHub-Actions-hosted script -- `/api/reminder-teams` only covers the reminder-opted-in subset.
+  Bare team IDs only, no PII, gated the same way as `/api/archive-team-forecast`, capped at
+  `_REGISTERED_TEAMS_CAP = 25` (reusing `refresh.py`'s existing `_MANAGER_PICKS_TEAM_CAP` value,
+  per this issue's own "worth sizing against that precedent" note).
+- **New script `scripts/archive_team_forecasts.py`**: checks all three checkpoints
+  (`CHECKPOINT_LEAD_HOURS = (3, 12, 24)`) via `deadline_windows.in_send_window`, fetches the
+  registered-team list once per matching tick, calls the archive endpoint once per team per
+  matching checkpoint. `--dry-run` requires no env vars at all (matching
+  `trigger_scheduled_refresh.py`'s exemption pattern, not `send_deadline_reminder.py`'s
+  unconditional one -- this script's dry-run has nothing that needs a live fetch to preview).
+- **Reuses `scheduled-refresh.yml`'s existing hourly tick** (a second step in the same job,
+  `if: always()` so one script's failure never silently skips the other) rather than a new
+  workflow with its own `schedule:`, per this issue's own dependency note.
+
+Verified live end-to-end against a real running server with a real saved draft squad (not just
+mocked tests): confirmed `/api/registered-teams` returns the real team, `/api/archive-team-
+forecast` correctly no-ops for a `waiting_for_gw2` team, correctly archives a real `active`
+decision with real player IDs/formation/captain once a draft squad made the decision real, is
+idempotent on a repeat call for the same checkpoint, and archives independently for a different
+checkpoint -- and confirmed the write lands exactly where `resolve_artifact` resolves for every
+future reader (the current generation directory, not a stale flat-file copy).
+
 ## Not in scope
 
 - Issue #65's ML minutes shadow model -- confirmed unaffected, entirely offline.

@@ -15,6 +15,13 @@ name: Scheduled refresh
 # is best-effort (documented delays of minutes, occasionally longer, under load); the hourly
 # cadence against checkpoints hours apart comfortably absorbs that, exactly like
 # deadline-reminder.yml already does for its own hourly tick.
+#
+# Issue #102: also runs scripts/archive_team_forecasts.py on this same hourly tick, checked
+# against its own independent set of checkpoints (T-24h/T-12h/T-3h) -- deliberately folded into
+# this workflow rather than given its own schedule/workflow, per #102's own dependency note: it
+# reuses this tick's cadence rather than introducing a second independent scheduler. Runs
+# regardless of the refresh step's own outcome (`if: always()`) -- the two are unrelated actions
+# with unrelated failure modes, and one failing must never silently skip the other.
 
 on:
   schedule:
@@ -54,3 +61,15 @@ jobs:
             DRY_RUN_FLAG=""
           fi
           PYTHONPATH=src python3 scripts/trigger_scheduled_refresh.py $DRY_RUN_FLAG
+
+      - name: Check windows and archive per-team forecasts (issue #102)
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            DRY_RUN_FLAG=""
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          else
+            DRY_RUN_FLAG=""
+          fi
+          PYTHONPATH=src python3 scripts/archive_team_forecasts.py $DRY_RUN_FLAG

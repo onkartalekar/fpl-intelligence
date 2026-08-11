@@ -149,6 +149,82 @@ def archive_forecast(store, decision, deadline_time=None):
     return store
 
 
+def archive_team_forecast(store, team_id, weekly_decisions, lead_hours):
+    """Archive one team's real weekly transfer/captaincy decision at one deadline checkpoint
+    (issue #102).
+
+    Deliberately a separate function from `archive_forecast` above, not a generalization of it:
+    `archive_forecast` archives `decision_center`'s generic, no-squad-required squad-construction
+    recommendation (status `active_preliminary`/`active`, shaped around `profile_recommendations`/
+    `horizons`) -- `weekly_decisions` (`build_transfer_decisions`/`build_draft_decisions`'s output,
+    status `active` on a real decision) is a structurally different shape (`profiles[].
+    recommendation` holding `action`/`transfer_count`/`point_cost`/`starting_xi`/`captain`/etc, no
+    `horizons` concept at all). No existing function could be reused unmodified for this.
+
+    Gated on `status == "active"` -- the only status representing a complete, real decision;
+    every other status (`waiting_for_gw2`, `manager_not_configured`, `manager_squad_unavailable`,
+    `scenario_unavailable`, ...) has nothing worth freezing. `lead_hours` (one of
+    `server._ALLOWED_REMINDER_LEAD_HOURS`, the same three checkpoints issue #79 already exposes
+    to visitors) is folded into the archive key alongside the origin event, so this team's three
+    checkpoints for one gameweek are stored independently rather than colliding on a single-
+    snapshot key -- captures how the recommendation evolves through the week (team news,
+    injuries, price moves) rather than one point-in-time snapshot. Within one checkpoint, first
+    capture wins and is never overwritten, mirroring `archive_forecast`'s own immutability
+    guarantee -- a retried/duplicate call for a checkpoint already captured is a no-op.
+
+    Stores IDs, not full player objects, matching `archive_forecast`'s own minimal-footprint
+    style -- the full player catalog is already available elsewhere (`players.json`), so this
+    only needs to record which player IDs the recommendation chose.
+    """
+    if weekly_decisions.get("status") != "active" or not weekly_decisions.get("event"):
+        return store
+    profiles_in = weekly_decisions.get("profiles") or []
+    if not profiles_in:
+        return store
+    event = int(weekly_decisions["event"])
+    forecast_id = f"gw{event}:{lead_hours}"
+    team_forecasts = store.setdefault("team_forecasts", {}).setdefault(str(team_id), {})
+    if forecast_id in team_forecasts:
+        return store
+    profiles_out = []
+    for profile in profiles_in:
+        recommendation = profile.get("recommendation") or {}
+        captain = recommendation.get("captain") or {}
+        vice_captain = recommendation.get("vice_captain") or {}
+        starting_xi = recommendation.get("starting_xi") or []
+        bench = recommendation.get("bench") or []
+        if not starting_xi or captain.get("id") is None:
+            continue
+        profiles_out.append(
+            {
+                "profile_id": profile.get("id"),
+                "action": recommendation.get("action"),
+                "transfer_count": recommendation.get("transfer_count"),
+                "point_cost": recommendation.get("point_cost"),
+                "net_gain_5gw": recommendation.get("net_gain_5gw"),
+                "projected_event_points_including_captain": recommendation.get(
+                    "projected_event_points_including_captain"
+                ),
+                "formation": recommendation.get("formation"),
+                "lineup_player_ids": [int(player["id"]) for player in starting_xi],
+                "bench_player_ids": [int(player["id"]) for player in bench],
+                "captain_id": int(captain["id"]),
+                "vice_captain_id": (
+                    int(vice_captain["id"]) if vice_captain.get("id") is not None else None
+                ),
+            }
+        )
+    if not profiles_out:
+        return store
+    team_forecasts[forecast_id] = {
+        "origin_event": event,
+        "lead_hours": lead_hours,
+        "generated_at": weekly_decisions.get("generated_at"),
+        "profiles": profiles_out,
+    }
+    return store
+
+
 def archive_shadow_forecast(store, model_version, origin_event, generated_at, player_forecasts):
     """Archive the first pre-result per-player forecast for one non-champion `model_version`.
 

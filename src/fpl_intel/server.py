@@ -19,10 +19,11 @@ import zoneinfo
 from . import profiles
 from . import reminder_confirmation
 from .dashboard import render_dashboard
+from .fpl_data import save_json
 from .generation import resolve_artifact
-from .model_performance import build_team_model_performance
+from .model_performance import archive_team_forecast, build_team_model_performance
 from .rate_limit import CooldownLimiter
-from .refresh import RefreshAlreadyRunning, compute_manager_view
+from .refresh import RefreshAlreadyRunning, compute_manager_view, project_refresh_lock
 from .transfer_decisions import validate_draft_squad
 
 
@@ -59,6 +60,10 @@ _TEAM_LOOKUP_COOLDOWN_SECONDS = 15
 # `reminder_status='enabled'` by issue #79's write path, so this is defensive, not expected to
 # trigger in practice.
 _DEFAULT_REMINDER_LEAD_HOURS = 3
+# Issue #102: same per-run bound `refresh.py`'s `_MANAGER_PICKS_TEAM_CAP` (issue #64) already
+# established for "loop over every registered team from a scheduled trigger" -- reused here
+# rather than inventing a second cap value for the same class of cost.
+_REGISTERED_TEAMS_CAP = 25
 _PROFILE_WRITE_COOLDOWN_SECONDS = 5
 # Deliberately stricter than the ordinary profile-write cooldown above -- this endpoint is the
 # one PIN-guessing surface in the app (issue #62), so a would-be attacker gets far fewer
@@ -1141,6 +1146,87 @@ def create_server(
                 teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
             self._json(200, {"status": "ok", "teams": teams})
 
+        def _handle_registered_teams(self):
+            """GET /api/registered-teams (issue #102): every team_id with a saved profile,
+            capped at `_REGISTERED_TEAMS_CAP` -- the read counterpart `scripts/
+            archive_team_forecasts.py` needs to discover which teams to archive a forecast for,
+            the same structural gap #105's `/api/reminder-teams` closed for the (much smaller)
+            reminder-opted-in subset. Deliberately a separate, broader endpoint rather than
+            widening `/api/reminder-teams`'s own meaning -- "every registered team" and "every
+            team that opted into reminder emails" are different, independently-useful sets.
+
+            Gated by the same `X-Refresh-Token` `/api/refresh` and `/api/archive-team-forecast`
+            already require, not a dedicated token like `/api/reminder-teams` -- this returns
+            bare team IDs only, no email/PII of any kind, so it carries the same sensitivity as
+            those two operator-only, non-PII-exposing endpoints, not #105's bulk-PII case.
+            """
+            if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
+                self._json(403, {"status": "error", "message": "Invalid refresh token"})
+                return
+            team_ids = profiles.list_team_ids(_profiles_db_path(root))[:_REGISTERED_TEAMS_CAP]
+            self._json(200, {"status": "ok", "team_ids": team_ids})
+
+        def _handle_archive_team_forecast(self, body):
+            """POST /api/archive-team-forecast (issue #102): archive one team's real weekly
+            decision at one deadline checkpoint into the shared model-performance.json.
+
+            Gated on the same `X-Refresh-Token` `/api/refresh` already requires, not a dedicated
+            token like #105's `/api/reminder-teams` -- unlike that endpoint, this one returns no
+            PII at all (only player IDs and recommendation metadata), so it carries the same
+            sensitivity as `/api/refresh` itself (an operator-only action that mutates shared
+            server state), not a bulk-PII-exposure risk needing its own secret.
+
+            Computes the team's live `weekly_decisions` via the exact same `_resolve_team_lookup`
+            helper `/api/manager-view` uses, so this can never drift from what a visitor's own
+            dashboard view or a GitHub-Actions-hosted script's `/api/manager-view` call would see.
+            The archive write itself is guarded by `project_refresh_lock` -- the same cross-
+            process file lock `/api/refresh`'s subprocess eventually acquires via
+            `refresh_project` -- so a concurrent full refresh (which loads, mutates, and wholesale
+            republishes `model-performance.json` as one of several artifacts) can never silently
+            clobber this endpoint's incremental update, or vice versa.
+
+            Token already checked by `do_POST` before dispatch, same as `/api/refresh`.
+            """
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": "Invalid archive-team-forecast payload"})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": "Invalid archive-team-forecast payload"})
+                return
+            team_id = payload.get("team_id")
+            if isinstance(team_id, bool) or not isinstance(team_id, int) or not (1 <= team_id <= 99_999_999):
+                self._json(400, {"status": "error", "message": "A valid team_id is required"})
+                return
+            lead_hours = payload.get("lead_hours")
+            if lead_hours not in _ALLOWED_REMINDER_LEAD_HOURS:
+                self._json(
+                    400,
+                    {"status": "error", "message": "lead_hours must be one of 3, 12, 24"},
+                )
+                return
+            manager, weekly_decisions = self._resolve_team_lookup(team_id)
+            if manager is None:
+                self._json(500, {"status": "error", "message": "Team lookup failed"})
+                return
+            try:
+                with project_refresh_lock(root):
+                    store_path = resolve_artifact(root, "model-performance.json")
+                    store = (
+                        json.loads(store_path.read_text(encoding="utf-8")) if store_path.exists() else {}
+                    )
+                    before = json.dumps(store.get("team_forecasts", {}).get(str(team_id), {}), sort_keys=True)
+                    archive_team_forecast(store, team_id, weekly_decisions, lead_hours)
+                    after = json.dumps(store.get("team_forecasts", {}).get(str(team_id), {}), sort_keys=True)
+                    archived = before != after
+                    if archived:
+                        save_json(store_path, store)
+            except RefreshAlreadyRunning:
+                self._json(409, {"status": "busy", "message": "A refresh is already running"})
+                return
+            self._json(200, {"status": "ok", "team_id": team_id, "archived": archived})
+
         def _serve_dashboard(self, query_string):
             query_team_id = _parse_team_id(query_string)
             # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
@@ -1271,6 +1357,9 @@ def create_server(
             if path == "/api/reminder-teams":
                 self._handle_reminder_teams()
                 return
+            if path == "/api/registered-teams":
+                self._handle_registered_teams()
+                return
             if path == "/favicon.ico":
                 self.send_response(204)
                 self.end_headers()
@@ -1287,23 +1376,25 @@ def create_server(
                 return
             path = self.path.split("?", 1)[0]
             if path not in {
-                "/api/refresh", "/api/profile", "/api/draft-squad", "/api/lookup-opt-out",
-                "/api/reminder-opt-in", "/api/contact",
+                "/api/refresh", "/api/archive-team-forecast", "/api/profile", "/api/draft-squad",
+                "/api/lookup-opt-out", "/api/reminder-opt-in", "/api/contact",
             }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
-            # Issue #27: the shared bearer token now gates only /api/refresh, an operator-only
-            # action never shipped to the browser (see _serve_dashboard). The other five paths
-            # (issue #110 adds /api/contact to the original four) are open, rate-limited
-            # per-visitor writes by design (issue #45) -- each already has its own
+            # Issue #27: the shared bearer token gates operator-only actions never shipped to the
+            # browser (see _serve_dashboard) -- /api/refresh, and (issue #102) /api/archive-team-
+            # forecast, which mutates shared server state the same way /api/refresh does (no PII
+            # exposure, unlike #105's /api/reminder-teams, which needed its own dedicated token).
+            # The other five paths (issue #110 adds /api/contact to the original four) are open,
+            # rate-limited per-visitor writes by design (issue #45) -- each already has its own
             # CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so re-gating
             # them behind one shared secret was redundant and, once public, actively broken (the
             # token was visible via view-source on every served page).
-            if path == "/api/refresh":
+            if path in {"/api/refresh", "/api/archive-team-forecast"}:
                 if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
                     self._json(403, {"status": "error", "message": "Invalid refresh token"})
                     return
-            max_body = 1024 if path == "/api/refresh" else 4096
+            max_body = 1024 if path in {"/api/refresh", "/api/archive-team-forecast"} else 4096
             try:
                 content_length = int(self.headers.get("Content-Length", "0") or 0)
             except (TypeError, ValueError):
@@ -1318,6 +1409,8 @@ def create_server(
             body = self.rfile.read(content_length) if content_length else b""
             if path == "/api/refresh":
                 self._handle_refresh()
+            elif path == "/api/archive-team-forecast":
+                self._handle_archive_team_forecast(body)
             elif path == "/api/profile":
                 self._handle_profile(body)
             elif path == "/api/draft-squad":
