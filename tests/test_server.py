@@ -772,6 +772,79 @@ class CookieResolvedTeamTests(unittest.TestCase):
         self.assertIn('"risk_profile": "aggressive"', html)
 
 
+class ConnectionStatusResolutionTests(unittest.TestCase):
+    """Issue #108: dashboard.js's Decision Center/Model Performance empty-state gate keys off
+    `state.manager.connection_status === 'not_configured'`. This confirms `_serve_dashboard`
+    resolves that field correctly for the three shapes the gate needs to tell apart -- no team at
+    all (gate must fire), the visitor's own team via cookie (gate must not fire), and an explicit
+    `?team_id=` lookup of someone else's team (gate must not fire either -- that's the whole point
+    of issue #46's no-signup lookup, and it must not be mistaken for "no profile")."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        # The shared, pre-generated dashboard.html is exactly what a visitor with no team_id at
+        # all (no cookie, no query param) is served, byte-for-byte -- built at refresh time by
+        # `_refresh_project_unlocked`, which sets `connection_status: "not_configured"` (see
+        # refresh.py) whenever no team is configured for that shared refresh. This fixture stands
+        # in for that pre-generated artifact.
+        (self.root / "dashboard.html").write_text(
+            json.dumps({"manager": {"connection_status": "not_configured", "squad": []}}),
+            encoding="utf-8",
+        )
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-08-10T12:00:00Z"}), encoding="utf-8"
+        )
+
+        def team_view_action(team_id):
+            return {
+                "manager": {
+                    "connection_status": "connected", "team_id": team_id,
+                    "team_name": f"Team {team_id}", "squad": [],
+                },
+                "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+            }
+
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_no_team_at_all_resolves_to_not_configured(self):
+        html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+
+        self.assertIn('"connection_status": "not_configured"', html)
+
+    def test_own_team_via_cookie_never_resolves_to_not_configured(self):
+        request = Request(self.base_url + "/", headers={"Cookie": "fpl_team_id=364759"})
+        html = urlopen(request, timeout=3).read().decode()
+
+        self.assertIn('"connection_status": "connected"', html)
+        self.assertNotIn('"connection_status": "not_configured"', html)
+        # This is the visitor's own remembered team, not a one-off lookup of someone else's.
+        self.assertNotIn('"lookup":', html.replace(" ", ""))
+
+    def test_someone_elses_team_via_explicit_lookup_never_resolves_to_not_configured(self):
+        html = urlopen(self.base_url + "/?team_id=999001", timeout=3).read().decode()
+
+        self.assertIn('"connection_status": "connected"', html)
+        self.assertNotIn('"connection_status": "not_configured"', html)
+        # Explicit lookup IS flagged (drives the "one-off lookup" banner, separate from the
+        # profile-gate signal this test class is about).
+        self.assertIn('"lookup":', html.replace(" ", ""))
+        self.assertIn('"status": "ok"', html)
+
+
 class ModelPerformanceSpliceTests(unittest.TestCase):
     """Issue #64: team_performance/player_performance computed and spliced at request time."""
 
