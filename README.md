@@ -3,6 +3,9 @@
 A local, source-backed foundation for 2026/27 FPL (Fantasy Premier
 League) decisions.
 
+For a plain-English tour of what the dashboard actually does today, see
+[RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ## Current status
 
 - Manager profile timezone is configurable per user (defaults to Eastern Time)
