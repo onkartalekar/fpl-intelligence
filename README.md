@@ -274,6 +274,12 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 An official Premier League or club announcement can confirm a move before FPL launches. The move remains labeled `pending_new_season_fpl` until the new FPL player and club records can be reconciled. No projections are generated from the old-season FPL feed.
 
+## Architecture
+
+A visual diagram of how the runtime pieces above (Railway server, refresh pipeline, GitHub
+Actions workflows, external dependencies) and the model pipeline fit together: see
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Specification
 
 See [SPECIFICATION.md](SPECIFICATION.md).
