@@ -200,6 +200,15 @@ Each profile also picks its own starting XI/formation, captain/vice-captain,
 and bench ordering by re-scoring the same squad under 1/3/5-gameweek
 horizons.
 
+### `goal` is recorded, not read (issue #117/#118)
+
+A manager's saved profile also carries a `goal` field (top 10k / 50k /
+100k / beat last season / just for fun, set from the dashboard's Profile
+tab). It is validated and persisted, but nothing above reads it — only
+`risk_profile` selects a search objective. `goal` doesn't currently
+change which squad, XI, or captain any profile recommends. This is true
+of all five values, not only `beat_last_season`.
+
 ## Phase 5 (scaffolding, not wired in): LLM news-signal extraction
 
 `src/fpl_intel/news_signals.py` uses an LLM API (raw HTTPS, no vendor SDK

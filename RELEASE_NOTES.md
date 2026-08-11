@@ -52,7 +52,9 @@ tip sheet, a vibe, or betting odds.
   no account created.
 - **[Live]** Manager profile -- team ID, timezone, risk profile, season
   goal (top 10k / 50k / 100k / beat last season / just for fun),
-  confirmed free transfers. Saved locally, no password.
+  confirmed free transfers. Saved locally, no password. Season goal is
+  recorded for your own reference only; it doesn't change model behavior
+  yet (issue #117/#118).
 - **[Live]** Preseason draft squad -- declare a provisional squad and
   get personalized recommendations before GW1's official picks exist.
 - **[Opt-in]** Opt-out lookup -- a manager can exclude their team from
