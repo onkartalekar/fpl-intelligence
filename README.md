@@ -196,72 +196,73 @@ pip install -r requirements.txt
 
 Everything below is optional for local use -- the dashboard, refresh pipeline, and tests all
 run with none of these set, exactly as `## Open the dashboard` describes. They only matter for
-specific opt-in features (LLM-based news parsing, the deadline-reminder email) or for the
-hosted deployment tracked in [issue #27](https://github.com/onkartalekar/fpl-intelligence/issues/27).
+the hosted deployment (issue #27) and its three GitHub Actions workflows, or for the still-unwired
+LLM-based news parsing feature.
 
 None of these are read from a `.env` file -- this codebase has no dotenv loading, by the same
 stdlib-only rule as everything else (see `## Dependencies`). Locally, set one by exporting it in
 the shell before running the affected script/server, e.g. `export FPL_INTEL_SMTP_HOST=...`; it
 isn't picked up any other way.
 
-### LLM-based news parsing (optional)
+To generate a new high-entropy token value for any of the `*_TOKEN` variables below:
+`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
-Unset by default; the feature silently no-ops (no error) when its provider's key is missing.
-Currently not wired into any live pipeline -- `news_signals.py` isn't called from the refresh
-pipeline, the server, or any script yet, only its own unit tests exercise it -- so these have no
-real hosting placement to worry about until it's actually wired into something.
-
-| Variable | Required when | Where to set | Notes |
-|---|---|---|---|
-| `FPL_INTEL_LLM_PROVIDER` | Never | N/A -- not yet wired in | Selects `"claude"` (default) or `"openai_compatible"`. |
-| `ANTHROPIC_API_KEY` | Provider is `claude` and you want live parsing | N/A -- not yet wired in | Standard Anthropic API key. |
-| `FPL_INTEL_LLM_API_BASE` | Provider is `openai_compatible` | N/A -- not yet wired in | Base URL of any OpenAI Chat Completions-shaped endpoint -- no vendor is hardcoded. |
-| `FPL_INTEL_LLM_MODEL` | Provider is `openai_compatible` | N/A -- not yet wired in | Model name at that endpoint. |
-| `FPL_INTEL_LLM_API_KEY` | Provider is `openai_compatible` | N/A -- not yet wired in | API key for that endpoint. |
-
-### Deadline-reminder email -- offline script (`scripts/send_deadline_reminder.py`, issue #55)
-
-Not used by the dashboard server itself; only by the separate script the (currently disabled)
-`.github/workflows/deadline-reminder.yml` GitHub Actions workflow invokes -- so these belong in
-**GitHub Actions repo secrets** (Settings -> Secrets and variables -> Actions), not Railway, since
-that workflow runs on GitHub's own runners regardless of where the dashboard server is hosted.
-That stays true even after #27 ships Railway hosting, *unless* you later choose to move this
-script onto a Railway cron service against the same `data/` volume instead of GitHub Actions --
-an alternative worth considering once the workflow is re-enabled, but not yet decided; if you do,
-these move to Railway's Variables tab like the vars below instead.
-
-| Variable | Required when | Where to set | Notes |
-|---|---|---|---|
-| `FPL_INTEL_REMINDER_TEAMS` | At least one of this or `FPL_INTEL_REMINDER_PROFILES_DB` must resolve at least one team, or the script raises `ConfigError` | GitHub Actions repo secrets | JSON list of `{"team_id", "email", "lead_hours"}` objects, manually maintained. |
-| `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80) | Never | GitHub Actions repo secrets | Path to a `profiles.db` to additionally source opted-in teams from (`reminder_status == "enabled"`). Unset by default. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`; the explicit-secret entry wins on collision. |
-| `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` | To actually send mail (a `--dry-run` flag exists for previewing without them) | GitHub Actions repo secrets | Deliberately separate credentials from the server's own SMTP vars below, so each can be rotated independently. |
-| `FPL_INTEL_DASHBOARD_BASE_URL` (issue #83) | Never | GitHub Actions repo secrets | Base URL used to build the email footer's "manage reminder settings" link. Defaults to `http://localhost:8877`. Once hosted on Railway, set this to the real `https://<app>.up.railway.app` so the footer link isn't a dead `localhost` URL in emails sent from the offline script. |
-
-### Reminder opt-in confirmation email -- live server (`src/fpl_intel/reminder_confirmation.py`, issue #79)
-
-These are read at request time by the same process serving the dashboard, so they go wherever
-`server.py` actually runs -- this is the one reminder-email group that directly matters for the
-Railway setup, unlike the offline-script group above.
-
-| Variable | Required when | Where to set | Notes |
-|---|---|---|---|
-| `FPL_INTEL_SERVER_SMTP_HOST` / `FPL_INTEL_SERVER_SMTP_PORT` / `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` | To send the double-opt-in confirmation email when a visitor enables reminders from the Profile tab | Local shell for local testing; **Railway's project Variables tab** once hosted | Separate credentials from the offline script's `FPL_INTEL_SMTP_*` above by design. |
-
-### Hosted deployment (issue #27)
+### Railway (Project -> your service -> Variables tab)
 
 Local (`scripts/start_dashboard.py`) behavior is unaffected either way: none of these are set by
-a plain local checkout, so it keeps binding `127.0.0.1` and behaving exactly as before #27. All
-three go in **Railway's project Variables tab** (Project -> your service -> Variables); Railway
-also supports per-environment variable scoping (e.g. separate values for a staging vs. production
-environment) if that's ever needed, though a single Hobby-tier service doesn't need it today.
+a plain local checkout, so it keeps binding `127.0.0.1` and behaving exactly as before #27.
 
-| Variable | Where to set | Purpose |
+| Variable | Required | Purpose |
 |---|---|---|
-| `PORT` | Railway (auto-injected -- no action needed) | The server binds here instead of the local default `8877`; its presence is also what switches the bind host from `127.0.0.1` to `0.0.0.0`. |
-| `FPL_INTEL_REFRESH_TOKEN` | Railway Variables tab (operator-set secret) | Operator-only secret gating `POST /api/refresh`. Read from this env var instead of the random per-process token used when unset, and never rendered into any served page. |
-| `FPL_INTEL_ALLOWED_ORIGIN` | Railway Variables tab (operator-set secret) | The full trusted origin, scheme included, e.g. `https://fpl-intelligence.up.railway.app`. Replaces the hardcoded `127.0.0.1:{port}` check `_has_trusted_host`/the `Origin` check use by default -- its host:port becomes the trusted `Host` header value, and the full string becomes the trusted `Origin` header value. Defaults to `http://127.0.0.1:{port}` locally when unset. |
+| `PORT` | Auto-injected by Railway -- no action needed | The server binds here instead of the local default `8877`; its presence is also what switches the bind host from `127.0.0.1` to `0.0.0.0`. |
+| `FPL_INTEL_REFRESH_TOKEN` | Yes | Operator-only secret gating `POST /api/refresh`, and (issue #125) `POST /api/manager-view`'s rate-limit exemption and `POST /api/archive-team-forecast`/`GET /api/registered-teams` (issue #102). **Must be the same value** set as the `FPL_INTEL_REFRESH_TOKEN` GitHub Actions secret below -- every scheduled workflow authenticates to Railway with it. |
+| `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105) | Yes, if the reminder job's self-serve roster (below) is used | Gates `GET /api/reminder-teams`, which returns every opted-in manager's email in bulk -- deliberately a separate secret from `FPL_INTEL_REFRESH_TOKEN`, not a reuse of it. **Must match** the same-named GitHub Actions secret. |
+| `FPL_INTEL_ALLOWED_ORIGIN` | Yes | The full trusted origin, scheme included, e.g. `https://fpl-intelligence.up.railway.app`. Its host:port becomes the trusted `Host` header value, and the full string becomes the trusted `Origin` header value. Defaults to `http://127.0.0.1:{port}` locally when unset. |
+| `FPL_INTEL_SERVER_SMTP_HOST` / `FPL_INTEL_SERVER_SMTP_PORT` / `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` | Yes, to send the double-opt-in reminder confirmation email (issue #79) and Contact Us operator notifications (issue #110) | Read at request time by the live server. Separate credentials from the offline reminder script's own `FPL_INTEL_SMTP_*` below, by design, so each can be rotated independently. A Gmail account with an [app password](https://myaccount.google.com/apppasswords) works well here (`smtp.gmail.com`, port `587`). |
 
-See [plans/issue-27-cloud-hosting.md](plans/issue-27-cloud-hosting.md) for the full design.
+See [plans/issue-27-cloud-hosting.md](plans/issue-27-cloud-hosting.md) for the full hosting design.
+
+### GitHub Actions (Settings -> Secrets and variables -> Actions)
+
+Three scheduled workflows run on GitHub's own runners regardless of where the dashboard is
+hosted, and all call back into the live Railway server over HTTP rather than sharing its
+filesystem (see [ARCHITECTURE.md](ARCHITECTURE.md)) -- so their secrets live here, not on Railway.
+
+| Variable | Required by | Notes |
+|---|---|---|
+| `FPL_INTEL_REFRESH_TOKEN` | `scheduled-refresh.yml`, `deadline-reminder.yml` | **Same value** as Railway's `FPL_INTEL_REFRESH_TOKEN` above. Not needed by `live-regression-check.yml`, which deliberately never calls `/api/refresh` with a valid token at all (see that workflow's own comments). |
+| `FPL_INTEL_DASHBOARD_BASE_URL` | `scheduled-refresh.yml`, `deadline-reminder.yml`, `live-regression-check.yml` | The live Railway origin, e.g. `https://fpl-intelligence.up.railway.app` (no trailing slash). `live-regression-check.yml` maps this same secret into `FPL_INTEL_LIVE_CHECK_BASE_URL`. |
+| `FPL_INTEL_REMINDER_TEAMS` | `deadline-reminder.yml` | JSON list of `{"team_id", "email", "lead_hours"}` objects, manually maintained. Optional if `FPL_INTEL_REMINDER_PROFILES_DB` (below) resolves at least one team instead -- at least one of the two must resolve a non-empty team list, or the script raises `ConfigError`. |
+| `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80, source changed by #105) | `deadline-reminder.yml` | Set to any non-blank value (e.g. `1`) to additionally source opted-in teams live from Railway's `GET /api/reminder-teams` (`reminder_status == "enabled"`). No longer a filesystem path -- a GitHub Actions runner has no shared filesystem with Railway to read one from. Unset by default. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`; the explicit-secret entry wins on collision. |
+| `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105) | `deadline-reminder.yml`, only when `FPL_INTEL_REMINDER_PROFILES_DB` is enabled | **Same value** as Railway's `FPL_INTEL_REMINDER_TEAMS_TOKEN` above. |
+| `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` | `deadline-reminder.yml`, to actually send mail (a `--dry-run` `workflow_dispatch` input exists for previewing without them) | The offline script's own send credentials -- deliberately separate from Railway's `FPL_INTEL_SERVER_SMTP_*` above, so each can be rotated independently. |
+| `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` (issue #119) | `live-regression-check.yml` | **Same values** as Railway's `FPL_INTEL_SERVER_SMTP_USER`/`_PASSWORD` above -- reused to read back the Contact Us notification over IMAP (the same account it's sent to), not a new secret. Without these, the workflow still runs but skips its email-delivery checks. |
+
+`scripts/trigger_scheduled_refresh.py` (`scheduled-refresh.yml`) and `scripts/archive_team_forecasts.py`
+(issue #102, also run from `scheduled-refresh.yml`) need only `FPL_INTEL_REFRESH_TOKEN` and
+`FPL_INTEL_DASHBOARD_BASE_URL` from the table above -- both already covered by the first two rows.
+
+`live-regression-check.yml` also has three optional variables, not repo secrets since none of
+them are sensitive: `FPL_INTEL_LIVE_CHECK_PUBLIC_TEAM_ID` (defaults to `364759`),
+`FPL_INTEL_LIVE_CHECK_IMAP_HOST` (defaults to `imap.gmail.com`), and
+`FPL_INTEL_LIVE_CHECK_IMAP_PORT` (defaults to `993`) -- set as plain repository variables
+(Settings -> Secrets and variables -> Actions -> Variables tab) only if the SMTP account above
+isn't Gmail, or you want the live check to look up a different public team.
+
+### LLM-based news parsing (optional, not yet wired into any live pipeline)
+
+Unset by default; the feature silently no-ops (no error) when its provider's key is missing.
+`news_signals.py` isn't called from the refresh pipeline, the server, or any script yet, only its
+own unit tests exercise it -- so these have no real hosting placement to worry about until it's
+actually wired into something.
+
+| Variable | Required when | Notes |
+|---|---|---|
+| `FPL_INTEL_LLM_PROVIDER` | Never | Selects `"claude"` (default) or `"openai_compatible"`. |
+| `ANTHROPIC_API_KEY` | Provider is `claude` and you want live parsing | Standard Anthropic API key. |
+| `FPL_INTEL_LLM_API_BASE` | Provider is `openai_compatible` | Base URL of any OpenAI Chat Completions-shaped endpoint -- no vendor is hardcoded. |
+| `FPL_INTEL_LLM_MODEL` | Provider is `openai_compatible` | Model name at that endpoint. |
+| `FPL_INTEL_LLM_API_KEY` | Provider is `openai_compatible` | API key for that endpoint. |
 
 ## Tests
 
