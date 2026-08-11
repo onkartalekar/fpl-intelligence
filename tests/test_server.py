@@ -982,6 +982,188 @@ class ReminderTeamsApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
 
 
+class RegisteredTeamsApiTests(unittest.TestCase):
+    """Issue #102: GET /api/registered-teams -- every team_id with a saved profile, for
+    scripts/archive_team_forecasts.py to discover which teams to archive a forecast for. Bare
+    team IDs only, no PII -- gated by the ordinary token (/api/refresh's), not a dedicated one
+    like #105's /api/reminder-teams."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "profiles.db"
+        self.now = "2026-08-11T12:00:00Z"
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _get(self, token="test-token"):
+        headers = {"X-Refresh-Token": token} if token is not None else {}
+        return urlopen(Request(self.base_url + "/api/registered-teams", headers=headers), timeout=3)
+
+    def test_missing_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._get(token=None)
+        self.assertEqual(error.exception.code, 403)
+
+    def test_invalid_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._get(token="wrong-token")
+        self.assertEqual(error.exception.code, 403)
+
+    def test_returns_every_registered_team_id_ascending(self):
+        save_profile(self.db_path, 300, "America/New_York", "balanced", None, None, self.now)
+        save_profile(self.db_path, 100, "America/New_York", "balanced", None, None, self.now)
+        save_profile(self.db_path, 200, "America/New_York", "balanced", None, None, self.now)
+
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "team_ids": [100, 200, 300]})
+
+    def test_no_profiles_at_all_yields_an_empty_list(self):
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {"status": "ok", "team_ids": []})
+
+    def test_caps_at_the_registered_teams_limit(self):
+        for team_id in range(1, 30):
+            save_profile(self.db_path, team_id, "America/New_York", "balanced", None, None, self.now)
+
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(len(payload["team_ids"]), 25)
+
+
+def _active_weekly_decisions(event=2):
+    recommendation = {
+        "action": "roll",
+        "transfer_count": 0,
+        "point_cost": 0,
+        "net_gain_5gw": 3.2,
+        "projected_event_points_including_captain": 55.0,
+        "formation": "3-4-3",
+        "starting_xi": [{"id": player_id} for player_id in range(1, 12)],
+        "bench": [{"id": player_id} for player_id in range(12, 16)],
+        "captain": {"id": 1},
+        "vice_captain": {"id": 2},
+    }
+    return {
+        "status": "active",
+        "event": event,
+        "generated_at": "2026-08-20T12:00:00-04:00",
+        "profiles": [{"id": "balanced", "recommendation": recommendation}],
+    }
+
+
+class ArchiveTeamForecastApiTests(unittest.TestCase):
+    """Issue #102: POST /api/archive-team-forecast -- archives one team's real weekly decision
+    at one checkpoint into the shared model-performance.json."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+
+        def team_view_action(team_id):
+            return {"manager": {"connection_status": "connected"}, "weekly_decisions": _active_weekly_decisions()}
+
+        self.team_view_action = team_view_action
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token", team_view_action=team_view_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _post(self, payload, token="test-token"):
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Refresh-Token"] = token
+        return urlopen(
+            Request(
+                self.base_url + "/api/archive-team-forecast",
+                data=json.dumps(payload).encode("utf-8"), method="POST", headers=headers,
+            ),
+            timeout=3,
+        )
+
+    def test_missing_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"team_id": 364759, "lead_hours": 24}, token=None)
+        self.assertEqual(error.exception.code, 403)
+
+    def test_invalid_team_id_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"team_id": -1, "lead_hours": 24})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_invalid_lead_hours_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"team_id": 364759, "lead_hours": 6})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_archives_and_persists_to_model_performance_json(self):
+        response = self._post({"team_id": 364759, "lead_hours": 24})
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "team_id": 364759, "archived": True})
+        store = json.loads((self.root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+        self.assertIn("gw2:24", store["team_forecasts"]["364759"])
+
+    def test_repeated_call_for_the_same_checkpoint_reports_not_archived(self):
+        self._post({"team_id": 364759, "lead_hours": 24})
+
+        response = self._post({"team_id": 364759, "lead_hours": 24})
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload["archived"], False)
+
+    def test_lookup_failure_is_a_500(self):
+        def failing_team_view_action(team_id):
+            raise RuntimeError("upstream unavailable")
+
+        failing_server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=failing_team_view_action,
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(HTTPError) as error:
+                urlopen(
+                    Request(
+                        f"http://127.0.0.1:{failing_server.server_port}/api/archive-team-forecast",
+                        data=json.dumps({"team_id": 364759, "lead_hours": 24}).encode("utf-8"),
+                        method="POST", headers={"X-Refresh-Token": "test-token", "Content-Type": "application/json"},
+                    ),
+                    timeout=3,
+                )
+            self.assertEqual(error.exception.code, 500)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

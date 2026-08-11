@@ -3,6 +3,7 @@ import unittest
 from fpl_intel.model_performance import (
     archive_forecast,
     archive_shadow_forecast,
+    archive_team_forecast,
     build_performance_report,
     build_shadow_performance_report,
     build_team_model_performance,
@@ -374,6 +375,124 @@ class ModelPerformanceTests(unittest.TestCase):
         migrate_manager_picks(store, team_id=364759)
 
         self.assertNotIn("manager_picks", store)
+
+
+def _weekly_decisions(status="active", event=2, action="roll"):
+    """A minimal `build_transfer_decisions`/`build_draft_decisions`-shaped fixture -- the actual
+    shape `archive_team_forecast` (issue #102) archives, structurally different from
+    `_decision()`'s `decision_center`-shaped fixture above (`archive_forecast`'s own target)."""
+    if status != "active":
+        return {"status": status, "event": event, "reason": "not available"}
+    recommendation = {
+        "action": action,
+        "transfers": [],
+        "transfer_count": 0 if action == "roll" else 1,
+        "point_cost": 0,
+        "gross_gain_5gw": 3.2,
+        "net_gain_5gw": 3.2,
+        "bank_after": 1.5,
+        "free_transfers_next_event": 2,
+        "profile_score": 44.0,
+        "squad": [],
+        "starting_xi": [{"id": player_id} for player_id in range(1, 12)],
+        "formation": "3-4-3",
+        "bench": [{"id": player_id} for player_id in range(12, 16)],
+        "captain": {"id": 1},
+        "vice_captain": {"id": 2},
+        "projected_event_points_including_captain": 55.0,
+    }
+    profiles = [
+        {"id": profile_id, "recommendation": dict(recommendation, profile_score=score)}
+        for profile_id, score in (("conservative", 40.0), ("balanced", 44.0), ("aggressive", 48.0))
+    ]
+    return {
+        "status": "active",
+        "event": event,
+        "generated_at": "2026-08-20T12:00:00-04:00",
+        "profiles": profiles,
+    }
+
+
+class ArchiveTeamForecastTests(unittest.TestCase):
+    """Issue #102: archives a team's real weekly transfer/captaincy decision, structurally
+    distinct from `archive_forecast`'s generic decision_center archive above (see
+    `archive_team_forecast`'s own docstring for why the two can't share one function)."""
+
+    def test_archives_a_real_decision_once_per_checkpoint(self):
+        store = {}
+
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=24)
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=24)
+
+        team_forecasts = store["team_forecasts"]["364759"]
+        self.assertEqual(list(team_forecasts.keys()), ["gw2:24"])
+        snapshot = team_forecasts["gw2:24"]
+        self.assertEqual(snapshot["origin_event"], 2)
+        self.assertEqual(snapshot["lead_hours"], 24)
+        self.assertEqual(len(snapshot["profiles"]), 3)
+        balanced = next(row for row in snapshot["profiles"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["action"], "roll")
+        self.assertEqual(balanced["captain_id"], 1)
+        self.assertEqual(balanced["vice_captain_id"], 2)
+        self.assertEqual(len(balanced["lineup_player_ids"]), 11)
+        self.assertEqual(len(balanced["bench_player_ids"]), 4)
+        self.assertEqual(balanced["formation"], "3-4-3")
+
+    def test_distinct_checkpoints_are_stored_independently(self):
+        store = {}
+
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=24)
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=12)
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=3)
+
+        self.assertEqual(
+            sorted(store["team_forecasts"]["364759"].keys()), ["gw2:12", "gw2:24", "gw2:3"],
+        )
+
+    def test_a_later_checkpoint_does_not_overwrite_an_earlier_one_for_the_same_gameweek(self):
+        store = {}
+        archive_team_forecast(store, 364759, _weekly_decisions(action="roll"), lead_hours=24)
+
+        archive_team_forecast(store, 364759, _weekly_decisions(action="single_transfer"), lead_hours=24)
+
+        snapshot = store["team_forecasts"]["364759"]["gw2:24"]
+        balanced = next(row for row in snapshot["profiles"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["action"], "roll")
+
+    def test_different_teams_are_kept_fully_independent(self):
+        store = {}
+
+        archive_team_forecast(store, 1, _weekly_decisions(), lead_hours=24)
+        archive_team_forecast(store, 2, _weekly_decisions(), lead_hours=24)
+
+        self.assertEqual(set(store["team_forecasts"].keys()), {"1", "2"})
+
+    def test_non_active_status_is_never_archived(self):
+        for status in ("waiting_for_gw2", "manager_not_configured", "manager_squad_unavailable", "scenario_unavailable"):
+            with self.subTest(status=status):
+                store = {}
+
+                archive_team_forecast(store, 364759, _weekly_decisions(status=status), lead_hours=24)
+
+                self.assertNotIn("team_forecasts", store)
+
+    def test_missing_event_is_never_archived(self):
+        store = {}
+        decision = _weekly_decisions()
+        del decision["event"]
+
+        archive_team_forecast(store, 364759, decision, lead_hours=24)
+
+        self.assertNotIn("team_forecasts", store)
+
+    def test_empty_profiles_list_is_never_archived(self):
+        store = {}
+        decision = _weekly_decisions()
+        decision["profiles"] = []
+
+        archive_team_forecast(store, 364759, decision, lead_hours=24)
+
+        self.assertNotIn("team_forecasts", store)
 
 
 class ShadowForecastTests(unittest.TestCase):
