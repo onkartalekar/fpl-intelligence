@@ -1,0 +1,56 @@
+name: Scheduled refresh
+
+# Issue #101: triggers the shared dashboard's POST /api/refresh at four fixed checkpoints before
+# each gameweek deadline -- T-2d, T-1d, T-12h, T-3h -- so the shared market data (prices,
+# projections, fixture difficulty, official transfers, model performance) doesn't go stale between
+# an operator's manual `curl` calls. Deliberately a separate workflow from deadline-reminder.yml:
+# different purpose (freshening shared data, not emailing anyone) and a different cost profile (a
+# refresh can take up to 5 minutes and calls live FPL/transfer-source APIs), so the two stay
+# independently schedulable/disableable. See plans/issue-101-refresh-trigger.md for the full
+# design, including why this lives on GitHub Actions rather than a Railway cron service.
+#
+# Window resolution (fpl_intel/deadline_windows.py) is stateless and self-contained -- it fetches
+# the live FPL bootstrap itself to resolve the next deadline, so it needs nothing from Railway
+# except the one POST /api/refresh call once a checkpoint actually matches. GitHub's schedule cron
+# is best-effort (documented delays of minutes, occasionally longer, under load); the hourly
+# cadence against checkpoints hours apart comfortably absorbs that, exactly like
+# deadline-reminder.yml already does for its own hourly tick.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: report whether a refresh would trigger, without calling /api/refresh (safe to run any time)."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-refresh:
+    runs-on: ubuntu-latest
+    env:
+      FPL_INTEL_REFRESH_TOKEN: ${{ secrets.FPL_INTEL_REFRESH_TOKEN }}
+      FPL_INTEL_DASHBOARD_BASE_URL: ${{ secrets.FPL_INTEL_DASHBOARD_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check window and trigger refresh
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            DRY_RUN_FLAG=""
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          else
+            DRY_RUN_FLAG=""
+          fi
+          PYTHONPATH=src python3 scripts/trigger_scheduled_refresh.py $DRY_RUN_FLAG
