@@ -195,6 +195,18 @@ The local dashboard is a dense monitor, not a decorative marketing page. It will
 8. Original source links
 9. Decision log and forecast review
 
+**Spec amendment (2026-08-10) — alpha release notes, documentation
+only.** The dashboard itself is the operational surface described above;
+a separate, human-authored `RELEASE_NOTES.md` at the repo root is the
+user-facing companion document for alpha testers, describing only
+features live on `main` at time of writing, never planned or
+in-progress work (issue #112, `plans/issue-112-release-notes-hosting.md`).
+It is plain Markdown rendered by GitHub's own file viewer today; GitHub
+Pages hosting was considered and deferred (see
+`IMPLEMENTATION_PLAN.md`'s "Considered and declined" entry for the same
+date). This does not add a new data source, dashboard view, or
+recommendation input — it is documentation of what already exists above.
+
 A quiet or not-yet-launched dataset is shown honestly. No fake player projections, confidence scores, trends, or transfer claims will be generated.
 
 ## Operating cadence
