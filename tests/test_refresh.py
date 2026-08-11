@@ -69,27 +69,29 @@ class GenerationPublicationTests(unittest.TestCase):
                 root,
                 generated_at="2026-08-01T12:00:00Z",
                 json_artifacts={"dashboard-state.json": {"generation": "old"}},
-                dashboard_html="old dashboard",
             )
             pointer_before = (root / "data" / "current-generation.json").read_text(encoding="utf-8")
 
-            from fpl_intel import generation
-            original_write = generation.atomic_write_text
+            # Issue #120: dashboard.html is no longer a published artifact, so the
+            # compatibility-write failure this test injects targets the legacy root-level
+            # dashboard-state.json copy instead -- still the last compatibility write before
+            # the pointer switch, same failure shape the test is protecting against.
+            from fpl_intel import fpl_data
+            original_write = fpl_data.atomic_write_text
 
             resolved_root = root.resolve()
 
-            def fail_root_dashboard(path, content):
-                if Path(path) == resolved_root / "dashboard.html":
+            def fail_root_dashboard_state(path, content):
+                if Path(path) == resolved_root / "data" / "dashboard-state.json":
                     raise OSError("simulated publication failure")
                 return original_write(path, content)
 
-            with patch("fpl_intel.generation.atomic_write_text", side_effect=fail_root_dashboard):
+            with patch("fpl_intel.fpl_data.atomic_write_text", side_effect=fail_root_dashboard_state):
                 with self.assertRaises(OSError):
                     publish_generation(
                         root,
                         generated_at="2026-08-01T13:00:00Z",
                         json_artifacts={"dashboard-state.json": {"generation": "new"}},
-                        dashboard_html="new dashboard",
                     )
 
             pointer_after = (root / "data" / "current-generation.json").read_text(encoding="utf-8")
@@ -135,7 +137,6 @@ class RefreshProjectTests(unittest.TestCase):
             self.assertEqual(state["fpl"]["season_status"], "prior_season_data")
             self.assertTrue((root / "data" / "dashboard-state.json").exists())
             self.assertTrue((root / "data" / "fpl-bootstrap-latest.json").exists())
-            self.assertTrue((root / "dashboard.html").exists())
 
     def test_refresh_connects_configured_public_manager(self):
         bootstrap = {

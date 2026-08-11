@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import uuid
 
-from .fpl_data import atomic_write_text, save_json
+from .fpl_data import save_json
 
 
 def _safe_generation_dir(root):
@@ -37,18 +37,22 @@ def resolve_artifact(root, filename):
         candidate = generation / filename
         if candidate.is_file():
             return candidate
-    if filename == "dashboard.html":
-        return root / filename
     return root / "data" / filename
 
 
-def publish_generation(root, generated_at, json_artifacts, dashboard_html):
+def publish_generation(root, generated_at, json_artifacts):
     """Stage a complete generation and switch one authoritative pointer last.
 
     Legacy root-level files are still published for compatibility, but all
     application consumers resolve the current-generation pointer. If any
     compatibility write fails, the pointer remains on the previous complete
     generation.
+
+    Issue #120: this used to also publish a `dashboard.html` snapshot, but nothing
+    reads it anymore -- the server renders the dashboard fresh from
+    `dashboard-state.json` on every request instead of serving a static file that
+    could go stale relative to newly-deployed code. Dropped rather than kept as a
+    dead artifact, to avoid a future maintainer mistaking it for load-bearing.
     """
     root = Path(root).resolve()
     data_root = root / "data"
@@ -63,20 +67,17 @@ def publish_generation(root, generated_at, json_artifacts, dashboard_html):
             if not filename or Path(filename).name != filename:
                 raise ValueError("Artifact filename must be a basename")
             save_json(staged / filename, payload)
-        atomic_write_text(staged / "dashboard.html", dashboard_html)
         save_json(
             staged / "manifest.json",
             {
                 "generation_id": generation_id,
                 "generated_at": generated_at,
                 "json_artifacts": sorted(json_artifacts),
-                "dashboard_artifact": "dashboard.html",
             },
         )
 
         for filename, payload in json_artifacts.items():
             save_json(data_root / filename, payload)
-        atomic_write_text(root / "dashboard.html", dashboard_html)
         save_json(
             data_root / "current-generation.json",
             {"generation_id": generation_id, "generated_at": generated_at},
