@@ -453,6 +453,24 @@ class RunLoopTests(unittest.TestCase):
             dashboard_base_url=self._DASHBOARD_BASE_URL, refresh_token=self._REFRESH_TOKEN,
         )
 
+    def test_empty_teams_list_exits_quietly_without_even_checking_the_deadline(self):
+        """Distinct from 'outside window' below: an empty teams list (collect_teams' own
+        no-recipients-configured-yet path, not a ConfigError) short-circuits before
+        load_bootstrap_and_fixtures is even called -- no reason to fetch a live deadline just to
+        immediately discover there's no one to check it against."""
+        with patch.object(sdr, "load_bootstrap_and_fixtures") as mock_load, \
+             patch.object(sdr, "fetch_manager_view") as mock_fetch, \
+             patch.object(sdr, "send_email") as mock_send:
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                exit_code = self._run([], dry_run=False, smtp_config=None, now=datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc))
+
+        self.assertEqual(exit_code, 0)
+        mock_load.assert_not_called()
+        mock_fetch.assert_not_called()
+        mock_send.assert_not_called()
+        self.assertIn("no reminder recipients configured", captured.getvalue())
+
     def test_outside_window_exits_quietly_with_no_sends(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=10, now=now)
@@ -751,13 +769,18 @@ class CollectTeamsTests(unittest.TestCase):
         # Present only in profiles.db.
         self.assertEqual(by_team_id[500], {"team_id": 500, "email": "db-only@example.com", "lead_hours": 9})
 
-    def test_profiles_db_configured_but_empty_and_env_var_unset_raises(self):
+    def test_profiles_db_configured_but_currently_empty_and_env_var_unset_returns_empty_list(self):
+        """Not a ConfigError: the operator explicitly enabled the self-serve roster, so zero
+        currently-opted-in teams is an expected, self-resolving state (nobody's visited the
+        Profile tab and turned reminders on yet), not a misconfiguration -- distinct from the
+        early-return branch above, where neither source is even enabled at all."""
         with patch.object(sdr, "fetch_reminder_teams", return_value=[]):
-            with self.assertRaises(sdr.ConfigError):
-                sdr.collect_teams(
-                    None, "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
-                    reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
-                )
+            teams = sdr.collect_teams(
+                None, "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
+                reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
+            )
+
+        self.assertEqual(teams, [])
 
     def test_malformed_env_var_still_raises_even_with_profiles_db_configured(self):
         with patch.object(sdr, "fetch_reminder_teams", return_value=[{"team_id": 1, "email": "a@example.com", "lead_hours": 3}]):

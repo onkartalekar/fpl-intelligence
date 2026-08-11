@@ -190,9 +190,13 @@ def collect_teams(reminder_teams_raw, profiles_db_raw, dashboard_base_url=None, 
     default for either). On a `team_id` collision, the `FPL_INTEL_REMINDER_TEAMS` entry wins -- an
     operator explicitly hand-configuring the secret for a team is a stronger, more deliberate
     signal than an opportunistic profiles.db read, so a manually pinned entry is never silently
-    overridden by one. If the union is still empty (both sources unset/empty, or profiles.db
-    configured but matched zero `'enabled'` rows and the env var is also unset/empty), this raises
-    `ConfigError` -- nothing configured must fail loudly, not silently do nothing.
+    overridden by one.
+
+    Unlike the "neither source configured at all" case above (a real setup mistake, still a hard
+    `ConfigError`), an empty union here is *not* an error: it means the roster is genuinely empty
+    right now (no one has opted into reminders yet), which is an expected, self-resolving state on
+    a fresh deployment, not a misconfiguration -- returns `[]`, and `run()` already handles an
+    empty teams list as a quiet no-op.
     """
     if not profiles_db_source_enabled(profiles_db_raw):
         return parse_reminder_teams(reminder_teams_raw)
@@ -216,12 +220,14 @@ def collect_teams(reminder_teams_raw, profiles_db_raw, dashboard_base_url=None, 
     secret_team_ids = {team["team_id"] for team in secret_teams}
     merged = secret_teams + [team for team in db_teams if team["team_id"] not in secret_team_ids]
 
-    if not merged:
-        raise ConfigError(
-            f"No reminder recipients configured: {REMINDER_TEAMS_ENV_VAR} is not set or empty, "
-            f"and {REMINDER_PROFILES_DB_ENV_VAR} is set but matched no team with "
-            "reminder_status='enabled' in profiles.db."
-        )
+    # Deliberately not a ConfigError, even if merged is empty: unlike the early-return branch
+    # above (profiles_db disabled *and* FPL_INTEL_REMINDER_TEAMS unset/empty -- genuinely nothing
+    # configured, a real setup mistake worth failing loudly on), reaching this point already means
+    # the operator explicitly enabled the self-serve roster. Zero currently-opted-in teams is a
+    # normal, expected, self-resolving state on a fresh deployment -- nobody has visited the
+    # Profile tab and turned reminders on yet -- not a misconfiguration. run() already handles an
+    # empty teams list gracefully (falls through its own "outside window" no-op path), so this
+    # just lets that existing behavior take over instead of failing the whole scheduled run.
     return merged
 
 
@@ -949,6 +955,13 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=Non
     Railway's own (possibly-not-yet-refreshed) state, the same reasoning issue #101's scheduled-
     refresh trigger already established for the identical question.
     """
+    if not teams:
+        # Distinct from "outside window" below -- this means collect_teams() found nobody
+        # currently opted in (an expected, self-resolving state, not an error -- see its own
+        # docstring), not that a real roster simply doesn't match this hour's checkpoint.
+        print("checked: no reminder recipients configured right now")
+        return 0
+
     now = now or datetime.now(timezone.utc)
     bootstrap, fixtures, stale = load_bootstrap_and_fixtures(root)
     event = next_unfinished_event(bootstrap)
