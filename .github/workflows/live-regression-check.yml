@@ -1,0 +1,55 @@
+name: Live regression check
+
+# Issue #119: functional regression checks run directly against the real deployed Railway origin
+# -- nothing else in this repo does that (tests/*.py runs in-process; the verify-dashboard skill
+# targets a locally-started server). See plans/issue-119-live-regression-agent.md for the full
+# design, including why /api/contact specifically needs a real IMAP mailbox poll rather than just
+# checking the API's own response (its email-send failure is deliberately swallowed by issue
+# #110's durability backstop, so a broken SMTP config there still returns {"status": "ok"} --
+# exactly the class of bug that motivated this issue).
+#
+# Daily cron catches drift with no code change involved (an expired credential, a Railway
+# network/DNS change); workflow_dispatch covers the deploy-triggered case (run it right after a
+# deploy, rather than waiting for the next scheduled tick).
+
+on:
+  schedule:
+    - cron: "0 13 * * *"  # once daily, mid-afternoon UTC -- no continuous-deployment pipeline
+                            # here that would need tighter coverage than this.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: skip only the /api/contact real-email-delivery check (every other check, including its own input-validation rejection, still runs)."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  live-regression-check:
+    runs-on: ubuntu-latest
+    env:
+      FPL_INTEL_LIVE_CHECK_BASE_URL: ${{ secrets.FPL_INTEL_DASHBOARD_BASE_URL }}
+      # Issue #119: same account reminder_confirmation.py already sends the Contact Us
+      # notification to (there is no separate operator-recipient env var, by design) -- reused
+      # here to read that notification back over IMAP, not a new secret.
+      FPL_INTEL_SERVER_SMTP_USER: ${{ secrets.FPL_INTEL_SERVER_SMTP_USER }}
+      FPL_INTEL_SERVER_SMTP_PASSWORD: ${{ secrets.FPL_INTEL_SERVER_SMTP_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run live regression checks
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          else
+            DRY_RUN_FLAG=""
+          fi
+          PYTHONPATH=src python3 scripts/live_regression_check.py $DRY_RUN_FLAG

@@ -109,7 +109,7 @@ triggers) once the script itself exists, and covers both failure classes the iss
 - **Synthetic data marking, not a separate environment.** A second Railway environment would
   duplicate the volume/deployment/secrets story this session's #125 work just finished
   consolidating into one source of truth -- disproportionate for a test agent. Instead: a fixed,
-  clearly-synthetic team ID range/pattern (e.g. reserve `900000000`-`900000099`, comfortably
+  clearly-synthetic team ID range/pattern (e.g. reserve `90000000`-`90000099`, comfortably
   outside FPL's real team ID space -- current real team IDs are 8 digits, well under 90000000)
   and a clearly-marked test email address (e.g. `fpl-intel-live-check+<run-id>@<test-domain>`)
   for every write the agent makes, so a human auditing `profiles.db`/the contact log can
@@ -140,7 +140,7 @@ triggers) once the script itself exists, and covers both failure classes the iss
   `FPL_INTEL_SERVER_SMTP_*` recipient (simplest, no new inbox) vs. a dedicated separate test
   address (cleaner separation from real operator traffic, costs one more account to provision).
 - **The reserved synthetic team ID range** -- concrete value needs picking (this plan proposes
-  `900000000`-`900000099` as a starting point, comfortably outside FPL's real ~8-digit team ID
+  `90000000`-`90000099` as a starting point, comfortably outside FPL's real ~8-digit team ID
   space).
 
 ## Recommendation
