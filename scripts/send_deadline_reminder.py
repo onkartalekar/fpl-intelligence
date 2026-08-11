@@ -49,6 +49,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fpl_intel import profiles
 from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
 from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
+from fpl_intel.generation import resolve_artifact
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import compute_manager_view
 
@@ -231,6 +232,26 @@ def load_bootstrap_and_fixtures(root):
         return _shared_load_bootstrap_and_fixtures(root)
     except DeadlineDataError as error:
         raise ConfigError(str(error)) from error
+
+
+def load_official_transfers(root):
+    """Read `official-transfers-latest.json`'s current confirmed-transfer list (issue #122).
+
+    Mirrors `server.py`'s `_default_team_view_action` exactly (`resolve_artifact` -- the
+    generation-aware helper, not a raw file read that could resolve the wrong generation -- with
+    the same `{"transfers": []}`-shaped fallback) so this script's recommendations are computed
+    with the same transfer-signal awareness the live dashboard's per-team lookup always has.
+    A missing file is not treated as `stale` the way a failed live bootstrap fetch is -- this is a
+    local artifact read, not a live-fetch failure, a different failure mode with a different
+    likely cause (an unrefreshed/fresh checkout, not an upstream outage) -- so it degrades
+    silently to `[]`, matching `server.py`'s own "should essentially never fire in practice,
+    defense-in-depth only" treatment of the identical file.
+    """
+    transfers_path = resolve_artifact(root, "official-transfers-latest.json")
+    if not transfers_path.exists():
+        return []
+    transfers_artifact = json.loads(transfers_path.read_text(encoding="utf-8"))
+    return transfers_artifact.get("transfers", [])
 
 
 def _format_deadline(deadline_iso):
@@ -852,6 +873,7 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
     """Core run loop, factored out of `main` so tests can inject `now` and avoid argv/env parsing."""
     now = now or datetime.now(timezone.utc)
     bootstrap, fixtures, stale = load_bootstrap_and_fixtures(root)
+    transfers = load_official_transfers(root)
     event = next_unfinished_event(bootstrap)
     if event is None or not event.get("deadline_time"):
         print("checked: no upcoming gameweek deadline found")
@@ -876,7 +898,7 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
     for team in in_window_teams:
         saved = profiles.load_profile(root / "data" / "profiles.db", team["team_id"])
         manager_view = compute_manager_view(
-            bootstrap, fixtures, [], generated_at, team["team_id"],
+            bootstrap, fixtures, transfers, generated_at, team["team_id"],
             confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
             confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
             draft_squad_ids=saved["draft_squad"] if saved else None,
@@ -890,7 +912,7 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None):
             continue
         if status == "waiting_for_gw2" and decision_center is None:
             decision_center = build_gw_recommendations(
-                bootstrap, fixtures, generated_at=generated_at, recent_transfers=[],
+                bootstrap, fixtures, generated_at=generated_at, recent_transfers=transfers,
             )
         hours_left = hours_until(deadline_iso, now)
         subject, body, html_body = compose_email(
