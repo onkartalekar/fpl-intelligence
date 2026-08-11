@@ -520,10 +520,7 @@ class RefreshProjectTests(unittest.TestCase):
 
     def test_refresh_publishes_whitelisted_profile_fields_only(self):
         """`primary_goal` (issue #12's config/user-profile.json field, read by nothing in
-        `src/`) must stay excluded from the whitelist. `goal` (issue #78's *different*,
-        profiles.db-backed field -- unrelated despite the similar name) is a deliberate,
-        wired addition to this same whitelist, so it's expected here, unlike `primary_goal`.
-        """
+        `src/`) must stay excluded from the whitelist."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "data").mkdir()
@@ -560,14 +557,10 @@ class RefreshProjectTests(unittest.TestCase):
                 "confirmed_free_transfers",
                 "confirmed_free_transfers_event",
                 "risk_profile",
-                "goal",
             },
         )
         self.assertNotIn("primary_goal", state["profile"])
         self.assertNotIn("primary_goal", json.dumps(state["profile"]))
-        # No "goal" key was set in config/user-profile.json's "manager" object (only the
-        # unrelated "primary_goal") -- so issue #78's default applies here.
-        self.assertEqual(state["profile"]["goal"], "top_50k")
 
     def test_refresh_defaults_profile_when_no_profile_file_exists(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -866,7 +859,6 @@ class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
                 root / "data" / "profiles.db", team_id=team_id, timezone="UTC",
                 risk_profile="balanced", confirmed_free_transfers=None,
                 confirmed_free_transfers_event=None, now="2026-08-08T00:00:00Z",
-                goal="top_50k",
             )
         return root
 

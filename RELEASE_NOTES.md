@@ -50,8 +50,7 @@ tip sheet, a vibe, or betting odds.
 
 - **[Live]** No-signup team lookup -- view any public squad by team ID,
   no account created.
-- **[Live]** Manager profile -- team ID, timezone, risk profile, season
-  goal (top 10k / 50k / 100k / beat last season / just for fun),
+- **[Live]** Manager profile -- team ID, timezone, risk profile,
   confirmed free transfers. Saved locally, no password.
 - **[Live]** Preseason draft squad -- declare a provisional squad and
   get personalized recommendations before GW1's official picks exist.

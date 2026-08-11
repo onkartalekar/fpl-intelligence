@@ -27,17 +27,12 @@ from .transfer_decisions import validate_draft_squad
 
 
 _ALLOWED_RISK_PROFILES = {"conservative", "balanced", "aggressive"}
-# Issue #78: a manager's stated season objective -- metadata only, does not drive
-# `risk_profile` selection, model behavior, or any recommendation/copy (see
-# plans/issue-78-manager-goal.md). Keys mirror the profile form's `#profile-goal` <option>s.
-_ALLOWED_GOALS = {"top_10k", "top_50k", "top_100k", "beat_last_season", "just_for_fun"}
 _ALLOWED_PROFILE_KEYS = {
     "team_id",
     "timezone",
     "confirmed_free_transfers",
     "confirmed_free_transfers_event",
     "risk_profile",
-    "goal",
 }
 _TIMEZONE_SHAPE_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
 _PROFILE_VALIDATION_MESSAGE = "Invalid profile payload"
@@ -84,13 +79,8 @@ _DEFAULT_VISITOR_PROFILE = {
     "confirmed_free_transfers_event": None,
     "risk_profile": "balanced",
     "draft_squad": None,
-    # Matches `profiles._DEFAULT_GOAL` (issue #78) -- re-literaled here the same way
-    # "timezone"/"risk_profile" above already duplicate `profiles._DEFAULT_TIMEZONE`/
-    # `profiles._DEFAULT_RISK_PROFILE` rather than reaching into another module's private
-    # constant.
-    "goal": "top_50k",
-    # Issue #79: unlike `goal` above, these three are never defaulted to a non-null placeholder
-    # -- None/null means "no reminder ever requested", a real, distinct state (see
+    # Issue #79: these three are never defaulted to a non-null placeholder -- None/null means
+    # "no reminder ever requested", a real, distinct state (see
     # `profiles._row_to_dict`'s matching comment). `reminder_pending_email` is included for the
     # same reason `email` is: it's personal contact information, filtered out of
     # `state["profile"]` on an explicit lookup of someone else's team, same as `email` itself
@@ -118,8 +108,8 @@ _ALLOWED_REMINDER_LEAD_HOURS = {3, 12, 24}
 _ALLOWED_REMINDER_OPT_IN_KEYS = {"team_id", "action", "email", "lead_hours"}
 _REMINDER_OPT_IN_VALIDATION_MESSAGE = "Invalid reminder opt-in payload"
 _REMINDER_EMAIL_MAX_LENGTH = 254  # RFC 5321's practical maximum total address length
-# Issue #110: category is a fixed, closed option set, mirroring the profile form's `risk_profile`/
-# `goal` selects -- matches the Contact Us form's `#contact-category` <option>s.
+# Issue #110: category is a fixed, closed option set, mirroring the profile form's `risk_profile`
+# select -- matches the Contact Us form's `#contact-category` <option>s.
 _ALLOWED_CONTACT_CATEGORIES = {"bug", "feature_request", "feedback", "other"}
 _ALLOWED_CONTACT_KEYS = {"category", "message", "reply_to"}
 # Generous for free-text feedback while comfortably fitting inside `do_POST`'s shared 4096-byte
@@ -277,15 +267,6 @@ def _default_model_performance_action(root):
 def _default_visitor_profile_action(root):
     """Build the default per-team saved-profile reader, for splicing into a served page.
 
-    Note (issue #78): this reader's output is spliced into `state["profile"]` on *both* the
-    visitor's own cookie-resolved team path and the explicit `?team_id=` lookup-of-someone-else's
-    -team path (see `_serve_dashboard` below) -- so `goal`, like the `risk_profile` already
-    returned here, becomes visible to anyone who looks a team ID up. That's an intentional,
-    considered choice, not an oversight: `goal` is a low-sensitivity, five-option self-declared
-    target (comparable in sensitivity to `risk_profile`, which this same code path already
-    exposes today), not personal contact information like `email` -- so no extra gating is added
-    for it here.
-
     Issue #79: `email`/`reminder_status`/`reminder_lead_hours`/`reminder_pending_email` ARE
     personal contact information, unlike every other field returned here -- this function still
     always returns them (so the visitor's own-team view has everything it needs), but
@@ -307,7 +288,6 @@ def _default_visitor_profile_action(root):
             "confirmed_free_transfers_event": saved["confirmed_free_transfers_event"],
             "risk_profile": saved["risk_profile"],
             "draft_squad": saved["draft_squad"],
-            "goal": saved["goal"],
             "email": saved["email"],
             "reminder_status": saved["reminder_status"],
             "reminder_lead_hours": saved["reminder_lead_hours"],
@@ -398,13 +378,6 @@ def _validate_profile_payload(payload):
         raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
     cleaned["risk_profile"] = risk_profile
 
-    # Issue #78: metadata-only stated season objective, validated the same way as
-    # `risk_profile` above -- a fixed, closed option set, rejecting anything else.
-    goal = payload.get("goal")
-    if goal not in _ALLOWED_GOALS:
-        raise ProfileValidationError(_PROFILE_VALIDATION_MESSAGE)
-    cleaned["goal"] = goal
-
     return cleaned
 
 
@@ -428,7 +401,6 @@ def _default_profile_action(root, payload):
         risk_profile=cleaned["risk_profile"],
         confirmed_free_transfers=cleaned["confirmed_free_transfers"],
         confirmed_free_transfers_event=cleaned["confirmed_free_transfers_event"],
-        goal=cleaned["goal"],
         now=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -1230,7 +1202,7 @@ def create_server(
                     visitor_profile = visitor_profile_action(team_id)
                     # Issue #79: email/reminder_status/reminder_lead_hours/reminder_pending_email
                     # are personal contact information, unlike every other field this splice
-                    # carries (timezone, risk_profile, draft_squad, goal) -- they must never be
+                    # carries (timezone, risk_profile, draft_squad) -- they must never be
                     # visible to an explicit ?team_id= lookup of someone else's team, only the
                     # visitor's own cookie-resolved team. Filtered here, at the single splice site,
                     # rather than in `_default_visitor_profile_action` (or any injected replacement

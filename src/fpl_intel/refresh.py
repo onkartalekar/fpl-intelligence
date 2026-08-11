@@ -419,12 +419,6 @@ def _refresh_project_unlocked(
             "confirmed_free_transfers": profile.get("manager", {}).get("confirmed_free_transfers"),
             "confirmed_free_transfers_event": profile.get("manager", {}).get("confirmed_free_transfers_event"),
             "risk_profile": profile.get("manager", {}).get("risk_profile") or "balanced",
-            # Issue #78: display-only, threaded through the same spot as `risk_profile` above --
-            # never fed into `risk_profile` selection or any recommendation logic. Overwritten by
-            # `server.py`'s per-team splice (`_default_visitor_profile_action`, reading the real
-            # profiles.db-backed `goal`) whenever a team ID is known at request time; this is only
-            # the initial/no-team-known value baked into the generated dashboard-state.json.
-            "goal": profile.get("manager", {}).get("goal") or "top_50k",
         },
         "fpl": fpl_summary,
         "source_health": source_health,
