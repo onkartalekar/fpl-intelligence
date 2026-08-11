@@ -105,7 +105,10 @@ building alongside Candidate 1 from the start rather than as a later addition.
 - SMTP: **open question, worth a quick decision rather than guessing** -- reuse `FPL_INTEL_SERVER_SMTP_*` (already exists for exactly this shape: a live request handler sending one short email synchronously) versus a dedicated `FPL_INTEL_CONTACT_SMTP_*` (independently rotatable credential, matching #79's own stated reasoning for keeping its SMTP vars separate from the offline reminder script's). Leaning toward reuse, since the "why keep these separate" reasoning in #79 was about different *exposure profiles* (live server vs. offline trusted cron) -- this new endpoint has the same exposure profile as #79's confirmation-email send, not a different one.
 - Basic validation matching `_validate_profile_payload`'s established style (exact-key allowlist, length caps, no user input reflected back in error responses).
 
-## Next step
+## Decided (2026-08-11)
 
-Present this to the user for direction on: (1) confirm Candidate 1 + local-log backstop over
-Candidate 2/3, (2) SMTP var reuse vs. a dedicated one. Then hand off to `ship-issue`.
+Both open questions confirmed directly by the user: **Candidate 1 (email) + the local-log
+durability backstop**, over Candidate 2/3's persisted-store-plus-admin-auth route; and **reuse
+`FPL_INTEL_SERVER_SMTP_*`** rather than a dedicated `FPL_INTEL_CONTACT_SMTP_*`. Ready for
+`ship-issue`, continuing on this same branch/worktree per this skill's own guidance (a plan doc
+and its eventual implementation sharing one branch is expected, not a special case).
