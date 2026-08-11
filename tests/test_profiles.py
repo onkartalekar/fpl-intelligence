@@ -23,7 +23,7 @@ class ProfileStoreTests(unittest.TestCase):
         row = save_profile(
             self.db_path, team_id=364759, timezone="America/New_York", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertEqual(row["team_id"], 364759)
@@ -32,7 +32,6 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIsNone(row["confirmed_free_transfers"])
         self.assertIsNone(row["email"])
         self.assertIsNone(row["draft_squad"])
-        self.assertEqual(row["goal"], "top_50k")
         self.assertEqual(row["created_at"], "2026-08-08T00:00:00Z")
         self.assertEqual(row["updated_at"], "2026-08-08T00:00:00Z")
         self.assertEqual(load_profile(self.db_path, 364759), row)
@@ -41,13 +40,13 @@ class ProfileStoreTests(unittest.TestCase):
         first = save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         second = save_profile(
             self.db_path, team_id=1, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=2, confirmed_free_transfers_event=5,
-            now="2026-08-09T00:00:00Z", goal="top_10k",
+            now="2026-08-09T00:00:00Z",
         )
 
         self.assertEqual(second["created_at"], first["created_at"])
@@ -56,30 +55,27 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(second["risk_profile"], "aggressive")
         self.assertEqual(second["confirmed_free_transfers"], 2)
         self.assertEqual(second["confirmed_free_transfers_event"], 5)
-        self.assertEqual(second["goal"], "top_10k")
 
     def test_different_team_ids_are_kept_fully_independent(self):
         save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="conservative",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_10k",
+            now="2026-08-08T00:00:00Z",
         )
         save_profile(
             self.db_path, team_id=2, timezone="Asia/Tokyo", risk_profile="aggressive",
             confirmed_free_transfers=3, confirmed_free_transfers_event=4,
-            now="2026-08-08T00:00:00Z", goal="just_for_fun",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertEqual(load_profile(self.db_path, 1)["risk_profile"], "conservative")
         self.assertEqual(load_profile(self.db_path, 2)["risk_profile"], "aggressive")
-        self.assertEqual(load_profile(self.db_path, 1)["goal"], "top_10k")
-        self.assertEqual(load_profile(self.db_path, 2)["goal"], "just_for_fun")
 
     def test_saving_never_writes_email_which_stays_null_until_a_future_opt_in(self):
         row = save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertIsNone(row["email"])
@@ -90,7 +86,7 @@ class ProfileStoreTests(unittest.TestCase):
         save_profile(
             nested_db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertTrue(nested_db_path.exists())
@@ -105,15 +101,13 @@ class ProfileStoreTests(unittest.TestCase):
         # Seeded with the same defaults the dashboard already applies for an unconfigured visitor.
         self.assertEqual(row["timezone"], "America/New_York")
         self.assertEqual(row["risk_profile"], "balanced")
-        # No profile has ever been saved for this team -- `goal` resolves to the read-time default.
-        self.assertEqual(row["goal"], "top_50k")
         self.assertEqual(load_profile(self.db_path, 99), row)
 
     def test_saving_a_draft_squad_preserves_an_existing_profile(self):
         save_profile(
             self.db_path, team_id=5, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=2, confirmed_free_transfers_event=3,
-            now="2026-08-01T00:00:00Z", goal="top_10k",
+            now="2026-08-01T00:00:00Z",
         )
 
         row = save_draft_squad(self.db_path, team_id=5, draft_squad_ids=list(range(1, 16)), now="2026-08-08T00:00:00Z")
@@ -124,8 +118,6 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(row["confirmed_free_transfers_event"], 3)
         self.assertEqual(row["created_at"], "2026-08-01T00:00:00Z")
         self.assertEqual(row["draft_squad"], list(range(1, 16)))
-        # Issue #78: saving a draft squad must not silently clobber a previously chosen goal.
-        self.assertEqual(row["goal"], "top_10k")
 
     def test_saving_a_profile_preserves_an_existing_draft_squad(self):
         save_draft_squad(self.db_path, team_id=7, draft_squad_ids=list(range(1, 16)), now="2026-08-01T00:00:00Z")
@@ -133,12 +125,11 @@ class ProfileStoreTests(unittest.TestCase):
         row = save_profile(
             self.db_path, team_id=7, timezone="UTC", risk_profile="conservative",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="beat_last_season",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertEqual(row["draft_squad"], list(range(1, 16)))
         self.assertEqual(row["risk_profile"], "conservative")
-        self.assertEqual(row["goal"], "beat_last_season")
 
     def test_saving_none_clears_a_previously_saved_draft_squad(self):
         save_draft_squad(self.db_path, team_id=8, draft_squad_ids=list(range(1, 16)), now="2026-08-01T00:00:00Z")
@@ -151,7 +142,7 @@ class ProfileStoreTests(unittest.TestCase):
         row = save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertIsNone(row["opted_out"])
@@ -159,12 +150,12 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIsNone(load_pin_hash(self.db_path, 1))
 
     def test_new_teams_have_no_reminder_decision_until_touched(self):
-        """Issue #79: `reminder_status` is None (never decided), not a defaulted value like
-        `goal` -- an ordinary /api/profile save must never populate reminder fields."""
+        """Issue #79: `reminder_status` is None (never decided) -- an ordinary /api/profile save
+        must never populate reminder fields."""
         row = save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
 
         self.assertIsNone(row["reminder_status"])
@@ -172,76 +163,6 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIsNone(row["reminder_pending_email"])
         self.assertIsNone(row["reminder_confirmation_token_hash"])
         self.assertIsNone(row["reminder_confirmation_expires_at"])
-
-
-class GoalFieldTests(unittest.TestCase):
-    """Issue #78: a manager's stated season objective, metadata-only for now.
-
-    Covers the read-time default substitution and -- the change's main risk, per the issue's
-    own review -- that the two *other* write paths (`save_draft_squad`, `set_lookup_opt_out`)
-    never silently null out a goal that was set through the ordinary profile save.
-    """
-
-    def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.directory.name) / "profiles.db"
-
-    def tearDown(self):
-        self.directory.cleanup()
-
-    def test_a_brand_new_row_with_no_goal_ever_saved_defaults_to_top_50k(self):
-        # Created via the opt-out endpoint, never touching the profile form -- exactly the case
-        # `_row_to_dict`'s read-time default exists for.
-        row = set_lookup_opt_out(
-            self.db_path, team_id=1, opted_out=True, pin_hash="hash-one",
-            now="2026-08-08T00:00:00Z",
-        )
-
-        self.assertEqual(row["goal"], "top_50k")
-
-    def test_goal_survives_a_later_draft_squad_save_that_does_not_touch_it(self):
-        save_profile(
-            self.db_path, team_id=5, timezone="UTC", risk_profile="balanced",
-            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-01T00:00:00Z", goal="top_10k",
-        )
-
-        row = save_draft_squad(
-            self.db_path, team_id=5, draft_squad_ids=list(range(1, 16)), now="2026-08-08T00:00:00Z"
-        )
-
-        self.assertEqual(row["goal"], "top_10k")
-        self.assertEqual(load_profile(self.db_path, 5)["goal"], "top_10k")
-
-    def test_goal_survives_a_later_lookup_opt_out_toggle_that_does_not_touch_it(self):
-        save_profile(
-            self.db_path, team_id=6, timezone="UTC", risk_profile="balanced",
-            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-01T00:00:00Z", goal="beat_last_season",
-        )
-
-        row = set_lookup_opt_out(
-            self.db_path, team_id=6, opted_out=True, pin_hash="hash-one",
-            now="2026-08-08T00:00:00Z",
-        )
-
-        self.assertEqual(row["goal"], "beat_last_season")
-        self.assertEqual(load_profile(self.db_path, 6)["goal"], "beat_last_season")
-
-    def test_saving_a_profile_again_updates_goal_directly(self):
-        save_profile(
-            self.db_path, team_id=9, timezone="UTC", risk_profile="balanced",
-            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-01T00:00:00Z", goal="just_for_fun",
-        )
-
-        row = save_profile(
-            self.db_path, team_id=9, timezone="UTC", risk_profile="balanced",
-            confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_100k",
-        )
-
-        self.assertEqual(row["goal"], "top_100k")
 
 
 class LookupOptOutStoreTests(unittest.TestCase):
@@ -276,7 +197,7 @@ class LookupOptOutStoreTests(unittest.TestCase):
         save_profile(
             self.db_path, team_id=1, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=2, confirmed_free_transfers_event=5,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
         set_lookup_opt_out(
             self.db_path, team_id=1, opted_out=True, pin_hash="hash-one",
@@ -300,7 +221,7 @@ class LookupOptOutStoreTests(unittest.TestCase):
         save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
         set_lookup_opt_out(
             self.db_path, team_id=1, opted_out=True, pin_hash="hash-one",
@@ -310,7 +231,7 @@ class LookupOptOutStoreTests(unittest.TestCase):
         row = save_profile(
             self.db_path, team_id=1, timezone="UTC", risk_profile="aggressive",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T02:00:00Z", goal="top_50k",
+            now="2026-08-08T02:00:00Z",
         )
 
         self.assertTrue(row["opted_out"])
@@ -362,7 +283,7 @@ class ReminderStoreTests(unittest.TestCase):
         save_profile(
             self.db_path, team_id=5, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=2, confirmed_free_transfers_event=3,
-            now="2026-08-01T00:00:00Z", goal="top_10k",
+            now="2026-08-01T00:00:00Z",
         )
 
         row = set_reminder_pending(
@@ -374,7 +295,6 @@ class ReminderStoreTests(unittest.TestCase):
         self.assertEqual(row["timezone"], "Europe/London")
         self.assertEqual(row["risk_profile"], "aggressive")
         self.assertEqual(row["confirmed_free_transfers"], 2)
-        self.assertEqual(row["goal"], "top_10k")
         self.assertEqual(row["reminder_status"], "pending")
 
     def test_set_reminder_pending_overwrites_a_previous_pending_request(self):
@@ -417,7 +337,7 @@ class ReminderStoreTests(unittest.TestCase):
         save_profile(
             self.db_path, team_id=2, timezone="UTC", risk_profile="balanced",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-08T00:00:00Z", goal="top_50k",
+            now="2026-08-08T00:00:00Z",
         )
         self.assertIsNone(confirm_reminder(self.db_path, team_id=2, now="2026-08-08T00:00:00Z"))
 
@@ -495,7 +415,7 @@ class ReminderStoreTests(unittest.TestCase):
         save_profile(
             self.db_path, team_id=5, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=2, confirmed_free_transfers_event=3,
-            now="2026-08-01T00:00:00Z", goal="top_10k",
+            now="2026-08-01T00:00:00Z",
         )
 
         row = set_reminder_decision(
@@ -504,7 +424,6 @@ class ReminderStoreTests(unittest.TestCase):
 
         self.assertEqual(row["timezone"], "Europe/London")
         self.assertEqual(row["risk_profile"], "aggressive")
-        self.assertEqual(row["goal"], "top_10k")
 
     def test_reminder_writes_never_disturb_opt_out_flag_or_pin(self):
         set_lookup_opt_out(
@@ -598,7 +517,6 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIsNone(row["draft_squad"])
         self.assertIsNone(row["opted_out"])
         self.assertIsNone(row["reminder_status"])
-        self.assertEqual(row["goal"], "top_50k")
 
     def test_writing_to_a_pre_61_database_does_not_raise(self):
         self._create_pre_61_schema()
@@ -619,11 +537,10 @@ class SchemaMigrationTests(unittest.TestCase):
         row = save_profile(
             self.db_path, team_id=364758, timezone="Europe/London", risk_profile="aggressive",
             confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-            now="2026-08-09T00:00:00Z", goal="top_10k",
+            now="2026-08-09T00:00:00Z",
         )
 
         self.assertEqual(row["timezone"], "Europe/London")
-        self.assertEqual(row["goal"], "top_10k")
 
 
 if __name__ == "__main__":
