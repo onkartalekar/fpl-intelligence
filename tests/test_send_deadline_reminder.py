@@ -83,6 +83,34 @@ class SendWindowArithmeticTests(unittest.TestCase):
         self.assertAlmostEqual(sdr.hours_until(self.deadline, now), 5.0)
 
 
+class LoadOfficialTransfersTests(unittest.TestCase):
+    """Issue #122: mirrors server.py's `_default_team_view_action` handling of the exact same
+    `official-transfers-latest.json` artifact -- resolve_artifact-based read, `{"transfers": []}`
+    shaped fallback when the file is missing."""
+
+    def test_reads_the_transfers_list_from_the_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "data" / "official-transfers-latest.json").write_text(
+                json.dumps({"transfers": [{"player": "Example Player", "to_club": "Arsenal"}]}),
+                encoding="utf-8",
+            )
+
+            transfers = sdr.load_official_transfers(root)
+
+        self.assertEqual(transfers, [{"player": "Example Player", "to_club": "Arsenal"}])
+
+    def test_missing_file_falls_back_to_an_empty_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+
+            transfers = sdr.load_official_transfers(root)
+
+        self.assertEqual(transfers, [])
+
+
 class ReminderTeamsParsingTests(unittest.TestCase):
     def test_missing_or_empty_env_var_fails_loudly(self):
         with self.assertRaises(sdr.ConfigError):
@@ -479,6 +507,31 @@ class RunLoopTests(unittest.TestCase):
         self.assertEqual(sent_to, "manager@example.com")
         self.assertNotIn("manager@example.com", captured.getvalue())
         self.assertIn("reminder sent for GW1 to 1 team(s)", captured.getvalue())
+
+    def test_real_transfer_data_is_forwarded_to_compute_manager_view_and_recommendations(self):
+        """Issue #122 regression: run() must not silently compute recommendations with an empty
+        transfers list -- confirms load_official_transfers's result reaches both
+        compute_manager_view (every team) and build_gw_recommendations (the waiting_for_gw2
+        path), the exact coverage gap that let issue #122 go unnoticed."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+        real_transfers = [{"player": "Example Player", "to_club": "Arsenal"}]
+        manager_view = {
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "waiting_for_gw2", "event": 1},
+        }
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "load_official_transfers", return_value=real_transfers), \
+             patch.object(sdr, "compute_manager_view", return_value=manager_view) as mock_view, \
+             patch.object(sdr, "build_gw_recommendations", return_value={"status": "active"}) as mock_recs, \
+             patch.object(sdr, "send_email"):
+            with patch("sys.stdout", io.StringIO()):
+                sdr.run(teams, dry_run=False, smtp_config={"host": "h", "port": 1, "user": "u", "password": "p"}, now=now)
+
+        self.assertEqual(mock_view.call_args.args[2], real_transfers)
+        self.assertEqual(mock_recs.call_args.kwargs["recent_transfers"], real_transfers)
 
     def test_different_lead_hours_are_evaluated_independently(self):
         """Two teams configured with different lead_hours: only the in-window one is emailed."""
