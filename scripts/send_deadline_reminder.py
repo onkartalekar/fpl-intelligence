@@ -11,14 +11,17 @@ pattern in `src/fpl_intel/news_signals.py`:
 - `FPL_INTEL_REMINDER_TEAMS`: a JSON list of recipients, one object per team, e.g.
   `[{"team_id": 123456, "email": "manager@example.com", "lead_hours": 3}]`. `lead_hours` is
   optional and defaults to 3.
-- `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80): optional, unset by default -- explicit opt-in,
-  matching the rest of this module's env-var-driven config (nothing here is ever auto-detected
-  from a file's mere presence). When set, adds recipients from `profiles.db`'s self-serve opt-in
-  data (issue #79): every team with `reminder_status == 'enabled'` and a confirmed `email`, using
-  each row's own `reminder_lead_hours`. Set it to a truthy sentinel ("1"/"true"/"yes",
-  case-insensitive) to use the default location `<root>/data/profiles.db`, or to an explicit path
-  to point elsewhere (e.g. in a test). Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`: when
-  the same team_id appears in both sources, the `FPL_INTEL_REMINDER_TEAMS` entry wins -- an
+- `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80, source changed by issue #105): optional, unset by
+  default -- explicit opt-in, matching the rest of this module's env-var-driven config (nothing
+  here is ever auto-detected from a file's mere presence). Set it to a truthy value ("1"/"true"/
+  "yes", case-insensitive) to add recipients from `profiles.db`'s self-serve opt-in data (issue
+  #79): every team with `reminder_status == 'enabled'` and a confirmed `email`, using each row's
+  own `reminder_lead_hours`. As of issue #105, this no longer reads a local file path -- it fetches
+  the roster live from the hosted dashboard's `GET /api/reminder-teams` (see
+  `FPL_INTEL_REMINDER_TEAMS_TOKEN` below), the same reason `FPL_INTEL_DASHBOARD_BASE_URL`/
+  `FPL_INTEL_REFRESH_TOKEN` below exist: a GitHub Actions runner has no shared filesystem with
+  Railway's `profiles.db` to read directly. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`:
+  when the same team_id appears in both sources, the `FPL_INTEL_REMINDER_TEAMS` entry wins -- an
   operator explicitly hand-configuring the secret for a team is a stronger, more deliberate signal
   than an opportunistic profiles.db read, so it should not be silently overridden by one. Neither
   source is required on its own, but leaving both unset/empty still fails loudly with a
@@ -37,6 +40,10 @@ pattern in `src/fpl_intel/news_signals.py`:
   (issue #27) -- reused here, not a new secret, to exempt this script's per-team
   `/api/manager-view` calls from the visitor-tuned rate limit that would otherwise trip on the
   second team in a loop of more than one.
+- `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105): required only when `FPL_INTEL_REMINDER_PROFILES_DB`
+  is enabled -- gates `/api/reminder-teams`, which returns every opted-in manager's email address
+  in bulk. Deliberately a **separate** secret from `FPL_INTEL_REFRESH_TOKEN`, not a reuse of it: a
+  leak of the refresh token must not also hand over the entire reminder roster.
 
 Log hygiene: this script never prints recipient email addresses or SMTP credentials to stdout or
 stderr during normal (non-dry-run) operation -- only generic status lines. `--dry-run` is the one
@@ -58,7 +65,6 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel import profiles
 from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
 from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
 
@@ -67,7 +73,6 @@ DEFAULT_LEAD_HOURS = 3
 
 REMINDER_TEAMS_ENV_VAR = "FPL_INTEL_REMINDER_TEAMS"
 REMINDER_PROFILES_DB_ENV_VAR = "FPL_INTEL_REMINDER_PROFILES_DB"
-_PROFILES_DB_TRUTHY_SENTINELS = {"1", "true", "yes"}
 SMTP_HOST_ENV_VAR = "FPL_INTEL_SMTP_HOST"
 SMTP_PORT_ENV_VAR = "FPL_INTEL_SMTP_PORT"
 SMTP_USER_ENV_VAR = "FPL_INTEL_SMTP_USER"
@@ -88,6 +93,10 @@ _DEFAULT_DASHBOARD_BASE_URL = "http://localhost:8877"
 # Issue #125: the same operator secret `/api/refresh` already requires (issue #27) -- see
 # `_require_refresh_token`'s docstring for why this script now needs it too.
 REFRESH_TOKEN_ENV_VAR = "FPL_INTEL_REFRESH_TOKEN"
+
+# Issue #105: a separate secret from REFRESH_TOKEN_ENV_VAR, gating /api/reminder-teams -- see
+# `fetch_reminder_teams`'s docstring for why this is deliberately not a reuse of the refresh token.
+REMINDER_TEAMS_TOKEN_ENV_VAR = "FPL_INTEL_REMINDER_TEAMS_TOKEN"
 
 _DIVIDER = "-" * 60
 
@@ -126,76 +135,84 @@ def parse_reminder_teams(raw_value):
     return teams
 
 
-def resolve_profiles_db_path(raw_value, root=ROOT):
-    """Resolve `FPL_INTEL_REMINDER_PROFILES_DB` to a concrete `profiles.db` path, or `None`.
+def profiles_db_source_enabled(raw_value):
+    """Whether `FPL_INTEL_REMINDER_PROFILES_DB` opts into the profiles.db-sourced roster (issue
+    #80). Unset/blank means disabled -- explicit opt-in only, no auto-detection.
 
-    `None` (unset or blank) means the profiles.db source is disabled -- explicit opt-in only, no
-    auto-detection of the file's presence. A truthy sentinel ("1"/"true"/"yes", case-insensitive)
-    resolves to the default location `<root>/data/profiles.db`; any other non-empty value is
-    treated as an explicit path to the database file (handy for tests, or a non-default layout).
+    Issue #105: this used to resolve to a local filesystem path (a truthy sentinel meant the
+    default `<root>/data/profiles.db`, anything else an explicit path). It is now a plain boolean
+    flag -- the roster is always fetched from the hosted dashboard's `/api/reminder-teams` when
+    enabled, never read from a local path, so "explicit path" no longer means anything. Any
+    non-blank value enables it; the historical "1"/"true"/"yes" sentinel set still works (it's a
+    subset of "non-blank"), so existing deployments configuring one of those values keep working
+    unchanged.
     """
-    if raw_value is None or not raw_value.strip():
-        return None
-    value = raw_value.strip()
-    if value.lower() in _PROFILES_DB_TRUTHY_SENTINELS:
-        return Path(root) / "data" / "profiles.db"
-    return Path(value)
+    return raw_value is not None and bool(raw_value.strip())
 
 
-def load_teams_from_profiles_db(db_path):
-    """Build reminder-team entries from `profiles.db`'s self-serve opt-in data (issues #79/#80).
+def fetch_reminder_teams(base_url, token, timeout=30):
+    """GET /api/reminder-teams (issue #105): the opted-in reminder roster -- `team_id`, `email`,
+    `lead_hours` per team with a confirmed, *live* opt-in (`reminder_status == 'enabled'` and a
+    non-empty `email`) -- computed server-side by the one process with legitimate `profiles.db`
+    access, the same reason `fetch_shared_state`/`fetch_manager_view` exist (a GitHub Actions
+    runner has no shared filesystem with Railway to read `profiles.db` from directly). Gated by
+    its own dedicated `X-Reminder-Teams-Token` header -- deliberately not `token`
+    (`fetch_manager_view`'s `/api/refresh` secret), since this endpoint returns every opted-in
+    manager's email address in bulk and has no safe unauthenticated response at all.
 
-    Yields one entry per team with a confirmed, *live* opt-in: `reminder_status == 'enabled'` and
-    a non-empty `email`. Rows that are `'pending'` (confirmation email sent but link not yet
-    clicked), `'declined'`, or `NULL` (never decided) are excluded -- only `confirm_reminder`
-    promotes a row to `'enabled'`, and it always copies the confirmed address into `email` at the
-    same time, so `reminder_status == 'enabled'` and a present `email` should always travel
-    together. `reminder_lead_hours` is always set alongside `reminder_status='enabled'` by #79's
-    write path (`set_reminder_pending` requires it as an argument, and `confirm_reminder` never
-    touches it), so the `DEFAULT_LEAD_HOURS` fallback below is defensive, not expected to trigger
-    in practice.
+    Returns the parsed `teams` list directly (not the raw response envelope), already shaped as
+    `{"team_id": ..., "email": ..., "lead_hours": ...}` per entry -- the same shape
+    `parse_reminder_teams` produces, so callers can treat both sources identically.
     """
-    teams = []
-    for team_id in profiles.list_team_ids(db_path):
-        profile = profiles.load_profile(db_path, team_id)
-        if profile is None or profile.get("reminder_status") != "enabled":
-            continue
-        email = profile.get("email")
-        if not email:
-            continue
-        lead_hours = profile.get("reminder_lead_hours") or DEFAULT_LEAD_HOURS
-        teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
-    return teams
+    request = Request(
+        f"{base_url}/api/reminder-teams",
+        method="GET",
+        headers={"X-Reminder-Teams-Token": token},
+    )
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())["teams"]
 
 
-def collect_teams(reminder_teams_raw, profiles_db_raw, root=ROOT):
-    """Build the final `teams` list `run()` operates on (issue #80).
+def collect_teams(reminder_teams_raw, profiles_db_raw, dashboard_base_url=None, reminder_teams_token=None):
+    """Build the final `teams` list `run()` operates on (issue #80, HTTP-sourced since #105).
 
     `FPL_INTEL_REMINDER_TEAMS` and `FPL_INTEL_REMINDER_PROFILES_DB` are each independently
     optional; either alone is sufficient, and both together are unioned by `team_id`.
 
     When `FPL_INTEL_REMINDER_PROFILES_DB` is unset/blank, this is byte-identical to today's
     behavior: it calls `parse_reminder_teams(reminder_teams_raw)` directly and returns (or raises)
-    exactly what that always has, with the profiles.db path never even touched.
+    exactly what that always has, with `dashboard_base_url`/`reminder_teams_token` never even
+    touched.
 
-    When it is set, `FPL_INTEL_REMINDER_TEAMS` (if also set and non-blank) is parsed the same way,
-    then merged with `load_teams_from_profiles_db`'s rows. On a `team_id` collision, the
-    `FPL_INTEL_REMINDER_TEAMS` entry wins -- an operator explicitly hand-configuring the secret for
-    a team is a stronger, more deliberate signal than an opportunistic profiles.db read, so a
-    manually pinned entry is never silently overridden by one. If the union is still empty (both
-    sources unset/empty, or profiles.db configured but matched zero `'enabled'` rows and the env
-    var is also unset/empty), this raises `ConfigError` -- nothing configured must fail loudly, not
-    silently do nothing.
+    When it is enabled, `FPL_INTEL_REMINDER_TEAMS` (if also set and non-blank) is parsed the same
+    way, then merged with `fetch_reminder_teams`'s rows (requires both `dashboard_base_url` and
+    `reminder_teams_token`, raising `ConfigError` naming whichever is missing -- there is no safe
+    default for either). On a `team_id` collision, the `FPL_INTEL_REMINDER_TEAMS` entry wins -- an
+    operator explicitly hand-configuring the secret for a team is a stronger, more deliberate
+    signal than an opportunistic profiles.db read, so a manually pinned entry is never silently
+    overridden by one. If the union is still empty (both sources unset/empty, or profiles.db
+    configured but matched zero `'enabled'` rows and the env var is also unset/empty), this raises
+    `ConfigError` -- nothing configured must fail loudly, not silently do nothing.
     """
-    profiles_db_path = resolve_profiles_db_path(profiles_db_raw, root)
-    if profiles_db_path is None:
+    if not profiles_db_source_enabled(profiles_db_raw):
         return parse_reminder_teams(reminder_teams_raw)
+
+    if not dashboard_base_url:
+        raise ConfigError(
+            f"{DASHBOARD_BASE_URL_ENV_VAR} is required when {REMINDER_PROFILES_DB_ENV_VAR} is enabled "
+            "(used to fetch the opted-in roster from /api/reminder-teams)."
+        )
+    if not reminder_teams_token:
+        raise ConfigError(
+            f"{REMINDER_TEAMS_TOKEN_ENV_VAR} is required when {REMINDER_PROFILES_DB_ENV_VAR} is "
+            "enabled (used to authenticate to /api/reminder-teams)."
+        )
 
     secret_teams = []
     if reminder_teams_raw is not None and reminder_teams_raw.strip():
         secret_teams = parse_reminder_teams(reminder_teams_raw)
 
-    db_teams = load_teams_from_profiles_db(profiles_db_path)
+    db_teams = fetch_reminder_teams(dashboard_base_url, reminder_teams_token)
     secret_team_ids = {team["team_id"] for team in secret_teams}
     merged = secret_teams + [team for team in db_teams if team["team_id"] not in secret_team_ids]
 
@@ -1023,10 +1040,24 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
+    # Issue #125: required in both --dry-run and real runs -- unlike /api/refresh (a mutating
+    # action, unsafe to run idly), these are plain reads, so --dry-run still makes them for a
+    # genuine preview, exactly as it always has for the (now-replaced) local compute_manager_view
+    # call. Resolved before collect_teams (issue #105) since it now needs dashboard_base_url too,
+    # when FPL_INTEL_REMINDER_PROFILES_DB is enabled.
+    try:
+        dashboard_base_url = _require_dashboard_base_url()
+        refresh_token = _require_refresh_token()
+    except ConfigError as error:
+        print(f"Configuration error: {error}", file=sys.stderr)
+        return 1
+
     try:
         teams = collect_teams(
             os.environ.get(REMINDER_TEAMS_ENV_VAR),
             os.environ.get(REMINDER_PROFILES_DB_ENV_VAR),
+            dashboard_base_url=dashboard_base_url,
+            reminder_teams_token=os.environ.get(REMINDER_TEAMS_TOKEN_ENV_VAR),
         )
     except ConfigError as error:
         print(f"Configuration error: {error}", file=sys.stderr)
@@ -1039,17 +1070,6 @@ def main(argv=None):
         except ConfigError as error:
             print(f"Configuration error: {error}", file=sys.stderr)
             return 1
-
-    # Issue #125: required in both --dry-run and real runs -- unlike /api/refresh (a mutating
-    # action, unsafe to run idly), these are plain reads, so --dry-run still makes them for a
-    # genuine preview, exactly as it always has for the (now-replaced) local compute_manager_view
-    # call.
-    try:
-        dashboard_base_url = _require_dashboard_base_url()
-        refresh_token = _require_refresh_token()
-    except ConfigError as error:
-        print(f"Configuration error: {error}", file=sys.stderr)
-        return 1
 
     try:
         return run(

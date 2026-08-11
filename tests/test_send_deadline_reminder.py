@@ -10,7 +10,6 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from fpl_intel import profiles
 from fpl_intel.recommendations import build_gw_recommendations
 from fpl_intel.refresh import compute_manager_view
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
@@ -644,82 +643,55 @@ class RunLoopTests(unittest.TestCase):
         self.assertIn("manager@example.com", captured.getvalue())
 
 
-def _enable_reminder(db_path, team_id, email, lead_hours, now):
-    """Drive a team to a genuine `reminder_status='enabled'` row via #79's real write path
-    (`set_reminder_pending` then `confirm_reminder`), rather than hand-writing SQL that bypasses
-    it -- exercises the real schema and the real column semantics `load_teams_from_profiles_db`
-    depends on."""
-    profiles.set_reminder_pending(
-        db_path, team_id, pending_email=email, lead_hours=lead_hours,
-        token_hash="deadbeef", expires_at="2099-01-01T00:00:00Z", now=now,
-    )
-    result = profiles.confirm_reminder(db_path, team_id, now)
-    assert result is not None, "confirm_reminder unexpectedly found nothing pending"
-    return result
+class ProfilesDbSourceEnabledTests(unittest.TestCase):
+    """Issue #105: `FPL_INTEL_REMINDER_PROFILES_DB` is now a plain enable/disable flag -- the
+    roster is always fetched over HTTP, never read from a local path, so there is no "explicit
+    path" branch to test any more."""
 
-
-class LoadTeamsFromProfilesDbTests(unittest.TestCase):
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmpdir.cleanup)
-        self.db_path = Path(self._tmpdir.name) / "profiles.db"
-        self.now = "2026-08-09T12:00:00Z"
-
-    def test_filters_to_enabled_rows_only(self):
-        # Never decided: a plain profile save never touches reminder_status, so it stays NULL.
-        profiles.save_profile(
-            self.db_path, 100, "America/New_York", "balanced", None, None, self.now, "top_50k",
-        )
-        # Pending: confirmation email sent, link not yet clicked.
-        profiles.set_reminder_pending(
-            self.db_path, 200, pending_email="pending@example.com", lead_hours=3,
-            token_hash="hash", expires_at="2099-01-01T00:00:00Z", now=self.now,
-        )
-        # Declined: explicit opt-out, never enabled.
-        profiles.set_reminder_decision(self.db_path, 400, "declined", self.now)
-        # Enabled: the only row that should surface.
-        _enable_reminder(self.db_path, 300, "enabled@example.com", 6, self.now)
-
-        teams = sdr.load_teams_from_profiles_db(self.db_path)
-
-        self.assertEqual(teams, [{"team_id": 300, "email": "enabled@example.com", "lead_hours": 6}])
-
-    def test_reads_email_and_lead_hours_from_the_confirmed_row(self):
-        _enable_reminder(self.db_path, 42, "manager@example.com", 12, self.now)
-
-        teams = sdr.load_teams_from_profiles_db(self.db_path)
-
-        self.assertEqual(teams, [{"team_id": 42, "email": "manager@example.com", "lead_hours": 12}])
-
-    def test_no_profiles_at_all_yields_an_empty_list(self):
-        self.assertEqual(sdr.load_teams_from_profiles_db(self.db_path), [])
-
-
-class ResolveProfilesDbPathTests(unittest.TestCase):
     def test_unset_or_blank_is_disabled(self):
-        self.assertIsNone(sdr.resolve_profiles_db_path(None, root=Path("/whatever")))
-        self.assertIsNone(sdr.resolve_profiles_db_path("   ", root=Path("/whatever")))
+        self.assertFalse(sdr.profiles_db_source_enabled(None))
+        self.assertFalse(sdr.profiles_db_source_enabled("   "))
 
-    def test_truthy_sentinel_resolves_to_the_default_location(self):
-        root = Path("/repo/root")
-        for sentinel in ("1", "true", "True", "YES"):
-            self.assertEqual(
-                sdr.resolve_profiles_db_path(sentinel, root=root), root / "data" / "profiles.db",
-            )
+    def test_any_non_blank_value_is_enabled(self):
+        for value in ("1", "true", "True", "YES", "/custom/path/profiles.db", "anything"):
+            self.assertTrue(sdr.profiles_db_source_enabled(value))
 
-    def test_explicit_path_is_used_verbatim(self):
-        self.assertEqual(
-            sdr.resolve_profiles_db_path("/custom/path/profiles.db", root=Path("/repo/root")),
-            Path("/custom/path/profiles.db"),
-        )
+
+class FetchReminderTeamsTests(unittest.TestCase):
+    """Issue #105: `fetch_reminder_teams` against a real running server, matching how
+    `fetch_shared_state`/`fetch_manager_view` are exercised against `server.py` in
+    `tests/test_server.py`'s `ReminderTeamsApiTests`. Kept minimal here (the endpoint's own
+    behavior is covered there) -- this only confirms the client-side request shape."""
+
+    def test_sends_the_token_header_and_returns_the_teams_list(self):
+        captured_headers = {}
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "ok", "teams": [{"team_id": 1, "email": "a@example.com", "lead_hours": 3}]}).encode()
+
+        def fake_urlopen(request, timeout=None):
+            captured_headers.update(request.headers)
+            self.assertEqual(request.full_url, "https://example.up.railway.app/api/reminder-teams")
+            return _FakeResponse()
+
+        with patch.object(sdr, "urlopen", fake_urlopen):
+            teams = sdr.fetch_reminder_teams("https://example.up.railway.app", "reminder-secret")
+
+        self.assertEqual(teams, [{"team_id": 1, "email": "a@example.com", "lead_hours": 3}])
+        # Request headers are capitalized per-word by urllib.
+        self.assertEqual(captured_headers.get("X-reminder-teams-token"), "reminder-secret")
 
 
 class CollectTeamsTests(unittest.TestCase):
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmpdir.cleanup)
-        self.db_path = Path(self._tmpdir.name) / "profiles.db"
-        self.now = "2026-08-09T12:00:00Z"
+    _DASHBOARD_BASE_URL = "https://example.up.railway.app"
+    _REMINDER_TEAMS_TOKEN = "reminder-secret"
 
     def test_profiles_db_unset_is_byte_identical_to_todays_env_var_only_behavior(self):
         raw = json.dumps([{"team_id": 1, "email": "a@example.com", "lead_hours": 3}])
@@ -733,22 +705,42 @@ class CollectTeamsTests(unittest.TestCase):
         with self.assertRaises(sdr.ConfigError):
             sdr.collect_teams(None, None)
 
+    def test_profiles_db_enabled_without_dashboard_base_url_raises(self):
+        with self.assertRaises(sdr.ConfigError):
+            sdr.collect_teams(None, "1", dashboard_base_url=None, reminder_teams_token=self._REMINDER_TEAMS_TOKEN)
+
+    def test_profiles_db_enabled_without_reminder_teams_token_raises(self):
+        with self.assertRaises(sdr.ConfigError):
+            sdr.collect_teams(None, "1", dashboard_base_url=self._DASHBOARD_BASE_URL, reminder_teams_token=None)
+
     def test_only_profiles_db_configured_env_var_unset(self):
-        _enable_reminder(self.db_path, 555, "solo@example.com", 3, self.now)
+        with patch.object(
+            sdr, "fetch_reminder_teams",
+            return_value=[{"team_id": 555, "email": "solo@example.com", "lead_hours": 3}],
+        ) as mock_fetch:
+            teams = sdr.collect_teams(
+                None, "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
+                reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
+            )
 
-        teams = sdr.collect_teams(None, str(self.db_path))
-
+        mock_fetch.assert_called_once_with(self._DASHBOARD_BASE_URL, self._REMINDER_TEAMS_TOKEN)
         self.assertEqual(teams, [{"team_id": 555, "email": "solo@example.com", "lead_hours": 3}])
 
     def test_union_of_both_sources_with_explicit_secret_entry_winning_on_collision(self):
-        _enable_reminder(self.db_path, 300, "from-db@example.com", 6, self.now)
-        _enable_reminder(self.db_path, 500, "db-only@example.com", 9, self.now)
         raw = json.dumps([
             {"team_id": 300, "email": "from-secret@example.com", "lead_hours": 1},
             {"team_id": 600, "email": "secret-only@example.com", "lead_hours": 2},
         ])
+        db_teams = [
+            {"team_id": 300, "email": "from-db@example.com", "lead_hours": 6},
+            {"team_id": 500, "email": "db-only@example.com", "lead_hours": 9},
+        ]
 
-        teams = sdr.collect_teams(raw, str(self.db_path))
+        with patch.object(sdr, "fetch_reminder_teams", return_value=db_teams):
+            teams = sdr.collect_teams(
+                raw, "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
+                reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
+            )
 
         by_team_id = {team["team_id"]: team for team in teams}
         self.assertEqual(len(teams), 3)
@@ -760,14 +752,20 @@ class CollectTeamsTests(unittest.TestCase):
         self.assertEqual(by_team_id[500], {"team_id": 500, "email": "db-only@example.com", "lead_hours": 9})
 
     def test_profiles_db_configured_but_empty_and_env_var_unset_raises(self):
-        # DB exists but has no 'enabled' rows at all.
-        with self.assertRaises(sdr.ConfigError):
-            sdr.collect_teams(None, str(self.db_path))
+        with patch.object(sdr, "fetch_reminder_teams", return_value=[]):
+            with self.assertRaises(sdr.ConfigError):
+                sdr.collect_teams(
+                    None, "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
+                    reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
+                )
 
     def test_malformed_env_var_still_raises_even_with_profiles_db_configured(self):
-        _enable_reminder(self.db_path, 1, "a@example.com", 3, self.now)
-        with self.assertRaises(sdr.ConfigError):
-            sdr.collect_teams("{not json", str(self.db_path))
+        with patch.object(sdr, "fetch_reminder_teams", return_value=[{"team_id": 1, "email": "a@example.com", "lead_hours": 3}]):
+            with self.assertRaises(sdr.ConfigError):
+                sdr.collect_teams(
+                    "{not json", "1", dashboard_base_url=self._DASHBOARD_BASE_URL,
+                    reminder_teams_token=self._REMINDER_TEAMS_TOKEN,
+                )
 
 
 class MainCliTests(unittest.TestCase):

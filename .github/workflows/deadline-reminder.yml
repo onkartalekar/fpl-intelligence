@@ -39,6 +39,11 @@ jobs:
       # runner never had access to -- same two secrets scheduled-refresh.yml already uses.
       FPL_INTEL_DASHBOARD_BASE_URL: ${{ secrets.FPL_INTEL_DASHBOARD_BASE_URL }}
       FPL_INTEL_REFRESH_TOKEN: ${{ secrets.FPL_INTEL_REFRESH_TOKEN }}
+      # Issue #105: opt-in profiles.db-sourced roster, fetched live from /api/reminder-teams --
+      # both secrets default to unset/blank until an operator provisions them, which
+      # collect_teams treats as "disabled," exactly as it always has for this env var.
+      FPL_INTEL_REMINDER_PROFILES_DB: ${{ secrets.FPL_INTEL_REMINDER_PROFILES_DB }}
+      FPL_INTEL_REMINDER_TEAMS_TOKEN: ${{ secrets.FPL_INTEL_REMINDER_TEAMS_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout

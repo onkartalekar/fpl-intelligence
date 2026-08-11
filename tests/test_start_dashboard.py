@@ -28,7 +28,13 @@ class ResolveServerConfigTests(unittest.TestCase):
 
         self.assertEqual(
             config,
-            {"host": "127.0.0.1", "port": 8877, "token": None, "allowed_origin": None},
+            {
+                "host": "127.0.0.1",
+                "port": 8877,
+                "token": None,
+                "reminder_teams_token": None,
+                "allowed_origin": None,
+            },
         )
 
     def test_port_env_var_switches_host_to_0_0_0_0_and_sets_the_port(self):
@@ -71,6 +77,18 @@ class ResolveServerConfigTests(unittest.TestCase):
 
         self.assertIsNone(config["token"])
 
+    def test_reminder_teams_token_env_var_is_passed_through(self):
+        config = start_dashboard.resolve_server_config(
+            {"FPL_INTEL_REMINDER_TEAMS_TOKEN": "reminder-secret"}, cli_port=None
+        )
+
+        self.assertEqual(config["reminder_teams_token"], "reminder-secret")
+
+    def test_reminder_teams_token_defaults_to_none_when_unset(self):
+        config = start_dashboard.resolve_server_config({}, cli_port=None)
+
+        self.assertIsNone(config["reminder_teams_token"])
+
     def test_allowed_origin_env_var_is_passed_through(self):
         config = start_dashboard.resolve_server_config(
             {"FPL_INTEL_ALLOWED_ORIGIN": "https://example.up.railway.app"}, cli_port=None
@@ -88,6 +106,7 @@ class ResolveServerConfigTests(unittest.TestCase):
             {
                 "PORT": "8080",
                 "FPL_INTEL_REFRESH_TOKEN": "op-token",
+                "FPL_INTEL_REMINDER_TEAMS_TOKEN": "reminder-secret",
                 "FPL_INTEL_ALLOWED_ORIGIN": "https://fpl-intelligence.up.railway.app",
             },
             cli_port=None,
@@ -99,6 +118,7 @@ class ResolveServerConfigTests(unittest.TestCase):
                 "host": "0.0.0.0",
                 "port": 8080,
                 "token": "op-token",
+                "reminder_teams_token": "reminder-secret",
                 "allowed_origin": "https://fpl-intelligence.up.railway.app",
             },
         )
