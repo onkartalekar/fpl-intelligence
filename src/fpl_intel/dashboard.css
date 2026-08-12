@@ -635,7 +635,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   cursor: pointer;
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 10px;
   list-style: none;
 }
@@ -643,6 +643,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   display: none;
 }
 .whats-new-date {
+  flex-shrink: 0;
+  min-width: 84px;
+  padding-top: 1px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .04em;
@@ -652,6 +655,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .whats-new-headline {
   font-weight: 600;
   flex: 1;
+  min-width: 0;
+}
+.whats-new-entry summary > .muted {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .whats-new-entry > p.muted {
   margin-top: 10px;
