@@ -120,7 +120,38 @@ Candidate 3 was never a contender regardless of this decision -- it carried Cand
 validation cost while additionally risking a regression in three already-working call sites
 (`_draft_squad`, `build_draft_decisions`, `validate_draft_squad`), for no offsetting benefit.
 
+## Pitch view interaction design (decided 2026-08-12)
+
+Reusing `pitch()` visually is easy -- it already groups by position into rows and naturally
+reflows. What was still unspecified is the actual interaction for getting players into and out of
+the starting XI, setting captain/vice, and making the no-persistence requirement above impossible
+to miss. Decided, rather than left for `ship-issue` to improvise:
+
+- **Layout:** two zones beneath the existing search/filter squad picker -- a `pitch()`-style
+  starting-XI grid (grouped `GKP`/`DEF`/`MID`/`FWD` rows, same CSS as today's recommended-XI views)
+  above, and a flat 4-card bench strip below it.
+- **Interaction:** the existing click-a-card-to-open-inspector behavior
+  (`selectPlayerCard`/`attachBreakdownHandlers`, [dashboard.js:47-48](../src/fpl_intel/dashboard.js:47))
+  stays as the card body's click target -- it's useful and shouldn't be sacrificed. XI/bench
+  movement gets its own small per-card control instead: a "Move to bench" / "Move to XI" button,
+  plus -- only on starting-XI cards -- "C" / "VC" buttons to set captain/vice-captain. No
+  drag-and-drop: this app has no existing drag interaction anywhere to build on, and drag is
+  fragile on touch.
+- **Default state on load:** auto-seed a legal XI from the declared 15 (best `xp_1` per position,
+  subject to FPL's own formation rule -- 1 GKP, 3-5 DEF, 2-5 MID, 1-3 FWD), captain = highest
+  `xp_1` among the seeded 11 -- so the pitch never opens empty; the user adjusts from there.
+- **Legality guard, even though nothing is persisted:** still block illegal in-session moves live
+  (e.g. can't bench the only GKP, can't drop below 3 DEF) the same way `draft-warnings` already
+  live-validates the 15-player squad's budget/club-limit today
+  ([dashboard.js:197](../src/fpl_intel/dashboard.js:197)) -- otherwise the pitch stops looking like
+  a real XI. This is purely client-side UI logic, not new server-side validation (Candidate 2's
+  formation-legality function was for *persisted* data; this is the same idea reimplemented as a
+  disabled/blocked button state, not a new backend rule).
+- **The non-persistence notice:** a fixed, always-visible line directly above the pitch (not a
+  toast) -- e.g. "This lineup is for visualization only and resets on reload -- only your
+  15-player squad is saved." -- satisfying the explicit requirement above.
+
 ## Ready for `ship-issue`
 
-All four of #152's asks, and the XI/bench persistence question raised during this plan, are now
-decided. No open questions remain.
+All four of #152's asks, the XI/bench persistence question, and the pitch view's interaction
+design are now decided. No open questions remain.
