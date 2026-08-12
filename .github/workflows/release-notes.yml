@@ -77,6 +77,23 @@ jobs:
           PYTHONPATH=src python3 scripts/publish_release_notes.py $FLAGS
           exit $?
 
+      - name: Ensure a valid CA bundle before pushing
+        # Defensive: a live run of this workflow failed here with "server certificate
+        # verification failed. CAfile: none CRLfile: none" on `git push`, even though the
+        # earlier Checkout step's own HTTPS clone succeeded moments before in the same job --
+        # so the runner's CA store was fine at checkout time, and something (most likely a
+        # transient runner-image issue; documented as an occasional flake on GitHub-hosted
+        # runners) left it unusable by the time this step ran. Explicitly reinstalling
+        # ca-certificates and pointing git at the resulting bundle is the standard mitigation --
+        # it doesn't weaken verification (no sslVerify=false anywhere), just guarantees a real
+        # bundle is present.
+        if: github.event_name == 'schedule' || inputs.dry_run == false
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --reinstall ca-certificates
+          sudo update-ca-certificates
+          git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+
       - name: Commit the archived entry via a PR, if one was written
         # Only real (non-dry-run) runs write release-notes/<date>.md at all; `git status
         # --porcelain` is empty on a --dry-run run or a genuine no-op day (nothing merged), so
