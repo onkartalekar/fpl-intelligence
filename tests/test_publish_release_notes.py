@@ -146,6 +146,52 @@ class BuildTemplateEntryTests(unittest.TestCase):
         self.assertEqual(prn._truncate("short", 300), "short")
 
 
+class MaxResponseTokensTests(unittest.TestCase):
+    def test_scales_with_pr_count(self):
+        small = prn._max_response_tokens(2)
+        large = prn._max_response_tokens(26)
+
+        self.assertLess(small, large)
+        self.assertEqual(large, prn._BASE_RESPONSE_TOKENS + prn._TOKENS_PER_CHANGE * 26)
+
+    def test_never_zero_even_with_zero_prs(self):
+        self.assertGreater(prn._max_response_tokens(0), 0)
+
+
+class StripMarkdownFenceTests(unittest.TestCase):
+    def test_removes_json_fence(self):
+        raw = '```json\n{"a": 1}\n```'
+        self.assertEqual(prn._strip_markdown_fence(raw), '{"a": 1}')
+
+    def test_removes_bare_fence(self):
+        raw = '```\n{"a": 1}\n```'
+        self.assertEqual(prn._strip_markdown_fence(raw), '{"a": 1}')
+
+    def test_leaves_unfenced_text_unchanged(self):
+        raw = '{"a": 1}'
+        self.assertEqual(prn._strip_markdown_fence(raw), '{"a": 1}')
+
+
+class BuildLlmEntryFenceRegressionTests(unittest.TestCase):
+    """Regression: some models wrap JSON output in a markdown fence despite being told not to --
+    an earlier version of build_llm_entry's bare json.loads rejected this and fell back to the
+    template unnecessarily."""
+
+    def test_fenced_response_still_parses(self):
+        fenced = "```json\n" + json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"category": "Feature", "title": "T", "description": "D"}],
+        }) + "\n```"
+
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=lambda prompt: fenced)
+
+        self.assertEqual(entry["headline"], "H")
+
+
 class BuildLlmEntryTests(unittest.TestCase):
     def test_returns_none_when_unconfigured(self):
         with patch.dict("os.environ", {}, clear=True):

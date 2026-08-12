@@ -32,7 +32,13 @@ permissions:
                     # the first scheduled job in this repo with write access to the repo itself
                     # (every other one is contents: read; see the plan doc's Structural
                     # constraints section for why that's a deliberate, confirmed exception here).
-  pull-requests: read  # Needed to list merged PRs via the GitHub REST search API.
+  pull-requests: write  # This repo's main branch ruleset requires every change go through a PR
+                         # (confirmed live: a direct push here was rejected with "GH013 ... Changes
+                         # must be made through a pull request"), even though it requires zero
+                         # approvals -- so contents: write alone was never going to be enough. This
+                         # workflow now opens a PR for its own archival commit and immediately
+                         # squash-merges it itself (nothing in the ruleset blocks that -- zero
+                         # required reviews, zero required status checks), rather than a bare push.
 
 jobs:
   publish-release-notes:
@@ -71,18 +77,35 @@ jobs:
           PYTHONPATH=src python3 scripts/publish_release_notes.py $FLAGS
           exit $?
 
-      - name: Commit and push the archived entry, if one was written
+      - name: Commit the archived entry via a PR, if one was written
         # Only real (non-dry-run) runs write release-notes/<date>.md at all; `git status
         # --porcelain` is empty on a --dry-run run or a genuine no-op day (nothing merged), so
         # this step is a safe no-op in both those cases, not a failure.
+        #
+        # A branch + PR + immediate squash-merge, not a direct push to main: this repo's branch
+        # ruleset requires every change go through a PR (confirmed live -- a bare `git push` here
+        # was rejected with "GH013 ... Changes must be made through a pull request"). The ruleset
+        # itself requires zero approvals and has no required status checks, so the merge happens
+        # immediately in this same step -- no human wait, no separate follow-up action needed,
+        # matching the "just publishes, no review gate" design this workflow was always meant to
+        # have (see plans/issue-143-whats-new-tab.md's Structural constraints section).
         if: github.event_name == 'schedule' || inputs.dry_run == false
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$(git status --porcelain release-notes/)" ]; then
+            DATE=$(date -u +%Y-%m-%d)
+            BRANCH="release-notes-archive-$DATE"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -b "$BRANCH"
             git add release-notes/
-            git commit -m "Archive $(date -u +%Y-%m-%d) release notes (automated, issue #143)"
-            git push
+            git commit -m "Archive $DATE release notes (automated, issue #143)"
+            git push -u origin "$BRANCH"
+            gh pr create --title "Archive $DATE release notes" \
+              --body "Automated archival commit from release-notes.yml -- issue #143." \
+              --base main --head "$BRANCH"
+            gh pr merge "$BRANCH" --squash --delete-branch
           else
             echo "Nothing new to archive."
           fi

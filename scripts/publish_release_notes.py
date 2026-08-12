@@ -277,10 +277,24 @@ def build_template_entry(date, prs):
     }
 
 
-def _call_claude(prompt_body, api_key, model, timeout):
+# Scaled by PR count, not a single fixed number -- a 2-PR day doesn't need much headroom, but
+# _MAX_CHANGES_PER_ENTRY (release_notes.py, 50) means a busy day's response can legitimately run
+# long: ~150 output tokens per change (category+title+description) is a reasonable estimate, plus
+# a fixed allowance for the headline/summary and JSON structural overhead. A response cut off
+# mid-JSON by an undersized limit fails json.loads below and falls back to the template --
+# exactly the failure mode this sizing exists to avoid.
+_TOKENS_PER_CHANGE = 150
+_BASE_RESPONSE_TOKENS = 300
+
+
+def _max_response_tokens(pr_count):
+    return _BASE_RESPONSE_TOKENS + _TOKENS_PER_CHANGE * max(pr_count, 1)
+
+
+def _call_claude(prompt_body, api_key, model, timeout, max_tokens):
     body = json.dumps({
         "model": model or _CLAUDE_DEFAULT_MODEL,
-        "max_tokens": 2048,
+        "max_tokens": max_tokens,
         "system": _SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": prompt_body}],
     }).encode("utf-8")
@@ -296,11 +310,12 @@ def _call_claude(prompt_body, api_key, model, timeout):
     return "".join(text_blocks) if text_blocks else None
 
 
-def _call_openai_compatible(prompt_body, api_key, model, api_base, timeout):
+def _call_openai_compatible(prompt_body, api_key, model, api_base, timeout, max_tokens):
     if not api_base or not model:
         return None
     body = json.dumps({
         "model": model,
+        "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt_body},
@@ -315,6 +330,18 @@ def _call_openai_compatible(prompt_body, api_key, model, api_base, timeout):
         payload = json.load(response)
     choices = payload.get("choices") or []
     return (choices[0].get("message") or {}).get("content") if choices else None
+
+
+# Some models wrap JSON output in a markdown code fence even when the system prompt explicitly
+# says not to (_SYSTEM_PROMPT: "Output ONLY a single JSON object, no markdown fences"). Stripped
+# before parsing -- the parsed result still goes through the exact same category/shape validation
+# either way, so this recovers one specific, harmless formatting quirk without weakening the
+# "never trust unvalidated LLM output" posture.
+_MARKDOWN_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _strip_markdown_fence(raw_text):
+    return _MARKDOWN_JSON_FENCE_RE.sub("", raw_text.strip()).strip()
 
 
 def _build_prompt(prs):
@@ -333,15 +360,18 @@ def build_llm_entry(date, prs, caller=None):
     if not provider or not api_key:
         return None
     prompt_body = _build_prompt(prs)
+    max_tokens = _max_response_tokens(len(prs))
     try:
         if caller is not None:
             raw_text = caller(prompt_body)
         elif provider == "claude":
-            raw_text = _call_claude(prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR), _LLM_TIMEOUT_SECONDS)
+            raw_text = _call_claude(
+                prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR), _LLM_TIMEOUT_SECONDS, max_tokens,
+            )
         elif provider == "openai_compatible":
             raw_text = _call_openai_compatible(
                 prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR),
-                os.environ.get(LLM_API_BASE_ENV_VAR), _LLM_TIMEOUT_SECONDS,
+                os.environ.get(LLM_API_BASE_ENV_VAR), _LLM_TIMEOUT_SECONDS, max_tokens,
             )
         else:
             return None
@@ -350,7 +380,7 @@ def build_llm_entry(date, prs, caller=None):
     if not raw_text:
         return None
     try:
-        parsed = json.loads(raw_text.strip())
+        parsed = json.loads(_strip_markdown_fence(raw_text))
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(parsed, dict):
