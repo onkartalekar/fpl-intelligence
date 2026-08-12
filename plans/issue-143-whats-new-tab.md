@@ -250,16 +250,23 @@ per the user's "wait for my review" instruction on this pass.
 - End-of-list marker: *"That's the full history so far."*
 
 **New scope this mockup introduces, not covered by the "Decided" list
-or the candidates above:**
+or the candidates above.** Resolved with the user 2026-08-11:
 
-1. **Per-change category taxonomy** (`Feature` / `Fix` / `Data` in the
-   mockup, filterable via chips: `All` / `Feature` / `Fix` / `Data`).
-   The generation step (Candidate B) needs to assign a category to
-   every change, including in the **B2a template fallback path**, which
-   has no LLM to infer one -- needs its own deterministic rule (e.g.
-   keyword matching on the PR title: "fix"/"bug" -> Fix, else a rule
-   TBD) so the fallback path still produces a taggable entry, not an
-   uncategorized one that breaks the filter UI.
+1. **Per-change category taxonomy -- decided: `Feature` / `Fix` /
+   `Data` / `Docs` / `Chore`.** The mockup's three (`Feature`/`Fix`/
+   `Data`) are the starter set; the user confirmed adding `Docs` and
+   `Chore` so changes like this plan doc itself, or dependency/tooling
+   housekeeping, have a natural bucket instead of being force-fit into
+   one of the original three. The generation step (Candidate B) needs
+   to assign one of these five to every change, including in the
+   **B2a template fallback path**, which has no LLM to infer one --
+   needs its own deterministic rule (e.g. keyword/path matching: a PR
+   touching only `*.md`/`plans/` -> `Docs`, `tests/`-only or CI-only
+   changes -> `Chore`, "fix"/"bug" in the title -> `Fix`, else
+   `Feature`/`Data` by some further rule TBD) so the fallback path still
+   produces a taggable entry, not an uncategorized one that breaks the
+   filter UI. Exact rule ordering/precedence is implementation, not this
+   plan.
 2. **Two levels of generated content per day**, not one: a
    whole-day **headline + intro paragraph** (synthesized across every
    change that day) *and* a **per-change title + description** (one per
@@ -267,72 +274,65 @@ or the candidates above:**
    change") undersold this -- the day-level headline/intro is a
    separate synthesis step over the *set* of that day's per-change
    entries, not just the top item's title.
-3. **Unread tracking**: an unread-indicator dot on the sidebar nav item
-   itself, plus a "Mark all as read" control in the tab header. Not
-   server-state -- almost certainly `localStorage`-based (compare the
-   newest entry's date against a stored "last seen" date; "Mark all as
-   read" sets it to the newest entry's date), matching how the original
-   issue's placement option (c) ("track via `localStorage`... proactive
-   nudge") was scoped, now made concrete and paired with option (a) (the
-   tab itself) rather than a separate banner/toast.
-4. **Client-side search and category filtering** (a search box, "All /
-   Feature / Fix / Data" chips). Both operate over content the server
-   already sent down (same `data/release-notes.json` payload C2/C3
-   already produce) -- matches this codebase's existing client-side
-   filtering pattern used by Player Explorer (`#player-search`,
-   `#player-club-filter`) and Fixtures (`#fixture-club-filter`), not a
-   new server endpoint.
-5. **Email subscription** -- a capture card ("Get release notes by
-   email... one email each time a new entry publishes -- no account
-   required") with an email field and Subscribe button. This is a real,
-   separate feature: a persisted subscriber list, a send step triggered
-   whenever the daily job actually publishes an entry, and (not shown in
-   the mockup, but a real gap) an unsubscribe mechanism. **This project
-   already has an established pattern for exactly this shape of risk**
-   -- `reminder_confirmation.py`'s double opt-in (issue #79): a bare
-   single-opt-in text field lets anyone enter a stranger's email and
-   have this app send them mail with no verification, which is exactly
-   the abuse vector double opt-in exists to close elsewhere in this
-   codebase. Recommend the same pattern here (confirm-by-link before any
-   address actually receives release notes) rather than trusting the
-   submitted address outright -- but flagging this as a decision for the
-   user, not deciding it silently, since the mockup's copy ("no account
-   required") doesn't specify either way and could be read as "no
-   confirmation step" just as easily as "no account, but still
-   confirmed."
-6. **RSS/Atom feed** -- "Prefer a feed reader? Copy feed URL." A new,
-   unauthenticated `GET` endpoint (e.g. `/api/release-notes.rss`)
-   rendering the same stored entries as a standard feed format, at
-   request time -- same "render at request time from stored data"
-   pattern every other tab already uses, just a different output
-   format.
+3. **Client-side search and category filtering** (a search box, "All /
+   Feature / Fix / Data / Docs / Chore" chips). Both operate over
+   content the server already sent down (same `data/release-notes.json`
+   payload C2/C3 already produce) -- matches this codebase's existing
+   client-side filtering pattern used by Player Explorer
+   (`#player-search`, `#player-club-filter`) and Fixtures
+   (`#fixture-club-filter`), not a new server endpoint.
+4. **Email subscription -- decided: double opt-in**, matching
+   `reminder_confirmation.py`'s existing pattern (issue #79) rather than
+   trusting a submitted address outright. A capture card ("Get release
+   notes by email... one email each time a new entry publishes") with
+   an email field and Subscribe button triggers a confirmation email
+   (mirroring `send_confirmation_email`'s shape: a confirm link, nothing
+   enabled until it's clicked, expires if unused); only confirmed
+   addresses ever receive a real release-notes email. Needs, beyond
+   what the mockup shows: a persisted subscriber list (new store,
+   likely `profiles.db`-adjacent given that's this project's existing
+   home for exactly this shape of data -- opt-in state, confirmation
+   tokens, per issue #79/#102's precedent), a send step triggered
+   whenever the daily job actually publishes an entry, and an
+   unsubscribe mechanism (not shown in the mockup, but required --
+   every confirmation/notification email in this codebase already
+   carries a way to stop receiving it, and this shouldn't be the
+   exception).
 
-None of items 1-6 were part of the 7 decided points or the candidates
-investigated above (A/B/C). They're real, buildable, and mostly
-consistent with this codebase's existing patterns (client-side filters,
-double opt-in, request-time rendering) -- but they roughly double the
-surface area of this issue, so flagged here for explicit sign-off before
-scoping `ship-issue` work, rather than silently absorbed into "the
-plan" the user already approved the shape of.
+**Declined for now (2026-08-11), at explicit user request:**
 
-**Open questions for the user's review, not decided in this pass:**
-- Email subscription: single opt-in (trust the submitted address) or
-  double opt-in (confirm-by-link, matching `reminder_confirmation.py`'s
-  existing pattern)? Recommend double opt-in per the reasoning above,
-  but this is the user's call, same as every other opt-in-shaped
-  decision in this codebase has been.
-- Category taxonomy: is `Feature` / `Fix` / `Data` the complete,
-  final set, or are there other categories worth planning for now
-  (e.g. an explicit "Docs"/"Chore" bucket for changes like this very
-  plan doc, which wouldn't obviously read as Feature, Fix, or Data)?
-- Should items 3-6 (unread tracking, search/filter, email subscription,
-  RSS feed) all ship in the same first `ship-issue` pass as the core
-  tab (points 1-7 + Candidates A/B/C), or split into a smaller first
-  slice (the tab itself, dated/collapsible, no email/RSS/search) with
-  the rest as fast-follow issues? The mockup presents them as one
-  coherent design, but they're separable pieces of work with different
-  risk profiles (email subscription in particular touches real user
-  data and an abuse surface the rest of this feature doesn't).
+- **Unread tracking** (nav-item dot indicator + "Mark all as read").
+  Not needed right now -- drop from this pass. If wanted later, the
+  original design still holds: `localStorage`-based, comparing the
+  newest entry's date against a stored "last seen" date, no new
+  server-side state.
+- **RSS/Atom feed** ("Prefer a feed reader? Copy feed URL"). Not needed
+  right now -- drop from this pass. If wanted later: a new,
+  unauthenticated `GET /api/release-notes.rss`-style endpoint rendering
+  the same stored entries as a standard feed format, at request time --
+  same "render at request time from stored data" pattern every other
+  tab already uses, just a different output format. No dependency on
+  anything else in this plan, so it's a clean, independent fast-follow
+  whenever it's wanted.
+
+None of the four remaining items (1-4 above) were part of the 7 decided
+points or the Candidates A/B/C investigated earlier in this doc. They're
+real, buildable, and consistent with this codebase's existing patterns
+(client-side filters, double opt-in via `reminder_confirmation.py`'s
+established shape, request-time rendering) -- but email subscription in
+particular is a meaningfully larger, separately-risked piece of work
+(new persisted subscriber data, a confirmation-email flow, an
+unsubscribe path) than the read-only "tab that renders dated entries"
+core of this feature.
+
+**Open question still remaining for the user's review:**
+- Should email subscription (item 4) ship in the same first
+  `ship-issue` pass as the core tab (points 1-7 + Candidates A/B/C +
+  category taxonomy/search/filter), or split out as a fast-follow issue
+  once the core tab is live? It's the one piece here that touches real
+  user data and a new confirmation-email flow, a different risk profile
+  from the rest of this feature (which is entirely read-only rendering
+  of generated content).
 
 ## Recommendation
 
