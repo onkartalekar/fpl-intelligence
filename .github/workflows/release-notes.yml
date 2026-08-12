@@ -106,9 +106,18 @@ jobs:
         # immediately in this same step -- no human wait, no separate follow-up action needed,
         # matching the "just publishes, no review gate" design this workflow was always meant to
         # have (see plans/issue-143-whats-new-tab.md's Structural constraints section).
+        #
+        # gh pr create/merge specifically need FPL_INTEL_RELEASE_NOTES_PAT, not the default
+        # github.token: confirmed live -- "GitHub Actions is not permitted to create or approve
+        # pull requests" is a separate, repo-wide restriction on the GITHUB_TOKEN identity,
+        # distinct from (and additional to) the branch ruleset's own PR requirement above. A
+        # fine-grained PAT (repo-scoped, Contents + Pull requests: Read and write) authenticates
+        # as the user instead, which isn't subject to that restriction. The `git push` two lines
+        # below doesn't need it -- that already works fine with the default token, confirmed live
+        # (only PR creation was ever the blocked step).
         if: github.event_name == 'schedule' || inputs.dry_run == false
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FPL_INTEL_RELEASE_NOTES_PAT }}
         run: |
           if [ -n "$(git status --porcelain release-notes/)" ]; then
             DATE=$(date -u +%Y-%m-%d)
