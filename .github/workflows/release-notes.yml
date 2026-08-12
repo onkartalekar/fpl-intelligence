@@ -115,13 +115,22 @@ jobs:
         # as the user instead, which isn't subject to that restriction. The `git push` two lines
         # below doesn't need it -- that already works fine with the default token, confirmed live
         # (only PR creation was ever the blocked step).
+        #
+        # Branch name includes github.run_id: confirmed live -- a date-only branch name
+        # (release-notes-archive-<date>) collided with a leftover branch from an earlier run that
+        # had failed *after* pushing but *before* merging (the PR-creation-permission failure this
+        # same step's PAT fix above addresses). That stale branch then blocked every subsequent
+        # day's run with "! [rejected] ... (fetch first)" until manually deleted. A per-run-unique
+        # branch name means a half-finished prior run can never collide with the next one again --
+        # the branch is either deleted by --delete-branch on success, or left behind harmlessly
+        # under its own unique name if a run fails, never reused.
         if: github.event_name == 'schedule' || inputs.dry_run == false
         env:
           GH_TOKEN: ${{ secrets.FPL_INTEL_RELEASE_NOTES_PAT }}
         run: |
           if [ -n "$(git status --porcelain release-notes/)" ]; then
             DATE=$(date -u +%Y-%m-%d)
-            BRANCH="release-notes-archive-$DATE"
+            BRANCH="release-notes-archive-$DATE-${{ github.run_id }}"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git checkout -b "$BRANCH"
