@@ -101,24 +101,26 @@ validation logic, since it doesn't touch anything already working.
 
 ## Recommendation
 
-**Candidate 2, if persistence is wanted -- else Candidate 1.** This isn't a call I should make
-unilaterally: it's a real scope fork (a few hours of UI-only work vs. a new column + new
-formation-legality validation + new/extended endpoint + tests), not a quality difference where one
-option is simply better.
+**Decided (2026-08-12): Candidate 1 (ephemeral, client-side only) -- confirmed by the user.**
+Session-only is fine; the pitch view's XI/bench/captain choice is a lightweight visualization, not
+a second thing to declare and maintain alongside the persisted 15-player squad. No new column, no
+new validation, no new/extended endpoint.
 
-Reasoning for leaning toward Candidate 2 if forced to pick: "declare your draft" already implies
-persistence for the 15-player squad itself (issue #61 built exactly that), and a manager who spends
-time arranging a specific XI and captain likely expects that to survive a reload the same way the
-15-player selection already does -- an XI that resets on every visit would be a visibly weaker
-feature than the squad-selection half sitting right next to it. But Candidate 1 is a legitimate,
-much cheaper choice if the XI/captain concept is meant to stay a lightweight "what would this look
-like" visualization rather than a second thing to declare and maintain.
+**Explicit requirement attached to this choice: the UI must make clearly visible that this
+selection is not saved.** Since the 15-player squad *is* persisted (issue #61) and sits right next
+to this XI/bench picker, a user could otherwise reasonably assume the whole draft -- XI included --
+survives a reload the same way. That assumption would be wrong under Candidate 1, so the pitch
+view needs an explicit, always-visible note (not just a one-time toast) saying the XI/bench/captain
+arrangement resets on reload and only the 15-player squad itself is saved -- consistent with how
+`draft-locked-note`/`draft-message` already surface state clearly elsewhere in this same feature
+([dashboard.py:59](../src/fpl_intel/dashboard.py:59),
+[dashboard.js:96](../src/fpl_intel/dashboard.js:96)).
 
-Candidate 3 is not recommended under either scope size -- it carries Candidate 2's full validation
-cost while additionally risking a regression in three already-working call sites, for no offsetting
-benefit.
+Candidate 3 was never a contender regardless of this decision -- it carried Candidate 2's full
+validation cost while additionally risking a regression in three already-working call sites
+(`_draft_squad`, `build_draft_decisions`, `validate_draft_squad`), for no offsetting benefit.
 
-## Not decided yet
+## Ready for `ship-issue`
 
-Persist vs. ephemeral (Candidate 1 vs. Candidate 2) for the manual XI/bench/captain selection --
-waiting on direction before this can move to `ship-issue`.
+All four of #152's asks, and the XI/bench persistence question raised during this plan, are now
+decided. No open questions remain.
