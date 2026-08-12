@@ -16,7 +16,11 @@ from fpl_intel.reminder_confirmation import (
     ReminderEmailError,
     SMTP_HOST_ENV_VAR, SMTP_PASSWORD_ENV_VAR, SMTP_PORT_ENV_VAR, SMTP_USER_ENV_VAR,
     compose_contact_email,
+    compose_release_notes_email,
+    compose_release_notes_subscription_email,
     send_contact_email,
+    send_release_notes_email,
+    send_release_notes_subscription_email,
 )
 
 
@@ -108,6 +112,95 @@ class SendContactEmailTests(unittest.TestCase):
                 os.environ.pop(var, None)
             with self.assertRaises(ReminderEmailError):
                 send_contact_email("bug", "Something broke", None)
+
+
+class ComposeReleaseNotesSubscriptionEmailTests(unittest.TestCase):
+    def test_confirm_url_is_included(self):
+        _, body = compose_release_notes_subscription_email("https://example.com/confirm?token=abc")
+        self.assertIn("https://example.com/confirm?token=abc", body)
+
+    def test_says_nothing_happens_until_the_link_is_clicked(self):
+        _, body = compose_release_notes_subscription_email("https://example.com/confirm")
+        self.assertIn("nothing is sent to this address until this link is clicked", body)
+
+
+class SendReleaseNotesSubscriptionEmailTests(unittest.TestCase):
+    def _fake_smtp(self):
+        instance = MagicMock()
+        instance.__enter__.return_value = instance
+        instance.__exit__.return_value = False
+        return instance
+
+    def test_sends_to_the_submitted_address(self):
+        fake_smtp = self._fake_smtp()
+        with patch("fpl_intel.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp):
+            send_release_notes_subscription_email(
+                "visitor@example.com", "https://example.com/confirm", smtp_config=_SMTP_CONFIG,
+            )
+        sent_message = fake_smtp.send_message.call_args[0][0]
+        self.assertEqual(sent_message["To"], "visitor@example.com")
+
+    def test_smtp_failure_is_turned_into_reminder_email_error(self):
+        with patch(
+            "fpl_intel.reminder_confirmation.smtplib.SMTP",
+            side_effect=smtplib.SMTPException("boom"),
+        ):
+            with self.assertRaises(ReminderEmailError):
+                send_release_notes_subscription_email(
+                    "visitor@example.com", "https://example.com/confirm", smtp_config=_SMTP_CONFIG,
+                )
+
+
+_SAMPLE_ENTRY = {
+    "date": "2026-08-11",
+    "headline": "Sharper filters for preseason movement tracking",
+    "summary": "Club movement just got easier to scan.",
+    "changes": [
+        {"category": "Feature", "title": "Split filters", "description": "Three controls now."},
+    ],
+}
+
+
+class ComposeReleaseNotesEmailTests(unittest.TestCase):
+    def test_headline_is_in_the_subject(self):
+        subject, _ = compose_release_notes_email(_SAMPLE_ENTRY, "https://example.com/unsub")
+        self.assertIn(_SAMPLE_ENTRY["headline"], subject)
+
+    def test_every_change_and_the_unsubscribe_link_appear_in_the_body(self):
+        _, body = compose_release_notes_email(_SAMPLE_ENTRY, "https://example.com/unsub?token=xyz")
+        self.assertIn("Split filters", body)
+        self.assertIn("Three controls now.", body)
+        self.assertIn("[Feature]", body)
+        self.assertIn("https://example.com/unsub?token=xyz", body)
+
+
+class SendReleaseNotesEmailTests(unittest.TestCase):
+    def _fake_smtp(self):
+        instance = MagicMock()
+        instance.__enter__.return_value = instance
+        instance.__exit__.return_value = False
+        return instance
+
+    def test_sends_to_the_subscriber(self):
+        fake_smtp = self._fake_smtp()
+        with patch("fpl_intel.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp):
+            send_release_notes_email(
+                "subscriber@example.com", _SAMPLE_ENTRY, "https://example.com/unsub",
+                smtp_config=_SMTP_CONFIG,
+            )
+        sent_message = fake_smtp.send_message.call_args[0][0]
+        self.assertEqual(sent_message["To"], "subscriber@example.com")
+
+    def test_smtp_failure_is_turned_into_reminder_email_error(self):
+        with patch(
+            "fpl_intel.reminder_confirmation.smtplib.SMTP",
+            side_effect=smtplib.SMTPException("boom"),
+        ):
+            with self.assertRaises(ReminderEmailError):
+                send_release_notes_email(
+                    "subscriber@example.com", _SAMPLE_ENTRY, "https://example.com/unsub",
+                    smtp_config=_SMTP_CONFIG,
+                )
 
 
 if __name__ == "__main__":

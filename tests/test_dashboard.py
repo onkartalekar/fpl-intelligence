@@ -32,6 +32,13 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         self.assertIn('data-whats-new-filter="Docs"', html)
         self.assertIn('data-whats-new-filter="Chore"', html)
 
+    def test_email_subscribe_card_renders(self):
+        html = render_dashboard(self._BASE_STATE)
+
+        self.assertIn('id="whats-new-subscribe-form"', html)
+        self.assertIn('id="whats-new-subscribe-email"', html)
+        self.assertIn("Get release notes by email", html)
+
     def test_release_notes_entries_are_embedded_in_dashboard_data(self):
         state = {
             **self._BASE_STATE,

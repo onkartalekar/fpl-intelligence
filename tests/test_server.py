@@ -1252,6 +1252,380 @@ class ReleaseNotesApiTests(unittest.TestCase):
         self.assertIn('data-view="whats-new"', html)
 
 
+class ReleaseNotesSubscribeEndpointTests(unittest.TestCase):
+    """Issue #143: POST /api/release-notes-subscribe -- double opt-in, same shape as
+    /api/reminder-opt-in's "enable" path. All SMTP sending is mocked via an injected
+    `release_notes_subscribe_email_action`; no live network call is ever made."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "release-notes-subscribers.db"
+        self.sent_emails = []
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _fake_email_action(self):
+        def action(email, confirm_url):
+            self.sent_emails.append((email, confirm_url))
+        return action
+
+    def _failing_email_action(self):
+        def action(email, confirm_url):
+            raise ReminderEmailError("Could not send the subscription confirmation email. Try again shortly.")
+        return action
+
+    def _start(self, **kwargs):
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token", **kwargs)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def _post(self, base_url, payload):
+        return Request(
+            base_url + "/api/release-notes-subscribe",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_valid_email_sends_a_confirmation_and_writes_a_pending_row(self):
+        server, thread = self._start(release_notes_subscribe_email_action=self._fake_email_action())
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(self._post(base_url, {"email": "reader@example.com"}), timeout=3)
+            payload = json.loads(response.read())
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(len(self.sent_emails), 1)
+            sent_email, confirm_url = self.sent_emails[0]
+            self.assertEqual(sent_email, "reader@example.com")
+            self.assertIn("/api/release-notes-confirm-subscription?email=reader%40example.com&token=", confirm_url)
+
+            from fpl_intel.release_notes_subscribers import load
+            saved = load(self.db_path, "reader@example.com")
+            self.assertEqual(saved["status"], "pending")
+            self.assertIsNotNone(saved["confirm_token_hash"])
+            self.assertNotIn(saved["confirm_token_hash"], confirm_url)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_missing_at_sign_is_a_400(self):
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            with self.assertRaises(HTTPError) as error:
+                urlopen(self._post(base_url, {"email": "not-an-email"}), timeout=3)
+            self.assertEqual(error.exception.code, 400)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_send_failure_is_a_502_and_writes_nothing(self):
+        server, thread = self._start(release_notes_subscribe_email_action=self._failing_email_action())
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            with self.assertRaises(HTTPError) as error:
+                urlopen(self._post(base_url, {"email": "reader@example.com"}), timeout=3)
+            self.assertEqual(error.exception.code, 502)
+
+            from fpl_intel.release_notes_subscribers import load
+            self.assertIsNone(load(self.db_path, "reader@example.com"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_endpoint_is_open_no_refresh_token_required(self):
+        # Deliberately open/unauthenticated, unlike /api/release-notes -- no X-Refresh-Token
+        # required, matching /api/contact's/reminder-opt-in's visitor-facing model.
+        server, thread = self._start(release_notes_subscribe_email_action=self._fake_email_action())
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(self._post(base_url, {"email": "reader@example.com"}), timeout=3)
+            self.assertEqual(response.status, 200)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class ReleaseNotesConfirmSubscriptionEndpointTests(unittest.TestCase):
+    """Issue #143: GET /api/release-notes-confirm-subscription -- the emailed confirmation link."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "release-notes-subscribers.db"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _start(self):
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def _hash(self, raw_token):
+        from hashlib import sha256
+        return sha256(raw_token.encode("utf-8")).hexdigest()
+
+    def test_valid_token_confirms_the_subscription(self):
+        from fpl_intel.release_notes_subscribers import load, set_pending
+        set_pending(
+            self.db_path, "reader@example.com", self._hash("real-token"),
+            "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
+        )
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(
+                base_url + "/api/release-notes-confirm-subscription?email=reader@example.com&token=real-token",
+                timeout=3,
+            )
+            html = response.read().decode()
+
+            self.assertEqual(response.status, 200)
+            self.assertIn("subscribed", html.lower())
+            saved = load(self.db_path, "reader@example.com")
+            self.assertEqual(saved["status"], "confirmed")
+            self.assertIsNotNone(saved["unsubscribe_token"])
+            self.assertIsNone(saved["confirm_token_hash"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_wrong_token_is_rejected(self):
+        from fpl_intel.release_notes_subscribers import load, set_pending
+        set_pending(
+            self.db_path, "reader@example.com", self._hash("real-token"),
+            "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
+        )
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(
+                base_url + "/api/release-notes-confirm-subscription?email=reader@example.com&token=wrong",
+                timeout=3,
+            )
+            html = response.read().decode()
+
+            self.assertNotIn("you're confirmed", html.lower())
+            saved = load(self.db_path, "reader@example.com")
+            self.assertEqual(saved["status"], "pending")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_expired_token_is_rejected(self):
+        from fpl_intel.release_notes_subscribers import load, set_pending
+        set_pending(
+            self.db_path, "reader@example.com", self._hash("real-token"),
+            "2020-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
+        )
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(
+                base_url + "/api/release-notes-confirm-subscription?email=reader@example.com&token=real-token",
+                timeout=3,
+            )
+            html = response.read().decode()
+
+            self.assertIn("expired", html.lower())
+            saved = load(self.db_path, "reader@example.com")
+            self.assertEqual(saved["status"], "pending")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class ReleaseNotesUnsubscribeEndpointTests(unittest.TestCase):
+    """Issue #143: GET /api/release-notes-unsubscribe -- the link every sent release-notes
+    email's footer carries."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.db_path = self.root / "data" / "release-notes-subscribers.db"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _start(self):
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def test_valid_token_removes_the_subscriber(self):
+        from fpl_intel.release_notes_subscribers import confirm, load, set_pending
+        set_pending(self.db_path, "reader@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+        confirm(self.db_path, "reader@example.com", "unsub-token-xyz", "2026-08-11T00:00:00Z")
+
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = urlopen(
+                base_url + "/api/release-notes-unsubscribe?email=reader@example.com&token=unsub-token-xyz",
+                timeout=3,
+            )
+            html = response.read().decode()
+
+            self.assertEqual(response.status, 200)
+            self.assertIn("unsubscribed", html.lower())
+            self.assertIsNone(load(self.db_path, "reader@example.com"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_wrong_token_leaves_the_subscriber_in_place(self):
+        from fpl_intel.release_notes_subscribers import confirm, load, set_pending
+        set_pending(self.db_path, "reader@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+        confirm(self.db_path, "reader@example.com", "unsub-token-xyz", "2026-08-11T00:00:00Z")
+
+        server, thread = self._start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            urlopen(
+                base_url + "/api/release-notes-unsubscribe?email=reader@example.com&token=wrong-token",
+                timeout=3,
+            )
+            self.assertIsNotNone(load(self.db_path, "reader@example.com"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class ReleaseNotesNotifySubscribersTests(unittest.TestCase):
+    """Issue #143: publishing a new entry (POST /api/release-notes) emails every confirmed
+    subscriber, with an independent, best-effort send per recipient."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.subscribers_db_path = self.root / "data" / "release-notes-subscribers.db"
+        self.notified = []
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _fake_notify_action(self):
+        def action(email, entry, unsubscribe_url):
+            self.notified.append((email, entry["date"], unsubscribe_url))
+        return action
+
+    def _failing_first_notify_action(self):
+        calls = {"count": 0}
+
+        def action(email, entry, unsubscribe_url):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise ReminderEmailError("boom")
+            self.notified.append((email, entry["date"], unsubscribe_url))
+        return action
+
+    def _post_entry(self, base_url, date="2026-08-11"):
+        payload = {
+            "date": date, "headline": "H", "summary": "S",
+            "changes": [{"category": "Feature", "title": "T", "description": "D"}],
+        }
+        return urlopen(
+            Request(
+                base_url + "/api/release-notes", data=json.dumps(payload).encode("utf-8"), method="POST",
+                headers={"Content-Type": "application/json", "X-Refresh-Token": "test-token"},
+            ),
+            timeout=3,
+        )
+
+    def test_confirmed_subscribers_are_notified_on_publish(self):
+        from fpl_intel.release_notes_subscribers import confirm, set_pending
+        set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+        confirm(self.subscribers_db_path, "a@example.com", "unsub-a", "2026-08-11T00:00:00Z")
+
+        server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            release_notes_notify_email_action=self._fake_notify_action(),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = self._post_entry(base_url)
+            self.assertEqual(response.status, 200)
+            time.sleep(0.1)  # notify runs after the response is already sent
+
+            self.assertEqual(len(self.notified), 1)
+            email, date, unsubscribe_url = self.notified[0]
+            self.assertEqual(email, "a@example.com")
+            self.assertEqual(date, "2026-08-11")
+            self.assertIn("/api/release-notes-unsubscribe?email=a%40example.com&token=unsub-a", unsubscribe_url)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_pending_not_yet_confirmed_subscribers_are_not_notified(self):
+        from fpl_intel.release_notes_subscribers import set_pending
+        set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+
+        server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            release_notes_notify_email_action=self._fake_notify_action(),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            self._post_entry(base_url)
+            time.sleep(0.1)
+
+            self.assertEqual(self.notified, [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_one_subscribers_send_failure_does_not_block_the_others_or_the_publish_response(self):
+        from fpl_intel.release_notes_subscribers import confirm, set_pending
+        set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+        confirm(self.subscribers_db_path, "a@example.com", "unsub-a", "2026-08-11T00:00:00Z")
+        set_pending(self.subscribers_db_path, "b@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
+        confirm(self.subscribers_db_path, "b@example.com", "unsub-b", "2026-08-11T00:00:00Z")
+
+        server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            release_notes_notify_email_action=self._failing_first_notify_action(),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            response = self._post_entry(base_url)
+            self.assertEqual(response.status, 200)
+            time.sleep(0.1)
+
+            self.assertEqual(len(self.notified), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

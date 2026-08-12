@@ -109,6 +109,42 @@ class BuildTemplateEntryTests(unittest.TestCase):
 
         self.assertEqual(entry["changes"][0]["description"], "See the linked pull request for details.")
 
+    def test_skips_the_house_style_summary_heading_and_finds_the_real_bullet(self):
+        # Regression: every real PR in this repo opens with "## Summary" (ship-issue/plan-issue's
+        # house style) -- an earlier version of _pr_description picked up that heading itself as
+        # the "description", not any real content.
+        body = "## Summary\n- The real first bullet of substance.\n- A second bullet.\n\nCloses #29"
+
+        entry = prn.build_template_entry(date(2026, 8, 11), [{"title": "A change", "body": body}])
+
+        self.assertEqual(entry["changes"][0]["description"], "The real first bullet of substance.")
+
+    def test_skips_a_leading_horizontal_rule_and_checkbox(self):
+        body = "---\n\n[x] Done: the actual content here."
+
+        entry = prn.build_template_entry(date(2026, 8, 11), [{"title": "A change", "body": body}])
+
+        self.assertEqual(entry["changes"][0]["description"], "Done: the actual content here.")
+
+    def test_long_description_is_truncated(self):
+        # Regression: a real PR's first bullet was 537 chars, which the server rejected outright
+        # (release_notes.py's own 500-char ceiling) -- confirmed live, publishing that day's
+        # backfilled entry 400'd.
+        body = "x" * 600
+        entry = prn.build_template_entry(date(2026, 8, 11), [{"title": "A change", "body": body}])
+
+        description = entry["changes"][0]["description"]
+        self.assertLessEqual(len(description), prn._MAX_DESCRIPTION_CHARS)
+        self.assertTrue(description.endswith("…"))
+
+    def test_long_title_is_truncated(self):
+        entry = prn.build_template_entry(date(2026, 8, 11), [{"title": "x" * 300, "body": "y"}])
+
+        self.assertLessEqual(len(entry["changes"][0]["title"]), prn._MAX_TITLE_CHARS)
+
+    def test_short_text_is_not_altered(self):
+        self.assertEqual(prn._truncate("short", 300), "short")
+
 
 class BuildLlmEntryTests(unittest.TestCase):
     def test_returns_none_when_unconfigured(self):
@@ -287,6 +323,68 @@ class RunTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertTrue((root / "release-notes" / "2026-08-10.md").exists())
+
+
+class BackfillTests(unittest.TestCase):
+    def test_writes_an_entry_only_for_days_with_merges_and_skips_the_rest(self):
+        def fake_urlopen(request, timeout=None):
+            # _et_day_bounds_in_utc encodes the target day's start in the query -- 2026-08-01 ET
+            # 00:00 is 2026-08-01T04:00:00 UTC, distinct enough from the other two days' bounds
+            # to key off directly.
+            if "2026-08-01T04" in request.full_url:
+                return _FakeResponse({"items": [{"title": "A change"}]})
+            return _FakeResponse({"items": []})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(prn, "urlopen", fake_urlopen), \
+                 patch.dict("os.environ", {prn.GITHUB_REPOSITORY_ENV_VAR: "owner/repo"}, clear=True), \
+                 redirect_stdout(io.StringIO()):
+                written = prn.backfill(date(2026, 8, 1), date(2026, 8, 3), publish=False, root=root)
+
+            self.assertEqual(written, [date(2026, 8, 1)])
+            self.assertTrue((root / "release-notes" / "2026-08-01.md").exists())
+            self.assertFalse((root / "release-notes" / "2026-08-02.md").exists())
+            self.assertFalse((root / "release-notes" / "2026-08-03.md").exists())
+
+    def test_publish_flag_also_posts_each_entry(self):
+        publish_calls = []
+
+        def fake_urlopen(request, timeout=None):
+            if "search/issues" in request.full_url:
+                return _FakeResponse({"items": [{"title": "A change"}]})
+            publish_calls.append(request.full_url)
+            return _FakeResponse({"status": "ok"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(prn, "urlopen", fake_urlopen), \
+                 patch.dict("os.environ", {prn.GITHUB_REPOSITORY_ENV_VAR: "owner/repo"}, clear=True), \
+                 redirect_stdout(io.StringIO()):
+                prn.backfill(
+                    date(2026, 8, 1), date(2026, 8, 1), publish=True,
+                    dashboard_base_url="https://example.up.railway.app", refresh_token="test-token",
+                    root=root,
+                )
+
+            self.assertEqual(len(publish_calls), 1)
+
+    def test_without_publish_flag_never_calls_publish_endpoint(self):
+        calls = {"non_search": 0}
+
+        def fake_urlopen(request, timeout=None):
+            if "search/issues" not in request.full_url:
+                calls["non_search"] += 1
+            return _FakeResponse({"items": [{"title": "A change"}]})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(prn, "urlopen", fake_urlopen), \
+                 patch.dict("os.environ", {prn.GITHUB_REPOSITORY_ENV_VAR: "owner/repo"}, clear=True), \
+                 redirect_stdout(io.StringIO()):
+                prn.backfill(date(2026, 8, 1), date(2026, 8, 1), publish=False, root=root)
+
+            self.assertEqual(calls["non_search"], 0)
 
 
 class MainTests(unittest.TestCase):

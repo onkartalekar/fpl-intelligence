@@ -51,7 +51,7 @@ publishing or writing anything.
 """
 
 import argparse
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -201,13 +201,51 @@ def categorize_pr(pr):
     return "Feature"
 
 
+_MARKDOWN_BULLET_RE = re.compile(r"^[-*]\s+")
+_MARKDOWN_CHECKBOX_RE = re.compile(r"^\[[ xX]\]\s*")
+
+# Just under release_notes.py's own server-side validation ceilings (200/500 chars,
+# `_MAX_TITLE_LENGTH`/`_MAX_DESCRIPTION_LENGTH`) -- real PR titles/bodies in this repo regularly
+# run longer than either limit (a PR's first substantive bullet alone was 537 chars, confirmed
+# live), so the template fallback must truncate before POSTing, not just trust real-world PR
+# copy to already fit. Deliberately set close to the server's real ceiling, not an arbitrary
+# tighter number: the goal is "never get rejected," not "keep descriptions short" -- an earlier
+# version of this constant (300) trimmed real detail out of descriptions that would have fit
+# comfortably under the server's actual limit. Not imported from release_notes.py directly: those
+# are that module's own private constants; a few characters of margin (10) covers the trailing
+# "…" this truncation adds.
+_MAX_TITLE_CHARS = 190
+_MAX_DESCRIPTION_CHARS = 490
+
+
+def _truncate(text, max_length):
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
 def _pr_description(pr):
+    """First substantive line of a PR body, for the template fallback's per-change description.
+
+    Every PR in this repo's own history opens with a `## Summary` (or similar) Markdown heading
+    (`ship-issue`/`plan-issue`'s house style) -- a naive "first line of the first paragraph"
+    extraction picks up that heading itself, not any real content. Skips blank lines, heading
+    lines (`#...`), and horizontal rules, and strips a leading bullet/checkbox marker from
+    whatever line it does land on. Truncated to `_MAX_DESCRIPTION_CHARS` -- see that constant's
+    comment for why.
+    """
     body = (pr.get("body") or "").strip()
     if not body:
         return "See the linked pull request for details."
-    first_paragraph = body.split("\n\n", 1)[0].strip()
-    first_line = first_paragraph.splitlines()[0].strip() if first_paragraph else ""
-    return first_line or "See the linked pull request for details."
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line == "---":
+            continue
+        line = _MARKDOWN_BULLET_RE.sub("", line)
+        line = _MARKDOWN_CHECKBOX_RE.sub("", line)
+        if line:
+            return _truncate(line, _MAX_DESCRIPTION_CHARS)
+    return "See the linked pull request for details."
 
 
 def build_template_entry(date, prs):
@@ -216,7 +254,11 @@ def build_template_entry(date, prs):
     unconfigured or fails -- see the module docstring's point 3 and the plan doc's Candidate B2a.
     """
     changes = [
-        {"category": categorize_pr(pr), "title": pr.get("title") or "Untitled change", "description": _pr_description(pr)}
+        {
+            "category": categorize_pr(pr),
+            "title": _truncate(pr.get("title") or "Untitled change", _MAX_TITLE_CHARS),
+            "description": _pr_description(pr),
+        }
         for pr in prs
     ]
     headline = (
@@ -227,7 +269,12 @@ def build_template_entry(date, prs):
         f"One change shipped: {prs[0].get('title')}." if len(prs) == 1
         else f"{len(prs)} changes shipped today."
     )
-    return {"date": date.isoformat(), "headline": headline, "summary": summary, "changes": changes}
+    return {
+        "date": date.isoformat(),
+        "headline": _truncate(headline, _MAX_TITLE_CHARS),
+        "summary": _truncate(summary, _MAX_DESCRIPTION_CHARS),
+        "changes": changes,
+    }
 
 
 def _call_claude(prompt_body, api_key, model, timeout):
@@ -378,6 +425,36 @@ def run(dry_run, now=None, llm_caller=None, dashboard_base_url=None, refresh_tok
     return 0
 
 
+def backfill(start_date, end_date, publish, dashboard_base_url=None, refresh_token=None, root=ROOT, llm_caller=None):
+    """One-time historical seed, not part of the daily job: generate (and archive, and optionally
+    publish) an entry for every ET calendar day in `[start_date, end_date]` that had at least one
+    merged PR. Days with nothing merged are silently skipped, same no-op semantics as the daily
+    run. Returns the list of dates an entry was actually written for.
+
+    Unlike `run()`, this always writes the archive file regardless of `publish` -- backfilling
+    history is meaningfully a git-archival operation first; publishing each entry live is an
+    explicit opt-in (`publish=True`) on top of that, since it means one HTTP call per historical
+    day against a real running server.
+    """
+    repository = _require_repository()
+    written = []
+    current = start_date
+    while current <= end_date:
+        prs = fetch_merged_prs(repository, current, github_token=os.environ.get(GITHUB_TOKEN_ENV_VAR))
+        if prs:
+            entry, source = generate_entry(current, prs, llm_caller=llm_caller)
+            path = write_archive_file(entry, root=root)
+            print(f"backfilled {current.isoformat()}: {len(prs)} PR(s) via {source} -> {path}")
+            if publish:
+                publish_entry(entry, dashboard_base_url, refresh_token)
+                print(f"  published {current.isoformat()}")
+            written.append(current)
+        else:
+            print(f"backfilled {current.isoformat()}: nothing merged -- skipped")
+        current = current + timedelta(days=1)
+    return written
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -389,7 +466,47 @@ def main(argv=None):
         "--skip-hour-check", action="store_true",
         help="Bypass is_correct_scheduled_hour's DST-safe gate (for manual workflow_dispatch runs).",
     )
+    parser.add_argument(
+        "--backfill-start", metavar="YYYY-MM-DD",
+        help="One-time historical seed mode: write (and, with --backfill-publish, publish) an "
+             "entry for every ET day from this date through --backfill-end (default: yesterday) "
+             "that had at least one merged PR. Bypasses the hour check and --dry-run entirely -- "
+             "a distinct mode from the daily run, not a variant of it.",
+    )
+    parser.add_argument("--backfill-end", metavar="YYYY-MM-DD", help="Defaults to yesterday (ET).")
+    parser.add_argument(
+        "--backfill-publish", action="store_true",
+        help="Also POST each backfilled entry to the live dashboard (requires "
+             "FPL_INTEL_DASHBOARD_BASE_URL/FPL_INTEL_REFRESH_TOKEN). Without this, backfill only "
+             "writes the git-tracked release-notes/ archive.",
+    )
     args = parser.parse_args(argv)
+
+    if args.backfill_start:
+        try:
+            start = date.fromisoformat(args.backfill_start)
+            end = date.fromisoformat(args.backfill_end) if args.backfill_end else target_date()
+        except ValueError as error:
+            print(f"Configuration error: {error}", file=sys.stderr)
+            return 1
+        dashboard_base_url = refresh_token = None
+        if args.backfill_publish:
+            try:
+                dashboard_base_url = _require_dashboard_base_url()
+                refresh_token = _require_refresh_token()
+            except ConfigError as error:
+                print(f"Configuration error: {error}", file=sys.stderr)
+                return 1
+        try:
+            written = backfill(
+                start, end, args.backfill_publish,
+                dashboard_base_url=dashboard_base_url, refresh_token=refresh_token,
+            )
+        except ConfigError as error:
+            print(f"Configuration error: {error}", file=sys.stderr)
+            return 1
+        print(f"backfill complete: {len(written)} day(s) with entries between {start} and {end}")
+        return 0
 
     if not args.skip_hour_check and not is_correct_scheduled_hour():
         print("checked: outside the 8 AM ET scheduling window for this trigger -- no action")

@@ -34,7 +34,10 @@ class ReleaseNotesValidationError(Exception):
 # (see `scripts/publish_release_notes.py`'s `categorize_pr`) rather than leaving one blank.
 CATEGORIES = ("Feature", "Fix", "Data", "Docs", "Chore")
 
-_MAX_CHANGES_PER_ENTRY = 20
+# 20 looked generous on paper but wasn't: this repo's own real PR history includes a single day
+# (2026-08-08) with 26 merged PRs, confirmed live when the initial historical backfill (issue
+# #143) 400'd trying to publish it. 50 gives real headroom above the busiest day seen so far.
+_MAX_CHANGES_PER_ENTRY = 50
 _MAX_HEADLINE_LENGTH = 200
 _MAX_SUMMARY_LENGTH = 2000
 _MAX_TITLE_LENGTH = 200
