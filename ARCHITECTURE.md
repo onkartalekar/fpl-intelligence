@@ -39,7 +39,7 @@ flowchart TB
 
     fplApi[["FPL public API<br/>(bootstrap, fixtures, entry/history)"]]
     transferSources[["Scraped official transfer /<br/>club-news sources"]]
-    smtp[["SMTP (Gmail)<br/>FPL_INTEL_SERVER_SMTP_*"]]
+    smtp[["SMTP (Gmail)<br/>FPL_INTEL_SMTP_*"]]
 
     visitor -->|"GET /, /dashboard.html<br/>GET /api/status"| server
     visitor -->|"POST /api/profile, /draft-squad,<br/>/lookup-opt-out, /reminder-opt-in,<br/>/contact (open, per-source rate-limited)"| server

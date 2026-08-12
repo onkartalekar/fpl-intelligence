@@ -21,13 +21,13 @@ Configuration, entirely environment-variable driven:
   used throughout this repo's own test suite): a real, public FPL team ID used to exercise the
   "populated" side of issue #108's empty-state gating. Any real team ID works; the default is
   simply a known-good one already exercised elsewhere in this codebase.
-- `FPL_INTEL_SERVER_SMTP_USER` / `FPL_INTEL_SERVER_SMTP_PASSWORD` (required unless `--dry-run`):
-  the same credentials `reminder_confirmation.py` already uses to *send* the Contact Us
-  notification -- `send_contact_email` sends it to this same account (see that module's
-  docstring: "there is no separate operator recipient env var, by design"), so these same
-  credentials also work to *read* it back over IMAP, verifying actual delivery rather than just
-  the API's own response (see the plan doc's (a) finding for why that split is necessary). No new
-  secret to provision.
+- `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` (required unless `--dry-run`): the same
+  credentials `reminder_confirmation.py` already uses to *send* the Contact Us notification --
+  `send_contact_email` sends it to this same account (see that module's docstring: "there is no
+  separate operator recipient env var, by design"), so these same credentials also work to *read*
+  it back over IMAP, verifying actual delivery rather than just the API's own response (see the
+  plan doc's (a) finding for why that split is necessary). One canonical credential pair, reused
+  by every script that needs SMTP/IMAP access to this inbox -- no new secret to provision.
 - `FPL_INTEL_LIVE_CHECK_IMAP_HOST` (optional, default `imap.gmail.com`) /
   `FPL_INTEL_LIVE_CHECK_IMAP_PORT` (optional, default `993`).
 
@@ -70,8 +70,8 @@ BASE_URL_ENV_VAR = "FPL_INTEL_LIVE_CHECK_BASE_URL"
 PUBLIC_TEAM_ID_ENV_VAR = "FPL_INTEL_LIVE_CHECK_PUBLIC_TEAM_ID"
 _DEFAULT_PUBLIC_TEAM_ID = 364759
 
-SMTP_USER_ENV_VAR = "FPL_INTEL_SERVER_SMTP_USER"
-SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SERVER_SMTP_PASSWORD"
+SMTP_USER_ENV_VAR = "FPL_INTEL_SMTP_USER"
+SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SMTP_PASSWORD"
 IMAP_HOST_ENV_VAR = "FPL_INTEL_LIVE_CHECK_IMAP_HOST"
 IMAP_PORT_ENV_VAR = "FPL_INTEL_LIVE_CHECK_IMAP_PORT"
 _DEFAULT_IMAP_HOST = "imap.gmail.com"

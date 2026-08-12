@@ -6,17 +6,18 @@ SMTP-config-reading/connection logic in a second place -- both call sites run sy
 inside the same live server process with the same exposure profile, so there is no reason for
 two copies of this logic.
 
-Deliberately separate from `scripts/send_deadline_reminder.py`'s own SMTP sending: this module
-only ever sends one short email synchronously from a live request handler, never the full
-reminder digest that script owns, and runs inside the live server process (`server.py`'s
+Distinct from `scripts/send_deadline_reminder.py`'s own SMTP sending: this module only ever sends
+one short email synchronously from a live request handler, never the full reminder digest that
+script owns, and runs inside the live server process (`server.py`'s
 `_handle_reminder_opt_in`/`_handle_contact`) -- a different exposure profile from that script's
-offline, trusted GitHub Actions cron. That's why this module reads its own, separate
-`FPL_INTEL_SERVER_SMTP_*` env vars rather than reusing `FPL_INTEL_SMTP_*`: independently
-rotatable credentials as a matter of blast-radius hygiene, even though nothing stops an operator
-from pointing both at the same mailbox in practice. Issue #110's plan doc considered a further
-split (a dedicated `FPL_INTEL_CONTACT_SMTP_*`) and rejected it: the "why keep these separate"
-reasoning above is about *exposure profile* (live server vs. offline trusted cron), and the
-contact form has the same exposure profile as the reminder confirmation send, not a different one.
+offline, trusted GitHub Actions cron (live server vs. offline cron). An earlier version of this
+module read its own separate `FPL_INTEL_SERVER_SMTP_*` env vars specifically so the two could be
+rotated independently, but in practice both have always pointed at the same mailbox -- so it now
+reads the same `FPL_INTEL_SMTP_*` vars `send_deadline_reminder.py` and `live_regression_check.py`
+already use, for one credential pair to provision and rotate everywhere instead of two. Issue
+#110's plan doc considered a further split (a dedicated `FPL_INTEL_CONTACT_SMTP_*`) and rejected
+it for the same reason: the contact form has the same exposure profile as the reminder
+confirmation send, not a different one.
 
 Follows `news_signals.py`'s fail-safe posture: env vars are read at call time (never cached at
 import time), never logged, and any missing configuration or network/auth/SMTP failure is turned
@@ -37,10 +38,10 @@ import os
 import smtplib
 
 
-SMTP_HOST_ENV_VAR = "FPL_INTEL_SERVER_SMTP_HOST"
-SMTP_PORT_ENV_VAR = "FPL_INTEL_SERVER_SMTP_PORT"
-SMTP_USER_ENV_VAR = "FPL_INTEL_SERVER_SMTP_USER"
-SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SERVER_SMTP_PASSWORD"
+SMTP_HOST_ENV_VAR = "FPL_INTEL_SMTP_HOST"
+SMTP_PORT_ENV_VAR = "FPL_INTEL_SMTP_PORT"
+SMTP_USER_ENV_VAR = "FPL_INTEL_SMTP_USER"
+SMTP_PASSWORD_ENV_VAR = "FPL_INTEL_SMTP_PASSWORD"
 
 # Short on purpose: this call happens synchronously inside a request handler, unlike the offline
 # reminder script's own 30s timeout -- a slow/unreachable SMTP host must not tie up a request
@@ -90,8 +91,7 @@ def send_confirmation_email(to_email, confirm_url, lead_hours, smtp_config=None)
 
     Raises `ReminderEmailError` on any configuration or send failure -- never returns False, and
     never lets a raw `smtplib`/`OSError` escape to the caller. `smtp_config` is accepted mainly
-    for tests; real callers should omit it and let this read `FPL_INTEL_SERVER_SMTP_*` at call
-    time.
+    for tests; real callers should omit it and let this read `FPL_INTEL_SMTP_*` at call time.
     """
     smtp_config = smtp_config or _read_smtp_config()
     subject, body = compose_confirmation_email(confirm_url, lead_hours)
