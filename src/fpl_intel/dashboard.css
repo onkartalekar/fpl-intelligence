@@ -673,12 +673,23 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 }
 .whats-new-tag {
   flex-shrink: 0;
+  /* Fixed width, not just flex-shrink:0 -- "Feature"/"Chore" render wider than "Fix"/"Data"/
+     "Docs", so without this every change's title started at a different x position depending
+     on which category it happened to have. min-width sized to fit "Feature" (the longest
+     label) comfortably; text-align:center keeps shorter labels visually centered in it rather
+     than left-hugging. */
+  min-width: 62px;
+  text-align: center;
   font-size: 10px;
   padding: 3px 7px;
   border-radius: 999px;
   background: var(--tag-neutral-bg);
   color: var(--tag-neutral-fg);
   white-space: nowrap;
+  /* Compensates for the pill's smaller font-size/line-height sitting visually higher than
+     the 14px title text next to it under align-items:flex-start -- confirmed by measuring
+     both elements' real getBoundingClientRect() in the browser (2px gap), not guessed. */
+  margin-top: 2px;
 }
 .whats-new-tag-feature {
   background: var(--badge-info-bg);
