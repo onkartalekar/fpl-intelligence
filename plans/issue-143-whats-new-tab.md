@@ -1,13 +1,17 @@
 # Issue #143 -- Daily automated "What's New" tab
 
-Researched 2026-08-11. Issue asks for a "What's New" tab in the live
-dashboard, populated by a daily automated job that generates "visually
-creative" release notes for whatever shipped the previous day, with
-collapsible per-date sections (latest expanded, rest collapsed) and a
-no-op day producing no entry. See the issue's "Decided (2026-08-11)"
-section for the 7 concrete requirements this plan operationalizes; three
-sub-questions were left explicitly open there and are what this doc
-investigates.
+Researched 2026-08-11, updated 2026-08-11 with a UX mockup review. Issue
+asks for a "What's New" tab in the live dashboard, populated by a daily
+automated job that generates "visually creative" release notes for
+whatever shipped the previous day, with collapsible per-date sections
+(latest expanded, rest collapsed) and a no-op day producing no entry.
+See the issue's "Decided (2026-08-11)" section for the 7 concrete
+requirements this plan operationalizes. The "Candidate operationalizations"
+section below resolves the three sub-questions originally left open; the
+"## UX design" section further down parses a visual mockup the user
+supplied afterward, which introduces real new scope (email subscription,
+RSS feed, search/filter, unread tracking) not yet decided -- flagged
+there for review, not folded in as settled.
 
 ## Context
 
@@ -205,6 +209,180 @@ This does mean accepting the new bot-commit-to-`main` precedent flagged
 in Structural constraints above -- the user has confirmed that's an
 acceptable, intentional trade for having real git history of release
 notes, not an overlooked side effect.
+
+## UX design (mockup reviewed 2026-08-11)
+
+The user supplied a two-page visual mockup
+(`FPlIntelligence_WhatsNewDesign.pdf`) of the "What's New" tab. Parsed
+in full below -- this is not implemented, and several elements are new
+scope beyond the "Decided (2026-08-11)" 7 points and everything
+investigated above. Flagged explicitly rather than silently folded in,
+per the user's "wait for my review" instruction on this pass.
+
+**Layout, matching what's already decided:**
+- New sidebar nav item, "What's New", positioned last (after "Contact
+  Us") -- consistent with `dashboard.py:32-34`'s existing `data-view`
+  button list.
+- Header: small-caps eyebrow "RELEASE NOTES", then an `<h1>` "What's
+  New", then a one-line description: *"What shipped, day by day.
+  Generated automatically each morning from the previous day's merged
+  changes -- quiet days simply don't get an entry."* -- this description
+  itself is good, reusable copy for the tab's static intro text.
+- Dated entries render as collapsible cards, newest first, exactly
+  matching the issue's points 6-7: **Mon, Aug 11 ("Yesterday") starts
+  expanded; every older date starts collapsed** (Fri Aug 8, Tue Aug 5,
+  Thu Jul 30, each showing "N days ago" and a collapsed chevron).
+- Each card header, expanded or collapsed: relative date label
+  ("Yesterday" / "N days ago"), a **synthesized one-line headline** for
+  the day (not a raw PR title -- e.g. "Sharper filters for preseason
+  movement tracking" spans three unrelated PRs), and a "N changes"
+  count badge.
+- Expanded card body: a short **intro paragraph** synthesizing the
+  day's theme (2-3 sentences, reads as one coherent narrative across
+  that day's PRs, not a concatenation), then one block per change:
+  a **category tag** (colored chip: "Feature" / "Data" / "Fix" shown in
+  the mockup), a bold one-line title, and a muted one-line description.
+- Gap transparency: *"No entry for Aug 9-10 or Aug 6-7 -- nothing
+  merged those days."* -- an explicit, muted note acknowledging skipped
+  dates, so a gap reads as confirmed-quiet rather than possibly-broken.
+  Directly reflects this plan's no-op design (point 1) back to the user
+  in the UI itself, not just as an absence.
+- End-of-list marker: *"That's the full history so far."*
+
+**Worked example from the mockup, preserved verbatim as a concrete
+tone/style reference** (not real data -- illustrates the target voice
+for the generation step, Candidate B):
+
+> **Mon, Aug 11** -- Yesterday -- "Sharper filters for preseason
+> movement tracking" -- 3 changes
+>
+> Club movement just got easier to scan: the single messy filter row
+> split into three focused controls, and every incoming transfer now
+> carries a reconciled FPL player ID the moment it lands -- no more
+> waiting for the next refresh to match a name to an official record.
+>
+> - **[Feature]** Club movement filters split into Direction, Movement
+>   type, and Date -- Previously one combined control; each now narrows
+>   independently and combines with search.
+> - **[Data]** First-party transfer feed reconciles FPL player IDs on
+>   ingest -- Confirmed movements match official prices, clubs, and
+>   positions as soon as they arrive, not on the next scheduled refresh.
+> - **[Fix]** Deadline banner no longer flashes before the 2026/27 feed
+>   is live -- The banner now waits for a real deadline before rendering
+>   anything.
+>
+> Collapsed older entries (headline + count only, per the
+> expand/collapse rule): "Shadow models now score every refresh" (Fri,
+> Aug 8, 2 changes), "Declare a preseason draft squad" (Tue, Aug 5, 2
+> changes), "A way to reach the team, and a reminder before deadlines"
+> (Thu, Jul 30, 2 changes).
+
+**Visual style -- checked against the app's actual CSS
+(`src/fpl_intel/dashboard.css`), two findings:**
+- The mockup's dark navy background **already matches** this app's
+  existing default theme tokens (`--bg: #08101f`, `--panel: #101b2e`,
+  `:root` block) -- no new theme needed, the tab should just use the
+  existing tokens like every other view does. The app also already
+  supports a light theme (`:root[data-theme="light"]`) -- the new tab
+  needs to work in both, same as every other view, not just the dark
+  mockup shown.
+- **Open discrepancy, not yet resolved:** the mockup's buttons and
+  active-filter-chip state read as purple/indigo, but this app's actual
+  accent color is green (`--accent: #57dfae`, used everywhere else --
+  active nav item, buttons, focus rings). Also, the app already has an
+  established chip/badge color-token system
+  (`--badge-setup/-info/-ready-*`, `--chip-neutral/-easy/-hard-*` in
+  `dashboard.css`, used for e.g. fixture-difficulty chips) that the new
+  `Feature`/`Fix`/`Data`/`Docs`/`Chore` category tags should extend
+  rather than inventing an unrelated ad-hoc palette. **Needs a decision
+  before implementation:** match the mockup's purple/indigo accent as a
+  deliberate new color, or use the app's existing green `--accent` for
+  visual consistency with every other tab. Not decided in this plan.
+
+**New scope this mockup introduces, not covered by the "Decided" list
+or the candidates above.** Resolved with the user 2026-08-11:
+
+1. **Per-change category taxonomy -- decided: `Feature` / `Fix` /
+   `Data` / `Docs` / `Chore`.** The mockup's three (`Feature`/`Fix`/
+   `Data`) are the starter set; the user confirmed adding `Docs` and
+   `Chore` so changes like this plan doc itself, or dependency/tooling
+   housekeeping, have a natural bucket instead of being force-fit into
+   one of the original three. The generation step (Candidate B) needs
+   to assign one of these five to every change, including in the
+   **B2a template fallback path**, which has no LLM to infer one --
+   needs its own deterministic rule (e.g. keyword/path matching: a PR
+   touching only `*.md`/`plans/` -> `Docs`, `tests/`-only or CI-only
+   changes -> `Chore`, "fix"/"bug" in the title -> `Fix`, else
+   `Feature`/`Data` by some further rule TBD) so the fallback path still
+   produces a taggable entry, not an uncategorized one that breaks the
+   filter UI. Exact rule ordering/precedence is implementation, not this
+   plan.
+2. **Two levels of generated content per day**, not one: a
+   whole-day **headline + intro paragraph** (synthesized across every
+   change that day) *and* a **per-change title + description** (one per
+   PR). B1's original scope ("a short headline, a one-line summary per
+   change") undersold this -- the day-level headline/intro is a
+   separate synthesis step over the *set* of that day's per-change
+   entries, not just the top item's title.
+3. **Client-side search and category filtering** (a search box, "All /
+   Feature / Fix / Data / Docs / Chore" chips). Both operate over
+   content the server already sent down (same `data/release-notes.json`
+   payload C2/C3 already produce) -- matches this codebase's existing
+   client-side filtering pattern used by Player Explorer
+   (`#player-search`, `#player-club-filter`) and Fixtures
+   (`#fixture-club-filter`), not a new server endpoint.
+4. **Email subscription -- decided: double opt-in**, matching
+   `reminder_confirmation.py`'s existing pattern (issue #79) rather than
+   trusting a submitted address outright. A capture card ("Get release
+   notes by email... one email each time a new entry publishes") with
+   an email field and Subscribe button triggers a confirmation email
+   (mirroring `send_confirmation_email`'s shape: a confirm link, nothing
+   enabled until it's clicked, expires if unused); only confirmed
+   addresses ever receive a real release-notes email. Needs, beyond
+   what the mockup shows: a persisted subscriber list (new store,
+   likely `profiles.db`-adjacent given that's this project's existing
+   home for exactly this shape of data -- opt-in state, confirmation
+   tokens, per issue #79/#102's precedent), a send step triggered
+   whenever the daily job actually publishes an entry, and an
+   unsubscribe mechanism (not shown in the mockup, but required --
+   every confirmation/notification email in this codebase already
+   carries a way to stop receiving it, and this shouldn't be the
+   exception).
+
+**Declined for now (2026-08-11), at explicit user request:**
+
+- **Unread tracking** (nav-item dot indicator + "Mark all as read").
+  Not needed right now -- drop from this pass. If wanted later, the
+  original design still holds: `localStorage`-based, comparing the
+  newest entry's date against a stored "last seen" date, no new
+  server-side state.
+- **RSS/Atom feed** ("Prefer a feed reader? Copy feed URL"). Not needed
+  right now -- drop from this pass. If wanted later: a new,
+  unauthenticated `GET /api/release-notes.rss`-style endpoint rendering
+  the same stored entries as a standard feed format, at request time --
+  same "render at request time from stored data" pattern every other
+  tab already uses, just a different output format. No dependency on
+  anything else in this plan, so it's a clean, independent fast-follow
+  whenever it's wanted.
+
+None of the four remaining items (1-4 above) were part of the 7 decided
+points or the Candidates A/B/C investigated earlier in this doc. They're
+real, buildable, and consistent with this codebase's existing patterns
+(client-side filters, double opt-in via `reminder_confirmation.py`'s
+established shape, request-time rendering) -- but email subscription in
+particular is a meaningfully larger, separately-risked piece of work
+(new persisted subscriber data, a confirmation-email flow, an
+unsubscribe path) than the read-only "tab that renders dated entries"
+core of this feature.
+
+**Open question still remaining for the user's review:**
+- Should email subscription (item 4) ship in the same first
+  `ship-issue` pass as the core tab (points 1-7 + Candidates A/B/C +
+  category taxonomy/search/filter), or split out as a fast-follow issue
+  once the core tab is live? It's the one piece here that touches real
+  user data and a new confirmation-email flow, a different risk profile
+  from the rest of this feature (which is entirely read-only rendering
+  of generated content).
 
 ## Recommendation
 
