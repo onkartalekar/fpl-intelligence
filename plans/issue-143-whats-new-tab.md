@@ -155,15 +155,10 @@ complexity buys nothing B2a doesn't already give more simply.
 at request time (matching every other tab's live-render pattern).**
 Requires the new workflow to carry `contents: write` and push a commit
 to `main` -- the first scheduled automation to do so (see Structural
-constraints above). Assumes Railway's GitHub integration auto-deploys on
-push to `main`, which this session's own history is consistent with
-(every merged PR this session took effect on the live server with no
-separate manual deploy step ever performed) but was not independently
-re-verified for this plan -- **confirm this assumption before building**,
-since C1's entire viability depends on it. If true, this keeps release
-notes exactly where all this project's other prose already lives (git,
-diffable, `MODEL.md`/`SPECIFICATION.md`/`IMPLEMENTATION_PLAN.md`-style),
-at the cost of introducing the new bot-commit precedent.
+constraints above). If the live tab rendered directly from this
+git-committed copy, viability would hinge on Railway auto-deploying on
+push to `main` -- but see C3 below, which sidesteps that dependency
+entirely by not using this file as the live-render source.
 
 **C2. A new authenticated write endpoint, matching the existing
 operator-token pattern.** `POST /api/refresh` and `POST
@@ -176,28 +171,40 @@ on the same Railway volume `profiles.db`/the JSON snapshots already use
 (e.g. `data/release-notes.json`) -- no new secret to provision (reuses
 `FPL_INTEL_REFRESH_TOKEN`, already on both Railway and GitHub Actions),
 content is live immediately (no deploy latency), and it matches this
-repo's actual established scheduled-workflow architecture (call back
-over HTTP, never touch git) with zero exceptions. Trade-off: release
-notes are no longer git-history-diffable the way the rest of this
-project's docs are -- they'd live in the gitignored, volume-persisted
-`data/` directory instead (same durability caveat already documented for
-`profiles.db`: a real, persistent-but-not-version-controlled Railway
-volume, not ephemeral, but not `git log`-able either).
+repo's established scheduled-workflow architecture (call back over
+HTTP). Trade-off standing alone: not git-diffable, since it lives in
+the gitignored, volume-persisted `data/` directory.
 
-**Recommendation: C2, with one caveat.** C2 is a strictly smaller
-change (no new repo-write precedent, no new secret, reuses the
-established `X-Refresh-Token`-gated-POST-then-persist-to-volume shape
-`/api/refresh`/`/api/archive-team-forecast` already use) and is
-immediately live with no dependency on confirming Railway's deploy
-behavior. The caveat: this is a genuine, if minor, departure from "every
-piece of this project's prose lives in git" -- worth the user's explicit
-sign-off given issue #143's own point 3 ("move/re-create... in repo")
-frames the *bootstrap* migration as an in-repo, human-reviewed PR (which
-this plan treats as a one-time, separately-scoped task, not the ongoing
-daily job's mechanism -- see Recommendation below). If the user would
-rather keep the ongoing daily entries git-tracked too for auditability,
-C1 is the fallback, contingent on confirming Railway's auto-deploy
-behavior first.
+**C3 (decided). Both C1 and C2 -- POST for the live tab, a git-tracked
+folder for durable documentation.** The user wants release notes
+git-tracked as "an important piece of documentation" (not just a live
+UI feature), which C2 alone doesn't give -- but also doesn't want the
+live tab's correctness depending on Railway's deploy timing, which a
+C1-only design would. Doing both resolves this and removes the
+"confirm Railway auto-deploy" blocker entirely: the live "What's New"
+tab never reads the git folder, so it doesn't matter when or whether a
+given commit has actually been deployed.
+
+Concretely, the daily job, after generating one day's content:
+1. **`POST /api/release-notes`** (C2) -- the live-serving write. This
+   step is required; if it fails, the job fails loudly (same posture as
+   every other real misconfiguration in this repo's scheduled jobs --
+   `ConfigError`, non-zero exit, visible in the Actions run).
+2. **Commit a new dated file to a new top-level `release-notes/` folder**
+   (e.g. `release-notes/2026-08-12.md`) **and push to `main`** -- the
+   archival write. Needs `contents: write` added to this workflow's
+   permissions specifically (still `contents: read` for the other three
+   -- this is the first, deliberate exception, not a blanket repo change).
+   Recommend treating this step as best-effort relative to step 1: log a
+   warning if it fails (matching the reminder job's existing "kept out
+   of the public log; see the uploaded artifact" convention for
+   non-fatal detail) rather than failing the whole run, since the live
+   tab already reflects the day's notes via step 1 regardless.
+
+This does mean accepting the new bot-commit-to-`main` precedent flagged
+in Structural constraints above -- the user has confirmed that's an
+acceptable, intentional trade for having real git history of release
+notes, not an overlooked side effect.
 
 ## Recommendation
 
@@ -206,17 +213,18 @@ behavior first.
    provider-agnostic LLM caller; fall back to a plain templated entry
    (no LLM styling) rather than silently skipping a day with real
    changes.
-3. **C2** -- new `POST /api/release-notes` endpoint, gated by the
-   existing `FPL_INTEL_REFRESH_TOKEN`, persisting to a new
-   `data/release-notes.json` on the same Railway volume `profiles.db`
-   already uses. Dashboard's new "What's New" tab renders from that file
-   at request time, same as every other tab.
+3. **C3 (decided)** -- dual write: `POST /api/release-notes` (gated by
+   the existing `FPL_INTEL_REFRESH_TOKEN`) for the live tab, persisting
+   to `data/release-notes.json` on the Railway volume; **and** a commit
+   to a new `release-notes/` folder on `main` for git-tracked
+   documentation history. The live tab reads only from the POST/volume
+   path, never the git folder, so it never depends on deploy timing.
 4. **Bootstrap is a separate, one-time task**, not part of the ongoing
    daily job: migrate `RELEASE_NOTES.md`'s current content into the new
-   dated-entry format as the first ("yesterday") entry, via a normal
-   human-reviewed PR -- matching issue #143 point 3's "in repo" framing
-   for that one-time step specifically, distinct from how the recurring
-   job persists content (C2, not git).
+   `release-notes/` folder as the first ("yesterday") dated entry, via a
+   normal human-reviewed PR -- and POST that same content once, by hand
+   or via a one-off script invocation, so the live tab and the git
+   archive start in sync.
 5. Scheduling: two workflow cron triggers (12:00 UTC and 13:00 UTC,
    covering both EDT/EST 8 AM ET), gated by a Python-side
    `America/New_York` hour check inside the script itself -- the "wrong"
@@ -224,11 +232,6 @@ behavior first.
    discipline point 1 already requires for "nothing merged."
 
 **Before building, confirm with the user:**
-- Railway's auto-deploy-on-push-to-`main` behavior (only load-bearing if
-  C1 is chosen instead of C2).
-- Whether C2's git-untracked, volume-persisted storage is an acceptable
-  trade for avoiding the new bot-commit-to-`main` precedent, or whether
-  git-tracked history matters enough here to prefer C1.
 - The LLM provider/credentials to actually use for B1 (whether existing
   `FPL_INTEL_LLM_*` env vars, if any are already set for Phase 5
   scaffolding, should be reused, or a separate credential is wanted so
