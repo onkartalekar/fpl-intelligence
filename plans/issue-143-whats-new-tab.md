@@ -249,6 +249,56 @@ per the user's "wait for my review" instruction on this pass.
   in the UI itself, not just as an absence.
 - End-of-list marker: *"That's the full history so far."*
 
+**Worked example from the mockup, preserved verbatim as a concrete
+tone/style reference** (not real data -- illustrates the target voice
+for the generation step, Candidate B):
+
+> **Mon, Aug 11** -- Yesterday -- "Sharper filters for preseason
+> movement tracking" -- 3 changes
+>
+> Club movement just got easier to scan: the single messy filter row
+> split into three focused controls, and every incoming transfer now
+> carries a reconciled FPL player ID the moment it lands -- no more
+> waiting for the next refresh to match a name to an official record.
+>
+> - **[Feature]** Club movement filters split into Direction, Movement
+>   type, and Date -- Previously one combined control; each now narrows
+>   independently and combines with search.
+> - **[Data]** First-party transfer feed reconciles FPL player IDs on
+>   ingest -- Confirmed movements match official prices, clubs, and
+>   positions as soon as they arrive, not on the next scheduled refresh.
+> - **[Fix]** Deadline banner no longer flashes before the 2026/27 feed
+>   is live -- The banner now waits for a real deadline before rendering
+>   anything.
+>
+> Collapsed older entries (headline + count only, per the
+> expand/collapse rule): "Shadow models now score every refresh" (Fri,
+> Aug 8, 2 changes), "Declare a preseason draft squad" (Tue, Aug 5, 2
+> changes), "A way to reach the team, and a reminder before deadlines"
+> (Thu, Jul 30, 2 changes).
+
+**Visual style -- checked against the app's actual CSS
+(`src/fpl_intel/dashboard.css`), two findings:**
+- The mockup's dark navy background **already matches** this app's
+  existing default theme tokens (`--bg: #08101f`, `--panel: #101b2e`,
+  `:root` block) -- no new theme needed, the tab should just use the
+  existing tokens like every other view does. The app also already
+  supports a light theme (`:root[data-theme="light"]`) -- the new tab
+  needs to work in both, same as every other view, not just the dark
+  mockup shown.
+- **Open discrepancy, not yet resolved:** the mockup's buttons and
+  active-filter-chip state read as purple/indigo, but this app's actual
+  accent color is green (`--accent: #57dfae`, used everywhere else --
+  active nav item, buttons, focus rings). Also, the app already has an
+  established chip/badge color-token system
+  (`--badge-setup/-info/-ready-*`, `--chip-neutral/-easy/-hard-*` in
+  `dashboard.css`, used for e.g. fixture-difficulty chips) that the new
+  `Feature`/`Fix`/`Data`/`Docs`/`Chore` category tags should extend
+  rather than inventing an unrelated ad-hoc palette. **Needs a decision
+  before implementation:** match the mockup's purple/indigo accent as a
+  deliberate new color, or use the app's existing green `--accent` for
+  visual consistency with every other tab. Not decided in this plan.
+
 **New scope this mockup introduces, not covered by the "Decided" list
 or the candidates above.** Resolved with the user 2026-08-11:
 
