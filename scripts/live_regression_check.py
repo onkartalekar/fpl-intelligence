@@ -33,9 +33,10 @@ Configuration, entirely environment-variable driven:
 
 Every write this script makes uses a reserved, obviously-synthetic team ID
 (`SYNTHETIC_TEAM_ID_BASE` and up) well outside FPL's real ~8-digit team ID space, and the one real
-email it sends is prefixed `[live-regression-check]` in both subject and body so it's
-unmistakably distinguishable from real visitor traffic in the operator's inbox and
-`contact-submissions.log`.
+email it sends has its body (not subject -- `compose_contact_email` always sets the Subject to
+`"FPL Intelligence contact form: <category>"`, regardless of what's submitted) prefixed
+`[live-regression-check]` so it's unmistakably distinguishable from real visitor traffic in the
+operator's inbox and `contact-submissions.log`.
 
 `--dry-run` skips only the `/api/contact` valid-submission-plus-IMAP-poll leg (the one real,
 externally-visible side effect -- an actual email landing in a real inbox); every other check,
@@ -43,7 +44,6 @@ including `/api/contact`'s own input-validation rejection paths, still runs.
 """
 
 import argparse
-from email.header import decode_header
 import imaplib
 import json
 import os
@@ -344,10 +344,19 @@ def check_contact_endpoint_rejects_invalid(base_url):
 
 
 def _imap_poll_for_marker(imap_host, imap_port, imap_user, imap_password, marker, run_id):
-    """Poll the mailbox over IMAP for an email containing `marker` and `run_id` in the subject,
+    """Poll the mailbox over IMAP for an email containing `marker` and `run_id` in the body,
     within `_IMAP_POLL_TIMEOUT_SECONDS`. This is the only way to verify /api/contact's
     notification email actually arrived -- see the module docstring and plan doc for why the
-    API's own response can't tell us this."""
+    API's own response can't tell us this.
+
+    Searches the BODY, not the Subject: `compose_contact_email` (`reminder_confirmation.py`)
+    always sets the Subject to `"FPL Intelligence contact form: <category>"` -- the marker and
+    run_id are only ever in the message body (the submitted "Message:" field), never the Subject.
+    An earlier version of this function searched SUBJECT, which could never have matched
+    regardless of how long it waited -- a real, confirmed false-negative in this check itself,
+    not a delivery problem. Caught live: the notification genuinely arrived (visible in the real
+    inbox) while this check still reported it missing.
+    """
     deadline = time.monotonic() + _IMAP_POLL_TIMEOUT_SECONDS
     last_error = None
     while time.monotonic() < deadline:
@@ -356,17 +365,14 @@ def _imap_poll_for_marker(imap_host, imap_port, imap_user, imap_password, marker
             try:
                 connection.login(imap_user, imap_password)
                 connection.select("INBOX")
-                status, message_ids = connection.search(None, "SUBJECT", f'"{marker}"')
+                status, message_ids = connection.search(None, "BODY", f'"{marker}"')
                 if status == "OK":
                     for message_id in message_ids[0].split():
-                        status, msg_data = connection.fetch(message_id, "(BODY[HEADER.FIELDS (SUBJECT)])")
+                        status, msg_data = connection.fetch(message_id, "(BODY[TEXT])")
                         if status != "OK" or not msg_data or not msg_data[0]:
                             continue
-                        raw_subject = msg_data[0][1].decode("utf-8", errors="replace")
-                        decoded = "".join(
-                            part.decode(encoding or "utf-8") if isinstance(part, bytes) else part
-                            for part, encoding in decode_header(raw_subject)
-                        )
+                        raw_body = msg_data[0][1]
+                        decoded = raw_body.decode("utf-8", errors="replace")
                         if run_id in decoded:
                             return True
             finally:

@@ -11,7 +11,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # scripts/ is not a package, matching every other scripts/*.py test module's own setup.
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "live_regression_check.py"
@@ -273,6 +273,88 @@ class ContactEndpointDeliveryTests(unittest.TestCase):
                 lrc.check_contact_endpoint_delivery(
                     "https://example.com", "imap.example.com", 993, "user@example.com", "secret",
                 )
+
+
+class ImapPollForMarkerTests(unittest.TestCase):
+    """Exercises `_imap_poll_for_marker`'s actual IMAP search/fetch calls against a fake
+    connection, rather than mocking the function away entirely -- the earlier version of this
+    function searched the Subject header for a marker that `compose_contact_email`
+    (`reminder_confirmation.py`) never puts there (the real Subject is always
+    `"FPL Intelligence contact form: <category>"`, regardless of what's submitted; the marker and
+    run_id only ever appear in the body). That bug shipped and passed review because every test
+    here mocked `_imap_poll_for_marker` itself, never exercising its real IMAP search criterion --
+    confirmed live: the real notification email genuinely arrived while the check still reported
+    it missing. These tests are the regression guard for that class of bug specifically."""
+
+    def _fake_connection(self, search_result, fetch_bodies):
+        """`search_result`: the message-ID bytestring IMAP SEARCH would return.
+        `fetch_bodies`: {message_id_str: body_text_or_None (None simulates a failed fetch)}."""
+        connection = MagicMock()
+        connection.search.return_value = ("OK", [search_result])
+
+        def fake_fetch(message_id, spec):
+            body = fetch_bodies.get(message_id.decode() if isinstance(message_id, bytes) else message_id)
+            if body is None:
+                return ("NO", [None])
+            return ("OK", [(b"1 (BODY[TEXT] {n})", body.encode())])
+
+        connection.fetch.side_effect = fake_fetch
+        return connection
+
+    def test_searches_the_body_not_the_subject(self):
+        """The exact bug: SEARCH must use the BODY criterion, since the marker is never in the
+        Subject header compose_contact_email actually sends."""
+        connection = self._fake_connection(b"1", {"1": "[live-regression-check] run-123 -- ..."})
+        with patch.object(lrc.imaplib, "IMAP4_SSL", return_value=connection):
+            lrc._imap_poll_for_marker("imap.example.com", 993, "user@example.com", "secret", "[live-regression-check]", "run-123")
+
+        args, _kwargs = connection.search.call_args
+        self.assertEqual(args[1], "BODY")
+        self.assertNotEqual(args[1], "SUBJECT")
+
+    def test_finds_a_real_message_whose_marker_and_run_id_are_only_in_the_body(self):
+        """The exact real-world shape that broke: Subject is generic
+        ("FPL Intelligence contact form: Other"), marker+run_id live in the body only."""
+        connection = self._fake_connection(
+            b"1", {"1": "Category: Other\n\nMessage:\n[live-regression-check] run-1786491040 -- automated live regression check, safe to ignore/delete.\n\nReply-to: (not provided)"},
+        )
+        with patch.object(lrc.imaplib, "IMAP4_SSL", return_value=connection):
+            found = lrc._imap_poll_for_marker(
+                "imap.example.com", 993, "user@example.com", "secret",
+                "[live-regression-check]", "run-1786491040",
+            )
+
+        self.assertTrue(found)
+
+    def test_returns_false_when_run_id_does_not_match_any_candidate(self):
+        # Small but non-zero timeout: guarantees the loop body runs at least once (the deadline
+        # is still in the future when first checked), while time.sleep is mocked so retries
+        # between iterations never actually block the test.
+        connection = self._fake_connection(b"1", {"1": "[live-regression-check] run-999 -- ..."})
+        with patch.object(lrc.imaplib, "IMAP4_SSL", return_value=connection), \
+             patch.object(lrc, "_IMAP_POLL_TIMEOUT_SECONDS", 0.05), \
+             patch.object(lrc.time, "sleep"):
+            found = lrc._imap_poll_for_marker(
+                "imap.example.com", 993, "user@example.com", "secret",
+                "[live-regression-check]", "run-123",
+            )
+
+        self.assertFalse(found)
+
+    def test_logs_in_and_selects_inbox(self):
+        # Matches on the first attempt (deterministic -- exactly one iteration, so login/select/
+        # logout each happen exactly once) rather than relying on a real match ever showing up
+        # within a timing-dependent retry loop.
+        connection = self._fake_connection(b"1", {"1": "[live-regression-check] run-123 -- ..."})
+        with patch.object(lrc.imaplib, "IMAP4_SSL", return_value=connection):
+            found = lrc._imap_poll_for_marker(
+                "imap.example.com", 993, "user@example.com", "secret", "[live-regression-check]", "run-123",
+            )
+
+        self.assertTrue(found)
+        connection.login.assert_called_once_with("user@example.com", "secret")
+        connection.select.assert_called_once_with("INBOX")
+        connection.logout.assert_called_once()
 
 
 class RunTests(unittest.TestCase):
