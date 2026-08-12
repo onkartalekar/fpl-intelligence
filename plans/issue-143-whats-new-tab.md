@@ -231,9 +231,15 @@ notes, not an overlooked side effect.
    trigger for the current DST regime no-ops, reusing the same no-op
    discipline point 1 already requires for "nothing merged."
 
-**Before building, confirm with the user:**
-- The LLM provider/credentials to actually use for B1 (whether existing
-  `FPL_INTEL_LLM_*` env vars, if any are already set for Phase 5
-  scaffolding, should be reused, or a separate credential is wanted so
-  this job's usage/cost is distinguishable from any future Phase 5
-  activation).
+**Confirmed with the user (2026-08-11):**
+- Railway auto-deploys on every push to `main` -- not load-bearing for
+  this plan either way (C3's live tab reads only the POST/volume path),
+  but removes any remaining doubt about C1's own viability as a concept.
+- No `FPL_INTEL_LLM_*` credentials exist anywhere yet (Phase 5 has never
+  been activated) -- **provision a new API key specifically for this
+  job**, not shared with Phase 5. Needs its own env var name distinct
+  from `news_signals.py`'s (e.g. `FPL_INTEL_RELEASE_NOTES_LLM_*`, or
+  reuse the same var names but document that activating Phase 5 later
+  would then share this job's key unless a second one is added at that
+  point) -- exact naming is implementation, not this plan, but the
+  "separate key, not shared" decision itself is made.
