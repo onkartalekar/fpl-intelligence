@@ -861,6 +861,84 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("outside window", captured.getvalue())
 
+    def test_real_run_outside_window_does_not_require_smtp_env_vars_either(self):
+        """The actual reported bug: an hourly cron (always a real, non---dry-run invocation) with
+        nobody currently in-window must not fail just because SMTP hasn't been configured yet --
+        no email was ever going to be sent this tick regardless."""
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}]),
+            sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://example.up.railway.app",
+            sdr.REFRESH_TOKEN_ENV_VAR: "test-refresh-token",
+        }
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = sample_bootstrap()
+        bootstrap["events"] = [
+            {
+                "id": 1, "name": "Gameweek 1",
+                "deadline_time": (now + timedelta(hours=100)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "is_next": True,
+            },
+        ]
+        with patch.dict("os.environ", env_updates, clear=False):
+            for var in (
+                sdr.SMTP_HOST_ENV_VAR, sdr.SMTP_PORT_ENV_VAR,
+                sdr.SMTP_USER_ENV_VAR, sdr.SMTP_PASSWORD_ENV_VAR,
+            ):
+                os.environ.pop(var, None)
+            with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)):
+                captured = io.StringIO()
+                with patch("sys.stdout", captured):
+                    exit_code = sdr.main([])  # no --dry-run: a real, hourly-cron-shaped invocation
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("outside window", captured.getvalue())
+
+    def test_real_run_in_window_still_requires_smtp_env_vars(self):
+        """The other half of the fix: SMTP is only deferred, never skipped -- once there's an
+        actual send about to happen, a real (non-dry-run) run must still fail loudly if SMTP
+        isn't configured, rather than silently doing nothing."""
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com", "lead_hours": 3}]),
+            sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://example.up.railway.app",
+            sdr.REFRESH_TOKEN_ENV_VAR: "test-refresh-token",
+        }
+        frozen_now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = sample_bootstrap()
+        bootstrap["events"] = [
+            {
+                "id": 1, "name": "Gameweek 1",
+                "deadline_time": (frozen_now + timedelta(hours=2.5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "is_next": True,
+            },
+        ]
+        lookup = {
+            "status": "ok",
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+
+        class _FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen_now
+
+        with patch.dict("os.environ", env_updates, clear=False):
+            for var in (
+                sdr.SMTP_HOST_ENV_VAR, sdr.SMTP_PORT_ENV_VAR,
+                sdr.SMTP_USER_ENV_VAR, sdr.SMTP_PASSWORD_ENV_VAR,
+            ):
+                os.environ.pop(var, None)
+            with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+                 patch.object(sdr, "datetime", _FrozenDateTime), \
+                 patch.object(sdr, "fetch_manager_view", return_value=lookup):
+                captured_err = io.StringIO()
+                with patch("sys.stderr", captured_err):
+                    exit_code = sdr.main([])
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("Configuration error", captured_err.getvalue())
+        self.assertIn("SMTP", captured_err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

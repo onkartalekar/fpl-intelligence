@@ -28,8 +28,11 @@ pattern in `src/fpl_intel/news_signals.py`:
   `ConfigError`, exactly as an unset `FPL_INTEL_REMINDER_TEAMS` always has -- this script never
   silently does nothing because nothing at all was configured.
 - `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD`:
-  SMTP credentials (e.g. Gmail's `smtp.gmail.com:587` with an app password). Not required when
-  `--dry-run` is passed.
+  SMTP credentials (e.g. Gmail's `smtp.gmail.com:587` with an app password). Resolved lazily,
+  inside `run()`, only once there's an actual in-window team to email this run -- never required
+  by `--dry-run`, and not required by a real run either on a tick where nobody happens to be
+  in-window, so an hourly cron doesn't fail every single tick before anyone's ever configured
+  these, or before anyone is due a reminder this particular hour.
 - `FPL_INTEL_DASHBOARD_BASE_URL` (issue #125): the live dashboard's public origin, e.g.
   `https://web-production-1b285.up.railway.app`. Required in both real and `--dry-run` runs --
   each in-window team's recommendation is now fetched live from the hosted dashboard's
@@ -1034,6 +1037,20 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=Non
             print()
             print(f"HTML preview written to {preview_path}")
         else:
+            if smtp_config is None:
+                # Resolved lazily, right here at the first actual send attempt -- not just "some
+                # team is in-window" (a team can be in-window and still never reach this line,
+                # e.g. lookup failure/opt-out/not-found above), and not required unconditionally
+                # by main() on every tick. Without this, an hourly cron would fail every single
+                # tick until SMTP was configured, even on ticks where no real send was ever going
+                # to be attempted. `smtp_config` stays an explicit parameter so callers/tests can
+                # still inject a fake one directly, matching every other call in this module --
+                # this only resolves it when the caller didn't.
+                try:
+                    smtp_config = parse_smtp_config()
+                except ConfigError as error:
+                    print(f"Configuration error: {error}", file=sys.stderr)
+                    return 1
             send_email(smtp_config, team["email"], subject, body, html_body)
         sent_count += 1
 
@@ -1076,17 +1093,14 @@ def main(argv=None):
         print(f"Configuration error: {error}", file=sys.stderr)
         return 1
 
-    smtp_config = None
-    if not args.dry_run:
-        try:
-            smtp_config = parse_smtp_config()
-        except ConfigError as error:
-            print(f"Configuration error: {error}", file=sys.stderr)
-            return 1
-
+    # Issue: SMTP is no longer required eagerly here -- `run()` resolves it lazily, only once it
+    # knows there's an actual in-window team to email this run. An hourly cron with nobody
+    # currently in-window would otherwise fail every single tick until SMTP was configured, even
+    # though no send was ever going to be attempted -- the exact same "don't fail for a resource
+    # this particular run doesn't need" reasoning already applied to an empty teams list above.
     try:
         return run(
-            teams, args.dry_run, smtp_config,
+            teams, args.dry_run, None,
             dashboard_base_url=dashboard_base_url, refresh_token=refresh_token,
         )
     except ConfigError as error:
