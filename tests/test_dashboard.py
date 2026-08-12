@@ -1,8 +1,76 @@
 from html.parser import HTMLParser
+import json
 import re
 import unittest
 
 from fpl_intel.dashboard import render_dashboard
+
+
+class WhatsNewTabRenderTests(unittest.TestCase):
+    """Issue #143: the "What's New" tab's markup and embedded data."""
+
+    _BASE_STATE = {
+        "generated_at": "2026-08-11T12:00:00-04:00",
+        "timezone": "America/New_York",
+        "fpl": {
+            "season_status": "prior_season_data", "ready_for_2026_27": False,
+            "player_count": 841, "team_count": 20, "event_count": 38,
+        },
+        "transfers": [], "sources": [],
+    }
+
+    def test_nav_button_and_static_shell_render(self):
+        html = render_dashboard(self._BASE_STATE)
+
+        self.assertIn('data-view="whats-new"', html)
+        self.assertIn('id="view-whats-new"', html)
+        self.assertIn("What's New", html)
+        self.assertIn('id="whats-new-search"', html)
+        self.assertIn('data-whats-new-filter="Feature"', html)
+        self.assertIn('data-whats-new-filter="Fix"', html)
+        self.assertIn('data-whats-new-filter="Data"', html)
+        self.assertIn('data-whats-new-filter="Docs"', html)
+        self.assertIn('data-whats-new-filter="Chore"', html)
+
+    def test_email_subscribe_card_renders(self):
+        html = render_dashboard(self._BASE_STATE)
+
+        self.assertIn('id="whats-new-subscribe-form"', html)
+        self.assertIn('id="whats-new-subscribe-email"', html)
+        self.assertIn("Get release notes by email", html)
+
+    def test_release_notes_entries_are_embedded_in_dashboard_data(self):
+        state = {
+            **self._BASE_STATE,
+            "release_notes": [
+                {
+                    "date": "2026-08-11",
+                    "headline": "Sharper filters for preseason movement tracking",
+                    "summary": "Club movement just got easier to scan.",
+                    "changes": [
+                        {"category": "Feature", "title": "Split filters", "description": "Three controls now."},
+                    ],
+                },
+            ],
+        }
+
+        html = render_dashboard(state)
+
+        match = re.search(
+            r'<script id="dashboard-data" type="application/json">(.*?)</script>', html, re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        embedded = json.loads(match.group(1))
+        self.assertEqual(embedded["release_notes"][0]["headline"], "Sharper filters for preseason movement tracking")
+
+    def test_renders_without_release_notes_key_present(self):
+        # Mirrors every other new-view addition to this template: absence of the key (a fresh
+        # install that has never had /api/release-notes POSTed to it) must not raise or leave
+        # "undefined" anywhere in the served page -- dashboard.js's own `state.release_notes||[]`
+        # fallback handles that at the JS layer, but the Python render must not choke either.
+        html = render_dashboard(self._BASE_STATE)
+
+        self.assertNotIn("undefined", html)
 
 
 class DashboardRenderTests(unittest.TestCase):

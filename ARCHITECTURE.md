@@ -27,19 +27,22 @@ flowchart TB
         scheduledRefresh["scheduled-refresh.yml<br/>(issue #101, hourly cron)"]
         deadlineReminder["deadline-reminder.yml<br/>(issue #55, hourly cron)"]
         liveCheck["live-regression-check.yml<br/>(issue #119, daily cron)"]
+        releaseNotes["release-notes.yml<br/>(issue #143, twice-daily cron --<br/>12:00 &amp; 13:00 UTC, DST-safe 8am ET)"]
     end
 
     subgraph railway["Railway container"]
         server["server.py: create_server<br/>(issue #27)"]
         subgraph volume["Persistent volume (issue #27)"]
             profilesDb[("profiles.db")]
-            artifacts[("dashboard-state.json,<br/>fpl-bootstrap-latest.json,<br/>official-transfers-latest.json, ...")]
+            artifacts[("dashboard-state.json,<br/>fpl-bootstrap-latest.json,<br/>official-transfers-latest.json,<br/>release-notes.json, ...")]
         end
     end
 
     fplApi[["FPL public API<br/>(bootstrap, fixtures, entry/history)"]]
     transferSources[["Scraped official transfer /<br/>club-news sources"]]
     smtp[["SMTP (Gmail)<br/>FPL_INTEL_SMTP_*"]]
+    githubApi[["GitHub REST API<br/>(merged PRs; also this repo itself,<br/>for release-notes/ commits)"]]
+    llmApi[["LLM API (optional)<br/>FPL_INTEL_RELEASE_NOTES_LLM_*"]]
 
     visitor -->|"GET /, /dashboard.html<br/>GET /api/status"| server
     visitor -->|"POST /api/profile, /draft-squad,<br/>/lookup-opt-out, /reminder-opt-in,<br/>/contact (open, per-source rate-limited)"| server
@@ -63,6 +66,11 @@ flowchart TB
 
     liveCheck -->|"exercises every endpoint above<br/>with a reserved synthetic team ID"| server
     liveCheck -->|"IMAP poll: did the Contact Us<br/>notification actually arrive?"| smtp
+
+    releaseNotes -->|"list merged PRs<br/>(GITHUB_TOKEN)"| githubApi
+    releaseNotes -->|"generate copy<br/>(optional; template fallback if unset/fails)"| llmApi
+    releaseNotes -->|"POST /api/release-notes<br/>(X-Refresh-Token)"| server
+    releaseNotes -->|"git commit + push<br/>release-notes/&lt;date&gt;.md<br/>(contents: write --<br/>the one workflow with repo write access)"| githubApi
 
     classDef ephemeral stroke-dasharray: 4 3
     class gha ephemeral

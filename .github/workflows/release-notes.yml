@@ -1,0 +1,88 @@
+name: Release notes
+
+# Issue #143: publishes the "What's New" dashboard tab's daily entry -- see
+# plans/issue-143-whats-new-tab.md for the full design. Thin wrapper around
+# scripts/publish_release_notes.py, which does all the real work (listing yesterday's merged
+# PRs, generating the entry, publishing it) and takes no opinion on what invokes it.
+#
+# Two cron triggers, not one: GitHub's schedule cron is fixed UTC and does not itself understand
+# "8 AM Eastern Time" -- a single hardcoded UTC time would silently drift by an hour whenever the
+# US crosses a DST boundary. 12:00 UTC covers 8 AM EDT, 13:00 UTC covers 8 AM EST; the script's
+# own is_correct_scheduled_hour() no-ops whichever trigger doesn't match the current DST regime,
+# so exactly one of these two runs actually publishes on any given day -- the "wrong" one exiting
+# quietly is expected, not a failure.
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # 8 AM EDT
+    - cron: "0 13 * * *"  # 8 AM EST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print the generated entry instead of publishing/writing it."
+        type: boolean
+        default: true
+      skip_hour_check:
+        description: "Bypass the DST-safe hour gate (useful when running this manually)."
+        type: boolean
+        default: true
+
+permissions:
+  contents: write  # Issue #143's Candidate C3: this workflow commits release-notes/<date>.md --
+                    # the first scheduled job in this repo with write access to the repo itself
+                    # (every other one is contents: read; see the plan doc's Structural
+                    # constraints section for why that's a deliberate, confirmed exception here).
+  pull-requests: read  # Needed to list merged PRs via the GitHub REST search API.
+
+jobs:
+  publish-release-notes:
+    runs-on: ubuntu-latest
+    env:
+      FPL_INTEL_DASHBOARD_BASE_URL: ${{ secrets.FPL_INTEL_DASHBOARD_BASE_URL }}
+      FPL_INTEL_REFRESH_TOKEN: ${{ secrets.FPL_INTEL_REFRESH_TOKEN }}
+      # Optional -- unset means the script falls back to a plain template entry (no LLM styling)
+      # rather than failing. Deliberately a separate credential from news_signals.py's
+      # FPL_INTEL_LLM_* (confirmed with the user 2026-08-11: nothing is shared with the dormant
+      # Phase 5 feature).
+      FPL_INTEL_RELEASE_NOTES_LLM_PROVIDER: ${{ secrets.FPL_INTEL_RELEASE_NOTES_LLM_PROVIDER }}
+      FPL_INTEL_RELEASE_NOTES_LLM_MODEL: ${{ secrets.FPL_INTEL_RELEASE_NOTES_LLM_MODEL }}
+      FPL_INTEL_RELEASE_NOTES_LLM_API_KEY: ${{ secrets.FPL_INTEL_RELEASE_NOTES_LLM_API_KEY }}
+      FPL_INTEL_RELEASE_NOTES_LLM_API_BASE: ${{ secrets.FPL_INTEL_RELEASE_NOTES_LLM_API_BASE }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate and publish
+        run: |
+          set +e
+          FLAGS=""
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
+            FLAGS="$FLAGS --dry-run"
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_hour_check }}" = "true" ]; then
+            FLAGS="$FLAGS --skip-hour-check"
+          fi
+          PYTHONPATH=src python3 scripts/publish_release_notes.py $FLAGS
+          exit $?
+
+      - name: Commit and push the archived entry, if one was written
+        # Only real (non-dry-run) runs write release-notes/<date>.md at all; `git status
+        # --porcelain` is empty on a --dry-run run or a genuine no-op day (nothing merged), so
+        # this step is a safe no-op in both those cases, not a failure.
+        if: github.event_name == 'schedule' || inputs.dry_run == false
+        run: |
+          if [ -n "$(git status --porcelain release-notes/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add release-notes/
+            git commit -m "Archive $(date -u +%Y-%m-%d) release notes (automated, issue #143)"
+            git push
+          else
+            echo "Nothing new to archive."
+          fi

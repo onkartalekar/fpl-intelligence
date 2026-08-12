@@ -224,7 +224,7 @@ See [plans/issue-27-cloud-hosting.md](plans/issue-27-cloud-hosting.md) for the f
 
 ### GitHub Actions (Settings -> Secrets and variables -> Actions)
 
-Three scheduled workflows run on GitHub's own runners regardless of where the dashboard is
+Four scheduled workflows run on GitHub's own runners regardless of where the dashboard is
 hosted, and all call back into the live Railway server over HTTP rather than sharing its
 filesystem (see [ARCHITECTURE.md](ARCHITECTURE.md)) -- so their secrets live here, not on Railway.
 
@@ -236,10 +236,15 @@ filesystem (see [ARCHITECTURE.md](ARCHITECTURE.md)) -- so their secrets live her
 | `FPL_INTEL_REMINDER_PROFILES_DB` (issue #80, source changed by #105) | `deadline-reminder.yml` | Set to any non-blank value (e.g. `1`) to additionally source opted-in teams live from Railway's `GET /api/reminder-teams` (`reminder_status == "enabled"`). No longer a filesystem path -- a GitHub Actions runner has no shared filesystem with Railway to read one from. Unset by default. Unioned with `FPL_INTEL_REMINDER_TEAMS` by `team_id`; the explicit-secret entry wins on collision. |
 | `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105) | `deadline-reminder.yml`, only when `FPL_INTEL_REMINDER_PROFILES_DB` is enabled | **Same value** as Railway's `FPL_INTEL_REMINDER_TEAMS_TOKEN` above. |
 | `FPL_INTEL_SMTP_HOST` / `FPL_INTEL_SMTP_PORT` / `FPL_INTEL_SMTP_USER` / `FPL_INTEL_SMTP_PASSWORD` | `deadline-reminder.yml`, to actually send mail (a `--dry-run` `workflow_dispatch` input exists for previewing without them); `_USER`/`_PASSWORD` also used by `live-regression-check.yml` (issue #119) to read the Contact Us notification back over IMAP | **Same variable names and value** as Railway's `FPL_INTEL_SMTP_*` above -- one credential pair for every consumer (live server, both scheduled workflows). Without `_USER`/`_PASSWORD`, `live-regression-check.yml` still runs but skips its email-delivery checks. |
+| `FPL_INTEL_RELEASE_NOTES_LLM_PROVIDER` / `_MODEL` / `_API_KEY` / `_API_BASE` (issue #143) | `release-notes.yml`, optional | Provider-agnostic LLM credentials for generating the daily "What's New" entry's copy, matching `news_signals.py`'s existing `FPL_INTEL_LLM_*` pattern (`"claude"` or `"openai_compatible"`) -- but a **separate** credential, not shared with that (currently dormant) feature. Unset, or a failed call, falls back to a plain templated entry rather than skipping the day. |
 
 `scripts/trigger_scheduled_refresh.py` (`scheduled-refresh.yml`) and `scripts/archive_team_forecasts.py`
 (issue #102, also run from `scheduled-refresh.yml`) need only `FPL_INTEL_REFRESH_TOKEN` and
 `FPL_INTEL_DASHBOARD_BASE_URL` from the table above -- both already covered by the first two rows.
+`release-notes.yml` (issue #143) also reuses `FPL_INTEL_REFRESH_TOKEN`/`FPL_INTEL_DASHBOARD_BASE_URL`
+(no new secret for either), plus the automatically-provided `GITHUB_TOKEN` to list merged PRs and
+push its `release-notes/` commits -- see that workflow's own `permissions:` block, the first
+scheduled workflow in this repo with `contents: write` rather than `contents: read`.
 
 `live-regression-check.yml` also has three optional variables, not repo secrets since none of
 them are sensitive: `FPL_INTEL_LIVE_CHECK_PUBLIC_TEAM_ID` (defaults to `364759`),

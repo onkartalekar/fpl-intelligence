@@ -384,6 +384,25 @@ core of this feature.
   from the rest of this feature (which is entirely read-only rendering
   of generated content).
 
+## Decided (2026-08-11): final calls, and slicing the build
+
+- **Accent color: match the app's existing green `--accent`**, not the
+  mockup's purple/indigo -- visual consistency with every other tab.
+- **Scope for this first `ship-issue` pass: the core read-only tab
+  only.** Dated entries, collapsible per-date sections, category tags
+  (`Feature`/`Fix`/`Data`/`Docs`/`Chore`), client-side search/filter,
+  the daily generation job, and the dual-write storage (Candidate C3)
+  all ship now. **Email subscription is deferred to its own follow-up
+  issue**, not this pass -- once `server.py` was actually inspected,
+  every existing write endpoint in this codebase (`/api/reminder-opt-in`
+  in particular) carries its own validation-error class, cooldown
+  limiter, dependency-injection hook, and dedicated test suite; matching
+  that same rigor for a new double-opt-in subscriber system is a
+  separately-sized, separately-risked piece of work from "a tab that
+  renders generated content," not a small addition to it. The mockup's
+  email-capture card and RSS feed link are both left out of this pass's
+  UI as a result (RSS was already declined earlier in this doc).
+
 ## Recommendation
 
 1. **A1** -- source "yesterday" from merged PRs.

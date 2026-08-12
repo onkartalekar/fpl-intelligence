@@ -13,10 +13,12 @@ import subprocess
 import sys
 import threading
 import traceback
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 import zoneinfo
 
 from . import profiles
+from . import release_notes
+from . import release_notes_subscribers
 from . import reminder_confirmation
 from .dashboard import render_dashboard
 from .fpl_data import save_json
@@ -113,6 +115,15 @@ _ALLOWED_REMINDER_LEAD_HOURS = {3, 12, 24}
 _ALLOWED_REMINDER_OPT_IN_KEYS = {"team_id", "action", "email", "lead_hours"}
 _REMINDER_OPT_IN_VALIDATION_MESSAGE = "Invalid reminder opt-in payload"
 _REMINDER_EMAIL_MAX_LENGTH = 254  # RFC 5321's practical maximum total address length
+
+# Issue #143: the What's New tab's email subscription -- double opt-in, same shape as the
+# reminder opt-in constants just above (own separate cooldowns/TTL, not reused from there, since
+# this is a distinct feature with its own abuse surface).
+_RELEASE_NOTES_SUBSCRIBE_COOLDOWN_SECONDS = 30
+_RELEASE_NOTES_CONFIRM_COOLDOWN_SECONDS = 30
+_RELEASE_NOTES_CONFIRMATION_TTL_HOURS = 24
+_ALLOWED_RELEASE_NOTES_SUBSCRIBE_KEYS = {"email"}
+_RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE = "Invalid release-notes subscribe payload"
 # Issue #110: category is a fixed, closed option set, mirroring the profile form's `risk_profile`
 # select -- matches the Contact Us form's `#contact-category` <option>s.
 _ALLOWED_CONTACT_CATEGORIES = {"bug", "feature_request", "feedback", "other"}
@@ -244,6 +255,12 @@ def _default_team_view_action(root):
 
 def _profiles_db_path(root):
     return Path(root) / "data" / "profiles.db"
+
+
+def _release_notes_subscribers_db_path(root):
+    # A separate file from profiles.db, not another table there -- see release_notes_subscribers.
+    # py's own module docstring for why (email-keyed, unrelated to the per-team profile schema).
+    return Path(root) / "data" / "release-notes-subscribers.db"
 
 
 def _contact_log_path(root):
@@ -704,6 +721,89 @@ def _default_reminder_opt_in_action(root, send_email_action, confirm_send_limite
     return action
 
 
+class ReleaseNotesSubscribeValidationError(Exception):
+    """Raised when a submitted /api/release-notes-subscribe payload fails validation."""
+
+
+class ReleaseNotesSubscribeSendError(Exception):
+    """Raised when the subscription confirmation email could not be sent -- the send is always
+    attempted before any DB write (same principle as /api/reminder-opt-in's "enable" path), so
+    this means nothing was persisted."""
+
+
+def _validate_release_notes_subscribe_payload(payload):
+    """Validate and normalize a /api/release-notes-subscribe request body. Same email-shape check
+    as `_validate_reminder_opt_in_payload`'s "enable" path -- presence-of-"@"/length only, not
+    full RFC 5322 validation."""
+    if not isinstance(payload, dict):
+        raise ReleaseNotesSubscribeValidationError(_RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE)
+    if not set(payload.keys()) <= _ALLOWED_RELEASE_NOTES_SUBSCRIBE_KEYS:
+        raise ReleaseNotesSubscribeValidationError(_RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE)
+    email = payload.get("email")
+    if (
+        not isinstance(email, str) or "@" not in email or not email.strip()
+        or len(email) > _REMINDER_EMAIL_MAX_LENGTH
+    ):
+        raise ReleaseNotesSubscribeValidationError(_RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE)
+    return {"email": email.strip().lower()}
+
+
+def _default_release_notes_subscribe_email_action():
+    """Thin wrapper over `reminder_confirmation`, same pattern as `_default_reminder_email_action`
+    -- lets `create_server` inject a fake for tests without ever touching real SMTP."""
+
+    def action(email, confirm_url):
+        reminder_confirmation.send_release_notes_subscription_email(email, confirm_url)
+
+    return action
+
+
+def _default_release_notes_notify_email_action():
+    """Thin wrapper for sending one published entry to one confirmed subscriber -- the
+    send-on-publish step in `_handle_release_notes`."""
+
+    def action(email, entry, unsubscribe_url):
+        reminder_confirmation.send_release_notes_email(email, entry, unsubscribe_url)
+
+    return action
+
+
+def _default_release_notes_subscribe_action(root, send_email_action):
+    """Build the default /api/release-notes-subscribe write action (issue #143): double opt-in,
+    mirroring `_default_reminder_opt_in_action`'s "enable" path -- generates a token, attempts
+    the confirmation-email send FIRST, and only writes a pending row on send success, so a pending
+    confirmation is never persisted for a token that was never actually emailed. No per-team-ID-
+    equivalent cooldown here (that pattern exists in reminder-opt-in to bound repeated sends *at
+    the same target*, keyed by team_id) -- `release_notes_subscribers.set_pending` is itself
+    idempotent per email (refreshes the token rather than erroring), and the endpoint's own
+    per-source `CooldownLimiter` (checked by the caller, `_handle_release_notes_subscribe`)
+    already bounds repeated submissions.
+    """
+
+    def action(payload, base_url):
+        cleaned = _validate_release_notes_subscribe_payload(payload)
+        db_path = _release_notes_subscribers_db_path(root)
+        token = secrets.token_urlsafe(32)
+        confirm_url = (
+            f"{base_url}/api/release-notes-confirm-subscription"
+            f"?email={quote(cleaned['email'])}&token={token}"
+        )
+        try:
+            send_email_action(cleaned["email"], confirm_url)
+        except reminder_confirmation.ReminderEmailError as error:
+            raise ReleaseNotesSubscribeSendError(str(error)) from error
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=_RELEASE_NOTES_CONFIRMATION_TTL_HOURS)
+        ).isoformat()
+        release_notes_subscribers.set_pending(
+            db_path, cleaned["email"], _hash_pin(token), expires_at,
+            datetime.now(timezone.utc).isoformat(),
+        )
+        return {"email": cleaned["email"]}
+
+    return action
+
+
 class ContactValidationError(Exception):
     """Raised when a submitted /api/contact payload fails validation."""
 
@@ -915,6 +1015,11 @@ def create_server(
     contact_action=None,
     contact_email_action=None,
     contact_limiter=None,
+    release_notes_subscribe_action=None,
+    release_notes_subscribe_email_action=None,
+    release_notes_notify_email_action=None,
+    release_notes_subscribe_limiter=None,
+    release_notes_confirm_limiter=None,
 ):
     """Create a dashboard server with a token-protected /api/refresh and open, rate-limited
     per-team write endpoints (issue #45's model).
@@ -937,6 +1042,15 @@ def create_server(
     above's roles for `/api/reminder-opt-in` -- `contact_limiter` in particular exists so tests
     can inject a fake-clock `CooldownLimiter` for `/api/contact`'s own cooldown, same reasoning
     as `refresh_limiter`.
+
+    `release_notes_subscribe_action`/`release_notes_subscribe_email_action`/
+    `release_notes_notify_email_action`/`release_notes_subscribe_limiter`/
+    `release_notes_confirm_limiter` are the equivalent DI hooks for issue #143's email
+    subscription -- `release_notes_subscribe_action` for `/api/release-notes-subscribe`'s write,
+    `release_notes_subscribe_email_action` for its confirmation-email send,
+    `release_notes_notify_email_action` for the per-subscriber send when a new entry publishes,
+    and the two limiters for its own cooldowns, mirroring `reminder_opt_in_action`/
+    `reminder_email_action`'s roles above for the exact same reasons.
 
     `reminder_teams_token` (issue #105) gates `/api/reminder-teams` -- a **separate** secret from
     `token`, not another use of the existing operator token. That endpoint returns every opted-in
@@ -990,6 +1104,24 @@ def create_server(
     )
     contact_send_email_action = contact_email_action or _default_contact_email_action()
     contact_write_action = contact_action or _default_contact_action(root, contact_send_email_action)
+    # Issue #143: email subscription for the What's New tab -- same two-limiter shape as
+    # reminder opt-in just above (an ordinary per-source cooldown on the subscribe endpoint
+    # itself, plus a separate one guarding the confirm/unsubscribe GET links against brute-force).
+    # Each local below reuses its parameter's own name (self-shadowing) so the handler methods
+    # defined further down close over the *resolved* value, not the still-`None` parameter.
+    release_notes_subscribe_limiter = release_notes_subscribe_limiter or CooldownLimiter(
+        cooldown_seconds=_RELEASE_NOTES_SUBSCRIBE_COOLDOWN_SECONDS
+    )
+    release_notes_confirm_limiter = release_notes_confirm_limiter or CooldownLimiter(
+        cooldown_seconds=_RELEASE_NOTES_CONFIRM_COOLDOWN_SECONDS
+    )
+    release_notes_subscribe_send_email_action = (
+        release_notes_subscribe_email_action or _default_release_notes_subscribe_email_action()
+    )
+    release_notes_subscribe_write_action = release_notes_subscribe_action or _default_release_notes_subscribe_action(
+        root, release_notes_subscribe_send_email_action,
+    )
+    release_notes_notify_email_action = release_notes_notify_email_action or _default_release_notes_notify_email_action()
     refresh_lock = threading.Lock()
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -1227,6 +1359,162 @@ def create_server(
                 return
             self._json(200, {"status": "ok", "team_id": team_id, "archived": archived})
 
+        def _handle_release_notes(self, body):
+            """POST /api/release-notes (issue #143): publish one day's "What's New" entry.
+
+            Operator-only, same as `/api/refresh`/`/api/archive-team-forecast` -- gated on the
+            same `X-Refresh-Token` (checked by `do_POST` before dispatch), no per-source cooldown
+            of its own, since only the daily generation job (`scripts/publish_release_notes.py`)
+            and a human operator ever hold that token. Idempotent by date: re-publishing the same
+            date overwrites that date's entry rather than duplicating it (`release_notes.
+            upsert_entry`'s own docstring) -- safe for the daily job to retry.
+            """
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": "Invalid release-notes payload"})
+                return
+            try:
+                stored = release_notes.upsert_entry(root, payload)
+            except release_notes.ReleaseNotesValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+                return
+            except Exception as error:
+                print(f"Release-notes publish failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Release-notes publish failed"})
+                return
+            self._json(200, {"status": "ok", "date": stored["date"]})
+            self._notify_release_notes_subscribers(stored)
+
+        def _notify_release_notes_subscribers(self, entry):
+            """Send `entry` to every confirmed subscriber -- the "one email each time a new entry
+            publishes" half of issue #143's email subscription. Called only after the entry is
+            already durably stored (this method runs after `_handle_release_notes` has already
+            responded 200), so a send failure here can never lose or roll back the publish itself
+            -- same "durability first, notification best-effort" posture as Contact Us. Each
+            recipient's send is independent: one failing (or the whole step failing) never blocks
+            or retries the others, and is only logged, never surfaced to the daily job that
+            triggered the publish.
+            """
+            try:
+                db_path = _release_notes_subscribers_db_path(root)
+                subscribers = release_notes_subscribers.list_confirmed(db_path)
+            except Exception as error:
+                print(f"Release-notes subscriber lookup failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                return
+            if not subscribers:
+                return
+            base_url = f"http://{self.headers.get('Host')}"
+            for subscriber in subscribers:
+                unsubscribe_url = (
+                    f"{base_url}/api/release-notes-unsubscribe"
+                    f"?email={quote(subscriber['email'])}&token={subscriber['unsubscribe_token']}"
+                )
+                try:
+                    release_notes_notify_email_action(subscriber["email"], entry, unsubscribe_url)
+                except Exception as error:
+                    print(
+                        f"Release-notes notify failed for one subscriber: {error!r}\n{traceback.format_exc()}",
+                        file=sys.stderr,
+                    )
+
+        def _handle_release_notes_subscribe(self, body):
+            """POST /api/release-notes-subscribe (issue #143): open, rate-limited, double
+            opt-in -- same posture as /api/reminder-opt-in's "enable" path (issue #79's model
+            applied to a second feature)."""
+            if not release_notes_subscribe_limiter.allow(self.client_address[0]):
+                self._json(429, {"status": "error", "message": "Too many subscribe requests. Try again shortly."})
+                return
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": _RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"status": "error", "message": _RELEASE_NOTES_SUBSCRIBE_VALIDATION_MESSAGE})
+                return
+            base_url = f"http://{self.headers.get('Host')}"
+            try:
+                release_notes_subscribe_write_action(payload, base_url)
+                self._json(200, {"status": "ok", "message": "Check your email to confirm."})
+            except ReleaseNotesSubscribeValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+            except ReleaseNotesSubscribeSendError as error:
+                self._json(502, {"status": "error", "message": str(error)})
+            except Exception as error:
+                print(f"Release-notes subscribe failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Release-notes subscribe failed"})
+
+        def _handle_release_notes_confirm_subscription(self, query_string):
+            """GET /api/release-notes-confirm-subscription (issue #143) -- reached by clicking
+            the confirmation email's link, same shape as `_handle_reminder_confirm`."""
+            if not release_notes_confirm_limiter.allow(self.client_address[0]):
+                self._send_html(
+                    _render_reminder_confirm_page(False, "Too many attempts. Try again shortly.")
+                )
+                return
+            params = parse_qs(query_string)
+            raw_email = (params.get("email") or [None])[0]
+            raw_token = (params.get("token") or [None])[0]
+            invalid_message = "This confirmation link is invalid or has already been used."
+            if not raw_email or not raw_token:
+                self._send_html(_render_reminder_confirm_page(False, invalid_message))
+                return
+            email = raw_email.strip().lower()
+            db_path = _release_notes_subscribers_db_path(root)
+            saved = release_notes_subscribers.load(db_path, email)
+            stored_hash = saved.get("confirm_token_hash") if saved else None
+            if not stored_hash or not secrets.compare_digest(stored_hash, _hash_pin(raw_token)):
+                self._send_html(_render_reminder_confirm_page(False, invalid_message))
+                return
+            expires_at = saved.get("confirm_expires_at")
+            try:
+                expired = expires_at is None or datetime.fromisoformat(expires_at) < datetime.now(timezone.utc)
+            except ValueError:
+                expired = True
+            if expired:
+                self._send_html(
+                    _render_reminder_confirm_page(
+                        False, "This confirmation link has expired. Subscribe again from the What's New tab.",
+                    )
+                )
+                return
+            unsubscribe_token = secrets.token_urlsafe(32)
+            release_notes_subscribers.confirm(
+                db_path, email, unsubscribe_token, datetime.now(timezone.utc).isoformat(),
+            )
+            self._send_html(
+                _render_reminder_confirm_page(True, "You're subscribed to FPL Intelligence release notes.")
+            )
+
+        def _handle_release_notes_unsubscribe(self, query_string):
+            """GET /api/release-notes-unsubscribe (issue #143) -- the link every sent release-
+            notes email carries in its footer. Deletes the subscriber row entirely rather than
+            leaving a tombstone, same posture as declining/disabling a reminder opt-in."""
+            if not release_notes_confirm_limiter.allow(self.client_address[0]):
+                self._send_html(
+                    _render_reminder_confirm_page(False, "Too many attempts. Try again shortly.")
+                )
+                return
+            params = parse_qs(query_string)
+            raw_email = (params.get("email") or [None])[0]
+            raw_token = (params.get("token") or [None])[0]
+            invalid_message = "This unsubscribe link is invalid."
+            if not raw_email or not raw_token:
+                self._send_html(_render_reminder_confirm_page(False, invalid_message))
+                return
+            email = raw_email.strip().lower()
+            db_path = _release_notes_subscribers_db_path(root)
+            saved = release_notes_subscribers.load(db_path, email)
+            stored_token = saved.get("unsubscribe_token") if saved else None
+            if not stored_token or not secrets.compare_digest(stored_token, raw_token):
+                self._send_html(_render_reminder_confirm_page(False, invalid_message))
+                return
+            release_notes_subscribers.unsubscribe(db_path, email)
+            self._send_html(
+                _render_reminder_confirm_page(True, "You've been unsubscribed from FPL Intelligence release notes.")
+            )
+
         def _serve_dashboard(self, query_string):
             query_team_id = _parse_team_id(query_string)
             # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
@@ -1248,6 +1536,7 @@ def create_server(
                     self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                     return
                 state = json.loads(state_path.read_text(encoding="utf-8"))
+                state["release_notes"] = release_notes.load_entries(root)
                 self._send_html(render_dashboard(state))
                 return
             # Compute this one team's view at request time and splice it into a copy of the
@@ -1260,6 +1549,7 @@ def create_server(
                 self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                 return
             state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["release_notes"] = release_notes.load_entries(root)
             # Issue #62: a manager can opt their team out of showing derived recommendations to
             # anyone who looks it up by ID. Checked only for the explicit query-param lookup path
             # (never the visitor's own cookie-driven view) and before `lookup_action` -- a local
@@ -1348,6 +1638,12 @@ def create_server(
             if path == "/api/reminder-confirm":
                 self._handle_reminder_confirm(split_path.query)
                 return
+            if path == "/api/release-notes-confirm-subscription":
+                self._handle_release_notes_confirm_subscription(split_path.query)
+                return
+            if path == "/api/release-notes-unsubscribe":
+                self._handle_release_notes_unsubscribe(split_path.query)
+                return
             if path == "/api/shared-state":
                 self._handle_shared_state()
                 return
@@ -1377,7 +1673,8 @@ def create_server(
             path = self.path.split("?", 1)[0]
             if path not in {
                 "/api/refresh", "/api/archive-team-forecast", "/api/profile", "/api/draft-squad",
-                "/api/lookup-opt-out", "/api/reminder-opt-in", "/api/contact",
+                "/api/lookup-opt-out", "/api/reminder-opt-in", "/api/contact", "/api/release-notes",
+                "/api/release-notes-subscribe",
             }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
@@ -1390,11 +1687,18 @@ def create_server(
             # CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so re-gating
             # them behind one shared secret was redundant and, once public, actively broken (the
             # token was visible via view-source on every served page).
-            if path in {"/api/refresh", "/api/archive-team-forecast"}:
+            if path in {"/api/refresh", "/api/archive-team-forecast", "/api/release-notes"}:
                 if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
                     self._json(403, {"status": "error", "message": "Invalid refresh token"})
                     return
-            max_body = 1024 if path in {"/api/refresh", "/api/archive-team-forecast"} else 4096
+            max_body = (
+                # Large enough for release_notes.py's own worst case: up to
+                # _MAX_CHANGES_PER_ENTRY (50) changes, each up to a ~700-char title+description,
+                # plus JSON escaping overhead.
+                40960 if path == "/api/release-notes"
+                else 1024 if path in {"/api/refresh", "/api/archive-team-forecast"}
+                else 4096
+            )
             try:
                 content_length = int(self.headers.get("Content-Length", "0") or 0)
             except (TypeError, ValueError):
@@ -1419,6 +1723,10 @@ def create_server(
                 self._handle_lookup_opt_out(body)
             elif path == "/api/reminder-opt-in":
                 self._handle_reminder_opt_in(body)
+            elif path == "/api/release-notes":
+                self._handle_release_notes(body)
+            elif path == "/api/release-notes-subscribe":
+                self._handle_release_notes_subscribe(body)
             else:
                 self._handle_contact(body)
 
