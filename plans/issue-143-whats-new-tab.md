@@ -1,13 +1,17 @@
 # Issue #143 -- Daily automated "What's New" tab
 
-Researched 2026-08-11. Issue asks for a "What's New" tab in the live
-dashboard, populated by a daily automated job that generates "visually
-creative" release notes for whatever shipped the previous day, with
-collapsible per-date sections (latest expanded, rest collapsed) and a
-no-op day producing no entry. See the issue's "Decided (2026-08-11)"
-section for the 7 concrete requirements this plan operationalizes; three
-sub-questions were left explicitly open there and are what this doc
-investigates.
+Researched 2026-08-11, updated 2026-08-11 with a UX mockup review. Issue
+asks for a "What's New" tab in the live dashboard, populated by a daily
+automated job that generates "visually creative" release notes for
+whatever shipped the previous day, with collapsible per-date sections
+(latest expanded, rest collapsed) and a no-op day producing no entry.
+See the issue's "Decided (2026-08-11)" section for the 7 concrete
+requirements this plan operationalizes. The "Candidate operationalizations"
+section below resolves the three sub-questions originally left open; the
+"## UX design" section further down parses a visual mockup the user
+supplied afterward, which introduces real new scope (email subscription,
+RSS feed, search/filter, unread tracking) not yet decided -- flagged
+there for review, not folded in as settled.
 
 ## Context
 
@@ -205,6 +209,130 @@ This does mean accepting the new bot-commit-to-`main` precedent flagged
 in Structural constraints above -- the user has confirmed that's an
 acceptable, intentional trade for having real git history of release
 notes, not an overlooked side effect.
+
+## UX design (mockup reviewed 2026-08-11)
+
+The user supplied a two-page visual mockup
+(`FPlIntelligence_WhatsNewDesign.pdf`) of the "What's New" tab. Parsed
+in full below -- this is not implemented, and several elements are new
+scope beyond the "Decided (2026-08-11)" 7 points and everything
+investigated above. Flagged explicitly rather than silently folded in,
+per the user's "wait for my review" instruction on this pass.
+
+**Layout, matching what's already decided:**
+- New sidebar nav item, "What's New", positioned last (after "Contact
+  Us") -- consistent with `dashboard.py:32-34`'s existing `data-view`
+  button list.
+- Header: small-caps eyebrow "RELEASE NOTES", then an `<h1>` "What's
+  New", then a one-line description: *"What shipped, day by day.
+  Generated automatically each morning from the previous day's merged
+  changes -- quiet days simply don't get an entry."* -- this description
+  itself is good, reusable copy for the tab's static intro text.
+- Dated entries render as collapsible cards, newest first, exactly
+  matching the issue's points 6-7: **Mon, Aug 11 ("Yesterday") starts
+  expanded; every older date starts collapsed** (Fri Aug 8, Tue Aug 5,
+  Thu Jul 30, each showing "N days ago" and a collapsed chevron).
+- Each card header, expanded or collapsed: relative date label
+  ("Yesterday" / "N days ago"), a **synthesized one-line headline** for
+  the day (not a raw PR title -- e.g. "Sharper filters for preseason
+  movement tracking" spans three unrelated PRs), and a "N changes"
+  count badge.
+- Expanded card body: a short **intro paragraph** synthesizing the
+  day's theme (2-3 sentences, reads as one coherent narrative across
+  that day's PRs, not a concatenation), then one block per change:
+  a **category tag** (colored chip: "Feature" / "Data" / "Fix" shown in
+  the mockup), a bold one-line title, and a muted one-line description.
+- Gap transparency: *"No entry for Aug 9-10 or Aug 6-7 -- nothing
+  merged those days."* -- an explicit, muted note acknowledging skipped
+  dates, so a gap reads as confirmed-quiet rather than possibly-broken.
+  Directly reflects this plan's no-op design (point 1) back to the user
+  in the UI itself, not just as an absence.
+- End-of-list marker: *"That's the full history so far."*
+
+**New scope this mockup introduces, not covered by the "Decided" list
+or the candidates above:**
+
+1. **Per-change category taxonomy** (`Feature` / `Fix` / `Data` in the
+   mockup, filterable via chips: `All` / `Feature` / `Fix` / `Data`).
+   The generation step (Candidate B) needs to assign a category to
+   every change, including in the **B2a template fallback path**, which
+   has no LLM to infer one -- needs its own deterministic rule (e.g.
+   keyword matching on the PR title: "fix"/"bug" -> Fix, else a rule
+   TBD) so the fallback path still produces a taggable entry, not an
+   uncategorized one that breaks the filter UI.
+2. **Two levels of generated content per day**, not one: a
+   whole-day **headline + intro paragraph** (synthesized across every
+   change that day) *and* a **per-change title + description** (one per
+   PR). B1's original scope ("a short headline, a one-line summary per
+   change") undersold this -- the day-level headline/intro is a
+   separate synthesis step over the *set* of that day's per-change
+   entries, not just the top item's title.
+3. **Unread tracking**: an unread-indicator dot on the sidebar nav item
+   itself, plus a "Mark all as read" control in the tab header. Not
+   server-state -- almost certainly `localStorage`-based (compare the
+   newest entry's date against a stored "last seen" date; "Mark all as
+   read" sets it to the newest entry's date), matching how the original
+   issue's placement option (c) ("track via `localStorage`... proactive
+   nudge") was scoped, now made concrete and paired with option (a) (the
+   tab itself) rather than a separate banner/toast.
+4. **Client-side search and category filtering** (a search box, "All /
+   Feature / Fix / Data" chips). Both operate over content the server
+   already sent down (same `data/release-notes.json` payload C2/C3
+   already produce) -- matches this codebase's existing client-side
+   filtering pattern used by Player Explorer (`#player-search`,
+   `#player-club-filter`) and Fixtures (`#fixture-club-filter`), not a
+   new server endpoint.
+5. **Email subscription** -- a capture card ("Get release notes by
+   email... one email each time a new entry publishes -- no account
+   required") with an email field and Subscribe button. This is a real,
+   separate feature: a persisted subscriber list, a send step triggered
+   whenever the daily job actually publishes an entry, and (not shown in
+   the mockup, but a real gap) an unsubscribe mechanism. **This project
+   already has an established pattern for exactly this shape of risk**
+   -- `reminder_confirmation.py`'s double opt-in (issue #79): a bare
+   single-opt-in text field lets anyone enter a stranger's email and
+   have this app send them mail with no verification, which is exactly
+   the abuse vector double opt-in exists to close elsewhere in this
+   codebase. Recommend the same pattern here (confirm-by-link before any
+   address actually receives release notes) rather than trusting the
+   submitted address outright -- but flagging this as a decision for the
+   user, not deciding it silently, since the mockup's copy ("no account
+   required") doesn't specify either way and could be read as "no
+   confirmation step" just as easily as "no account, but still
+   confirmed."
+6. **RSS/Atom feed** -- "Prefer a feed reader? Copy feed URL." A new,
+   unauthenticated `GET` endpoint (e.g. `/api/release-notes.rss`)
+   rendering the same stored entries as a standard feed format, at
+   request time -- same "render at request time from stored data"
+   pattern every other tab already uses, just a different output
+   format.
+
+None of items 1-6 were part of the 7 decided points or the candidates
+investigated above (A/B/C). They're real, buildable, and mostly
+consistent with this codebase's existing patterns (client-side filters,
+double opt-in, request-time rendering) -- but they roughly double the
+surface area of this issue, so flagged here for explicit sign-off before
+scoping `ship-issue` work, rather than silently absorbed into "the
+plan" the user already approved the shape of.
+
+**Open questions for the user's review, not decided in this pass:**
+- Email subscription: single opt-in (trust the submitted address) or
+  double opt-in (confirm-by-link, matching `reminder_confirmation.py`'s
+  existing pattern)? Recommend double opt-in per the reasoning above,
+  but this is the user's call, same as every other opt-in-shaped
+  decision in this codebase has been.
+- Category taxonomy: is `Feature` / `Fix` / `Data` the complete,
+  final set, or are there other categories worth planning for now
+  (e.g. an explicit "Docs"/"Chore" bucket for changes like this very
+  plan doc, which wouldn't obviously read as Feature, Fix, or Data)?
+- Should items 3-6 (unread tracking, search/filter, email subscription,
+  RSS feed) all ship in the same first `ship-issue` pass as the core
+  tab (points 1-7 + Candidates A/B/C), or split into a smaller first
+  slice (the tab itself, dated/collapsible, no email/RSS/search) with
+  the rest as fast-follow issues? The mockup presents them as one
+  coherent design, but they're separable pieces of work with different
+  risk profiles (email subscription in particular touches real user
+  data and an abuse surface the rest of this feature doesn't).
 
 ## Recommendation
 
