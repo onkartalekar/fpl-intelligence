@@ -1164,6 +1164,94 @@ class ArchiveTeamForecastApiTests(unittest.TestCase):
             thread.join(timeout=2)
 
 
+class ReleaseNotesApiTests(unittest.TestCase):
+    """Issue #143: POST /api/release-notes -- operator-only publish of one day's "What's New"
+    entry, same X-Refresh-Token gate as /api/refresh and /api/archive-team-forecast."""
+
+    _VALID_PAYLOAD = {
+        "date": "2026-08-11",
+        "headline": "Sharper filters for preseason movement tracking",
+        "summary": "Club movement just got easier to scan.",
+        "changes": [
+            {
+                "category": "Feature",
+                "title": "Club movement filters split into Direction, Movement type, and Date",
+                "description": "Previously one combined control; each now narrows independently.",
+            },
+        ],
+    }
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _post(self, payload, token="test-token"):
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Refresh-Token"] = token
+        return urlopen(
+            Request(
+                self.base_url + "/api/release-notes",
+                data=json.dumps(payload).encode("utf-8"), method="POST", headers=headers,
+            ),
+            timeout=3,
+        )
+
+    def test_missing_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post(self._VALID_PAYLOAD, token=None)
+        self.assertEqual(error.exception.code, 403)
+
+    def test_wrong_token_is_a_403(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post(self._VALID_PAYLOAD, token="wrong-token")
+        self.assertEqual(error.exception.code, 403)
+
+    def test_invalid_payload_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({**self._VALID_PAYLOAD, "headline": ""})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_valid_entry_is_persisted(self):
+        response = self._post(self._VALID_PAYLOAD)
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "date": "2026-08-11"})
+        stored = json.loads((self.root / "data" / "release-notes.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["entries"][0]["headline"], self._VALID_PAYLOAD["headline"])
+
+    def test_republishing_the_same_date_overwrites_rather_than_duplicates(self):
+        self._post(self._VALID_PAYLOAD)
+        self._post({**self._VALID_PAYLOAD, "headline": "Revised headline"})
+
+        stored = json.loads((self.root / "data" / "release-notes.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(stored["entries"]), 1)
+        self.assertEqual(stored["entries"][0]["headline"], "Revised headline")
+
+    def test_published_entry_is_spliced_into_the_served_dashboard(self):
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-08-11T12:00:00Z"}), encoding="utf-8"
+        )
+        self._post(self._VALID_PAYLOAD)
+
+        with urlopen(self.base_url + "/", timeout=3) as response:
+            html = response.read().decode("utf-8")
+        self.assertIn(self._VALID_PAYLOAD["headline"], html)
+        self.assertIn('data-view="whats-new"', html)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

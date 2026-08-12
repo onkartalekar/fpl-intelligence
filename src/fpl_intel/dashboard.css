@@ -627,6 +627,71 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   background: var(--tag-low-bg);
   color: var(--tag-low-fg);
 }
+.whats-new-entry {
+  margin-bottom: 12px;
+  padding: 16px 18px;
+}
+.whats-new-entry summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  list-style: none;
+}
+.whats-new-entry summary::-webkit-details-marker {
+  display: none;
+}
+.whats-new-date {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.whats-new-headline {
+  font-weight: 600;
+  flex: 1;
+}
+.whats-new-entry > p.muted {
+  margin-top: 10px;
+}
+.whats-new-change {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.whats-new-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--tag-neutral-bg);
+  color: var(--tag-neutral-fg);
+  white-space: nowrap;
+}
+.whats-new-tag-feature {
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
+}
+.whats-new-tag-fix {
+  background: var(--chip-hard-bg);
+  color: var(--chip-hard-fg);
+}
+.whats-new-tag-data {
+  background: var(--tag-neutral-bg);
+  color: var(--tag-neutral-fg);
+}
+.whats-new-tag-docs {
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+}
+.whats-new-tag-chore {
+  background: var(--badge-setup-bg);
+  color: var(--badge-setup-fg);
+}
 .inspector {
   align-self: start;
   position: sticky;

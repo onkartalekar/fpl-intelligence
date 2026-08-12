@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 import zoneinfo
 
 from . import profiles
+from . import release_notes
 from . import reminder_confirmation
 from .dashboard import render_dashboard
 from .fpl_data import save_json
@@ -1227,6 +1228,32 @@ def create_server(
                 return
             self._json(200, {"status": "ok", "team_id": team_id, "archived": archived})
 
+        def _handle_release_notes(self, body):
+            """POST /api/release-notes (issue #143): publish one day's "What's New" entry.
+
+            Operator-only, same as `/api/refresh`/`/api/archive-team-forecast` -- gated on the
+            same `X-Refresh-Token` (checked by `do_POST` before dispatch), no per-source cooldown
+            of its own, since only the daily generation job (`scripts/publish_release_notes.py`)
+            and a human operator ever hold that token. Idempotent by date: re-publishing the same
+            date overwrites that date's entry rather than duplicating it (`release_notes.
+            upsert_entry`'s own docstring) -- safe for the daily job to retry.
+            """
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._json(400, {"status": "error", "message": "Invalid release-notes payload"})
+                return
+            try:
+                stored = release_notes.upsert_entry(root, payload)
+            except release_notes.ReleaseNotesValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+                return
+            except Exception as error:
+                print(f"Release-notes publish failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Release-notes publish failed"})
+                return
+            self._json(200, {"status": "ok", "date": stored["date"]})
+
         def _serve_dashboard(self, query_string):
             query_team_id = _parse_team_id(query_string)
             # A team_id query param is an explicit, one-off no-signup lookup (issue #46) --
@@ -1248,6 +1275,7 @@ def create_server(
                     self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                     return
                 state = json.loads(state_path.read_text(encoding="utf-8"))
+                state["release_notes"] = release_notes.load_entries(root)
                 self._send_html(render_dashboard(state))
                 return
             # Compute this one team's view at request time and splice it into a copy of the
@@ -1260,6 +1288,7 @@ def create_server(
                 self._json(404, {"status": "error", "message": "Dashboard has not been generated"})
                 return
             state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["release_notes"] = release_notes.load_entries(root)
             # Issue #62: a manager can opt their team out of showing derived recommendations to
             # anyone who looks it up by ID. Checked only for the explicit query-param lookup path
             # (never the visitor's own cookie-driven view) and before `lookup_action` -- a local
@@ -1377,7 +1406,7 @@ def create_server(
             path = self.path.split("?", 1)[0]
             if path not in {
                 "/api/refresh", "/api/archive-team-forecast", "/api/profile", "/api/draft-squad",
-                "/api/lookup-opt-out", "/api/reminder-opt-in", "/api/contact",
+                "/api/lookup-opt-out", "/api/reminder-opt-in", "/api/contact", "/api/release-notes",
             }:
                 self._json(404, {"status": "error", "message": "Not found"})
                 return
@@ -1390,11 +1419,17 @@ def create_server(
             # CooldownLimiter (and /api/lookup-opt-out its own separate PIN check), so re-gating
             # them behind one shared secret was redundant and, once public, actively broken (the
             # token was visible via view-source on every served page).
-            if path in {"/api/refresh", "/api/archive-team-forecast"}:
+            if path in {"/api/refresh", "/api/archive-team-forecast", "/api/release-notes"}:
                 if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
                     self._json(403, {"status": "error", "message": "Invalid refresh token"})
                     return
-            max_body = 1024 if path in {"/api/refresh", "/api/archive-team-forecast"} else 4096
+            max_body = (
+                # Large enough for release_notes.py's own worst case: up to 20 changes, each up
+                # to a ~700-char title+description, plus JSON escaping overhead.
+                16384 if path == "/api/release-notes"
+                else 1024 if path in {"/api/refresh", "/api/archive-team-forecast"}
+                else 4096
+            )
             try:
                 content_length = int(self.headers.get("Content-Length", "0") or 0)
             except (TypeError, ValueError):
@@ -1419,6 +1454,8 @@ def create_server(
                 self._handle_lookup_opt_out(body)
             elif path == "/api/reminder-opt-in":
                 self._handle_reminder_opt_in(body)
+            elif path == "/api/release-notes":
+                self._handle_release_notes(body)
             else:
                 self._handle_contact(body)
 

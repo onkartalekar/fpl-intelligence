@@ -5,6 +5,14 @@ this tool. This describes what the dashboard does today, on `main` --
 not what is planned or in progress. See `IMPLEMENTATION_PLAN.md` for
 history and `MODEL.md`/`SPECIFICATION.md` for the underlying contract.
 
+For **day-by-day, dated** release notes (issue #143) -- what shipped and
+when, rather than this file's always-current snapshot -- see the live
+dashboard's **What's New** tab, or the git-tracked history under
+[`release-notes/`](release-notes/). This file's content became that
+history's first dated entry (`release-notes/2026-08-10.md`) and
+continues to describe the current feature set going forward; it isn't
+replaced by the dated history, the two serve different purposes.
+
 Each item below is tagged:
 
 - **[Live]** -- drives what you see in the dashboard today.
