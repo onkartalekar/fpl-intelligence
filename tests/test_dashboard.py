@@ -444,6 +444,50 @@ class DashboardRenderTests(unittest.TestCase):
             html,
         )
 
+    def test_fresh_squad_benchmark_defaults_open_and_bench_squad_default_closed(self):
+        # Preseason Decision Center reorganization: before any draft is declared, the fresh-squad
+        # benchmark is the only useful thing on the page (open by default). "Bench & model" and
+        # "Squad & player detail" are advanced reference detail, collapsed by default regardless
+        # -- JS only re-opens them once the season is under way (`decision.event !== 1`).
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        summary_start = html.index('<details class="decision-details" id="decision-summary-details"')
+        summary_tag = html[summary_start:summary_start + 120]
+        self.assertIn(" open", summary_tag.split(">")[0])
+        self.assertIn('id="decision-summary-details-label">Preliminary recommendation<', html)
+
+        for details_id in ["decision-section-bench-details", "decision-section-squad-details"]:
+            start = html.index(f'<details class="decision-details" id="{details_id}"')
+            tag = html[start:start + 120].split(">")[0]
+            self.assertNotIn(" open", tag)
+
+        # The ids the rest of dashboard.js already reads (subnav, IntersectionObserver, direct
+        # byId calls) stay on the original inner elements -- only a wrapper was added around them.
+        self.assertIn('<section class="panel decision-hero" id="decision-section-summary"', html)
+        self.assertIn('<div class="decision-layout" id="decision-section-bench">', html)
+        self.assertIn('<div class="decision-layout" id="decision-section-squad">', html)
+
+    def test_draft_priority_reorder_and_demote_js_present(self):
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn("classList.toggle('draft-priority',!!weekly.draft)", html)
+        self.assertIn("summaryDetails.open=!weekly.draft", html)
+        self.assertIn(
+            "'For comparison only -- not personalized to your draft'", html,
+        )
+        self.assertIn("#decisions-content.draft-priority > .decision-subnav", html)
+        self.assertIn("#decisions-content.draft-priority > #decision-section-weekly", html)
+
+        # Preseason-only collapse for the two advanced/reference sections, independent of
+        # whether a draft exists -- gated on `decision.event`, not `weekly.draft`.
+        self.assertIn("decisionBenchDetails.open=!decisionPreseason", html)
+        self.assertIn("decisionSquadDetails.open=!decisionPreseason", html)
+
+        # Clicking a subnav chip must open a collapsed ancestor `<details>` before scrolling to
+        # it, or it would scroll to an invisible (zero-height, collapsed) target.
+        self.assertIn("const collapsedAncestor=target.closest('details')", html)
+        self.assertIn("collapsedAncestor.open=true", html)
+
     def test_decision_scroll_targets_clear_sticky_subnav(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
