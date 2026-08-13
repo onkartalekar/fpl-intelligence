@@ -671,6 +671,113 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertNotIn("X-Refresh-Token", html)
 
 
+class DraftSquadTabRenderTests(unittest.TestCase):
+    """Issue #152: the Draft Squad tab -- its own nav entry (moved out of "My Team"), explicit
+    preseason-only purpose framing, a draft-health summary, and a session-only pitch view."""
+
+    _STATE = {"fpl": {}, "transfers": [], "sources": []}
+
+    def test_nav_button_and_view_section_render(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('data-view="draft">Draft Squad</button>', html)
+        self.assertIn('id="view-draft" class="view"', html)
+        self.assertIn('<option value="draft">Draft Squad</option>', html)
+
+    def test_draft_squad_panel_moved_out_of_my_team_tab_into_its_own(self):
+        html = render_dashboard(self._STATE)
+
+        squad_start = html.index('<section id="view-squad"')
+        draft_start = html.index('<section id="view-draft"')
+        profile_start = html.index('<section id="view-profile"')
+        self.assertLess(squad_start, draft_start)
+        self.assertLess(draft_start, profile_start)
+        self.assertNotIn('id="draft-squad-panel"', html[squad_start:draft_start])
+        self.assertIn('id="draft-squad-panel"', html[draft_start:profile_start])
+
+    def test_purpose_framing_present(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-purpose-banner"', html)
+        self.assertIn("Preseason only", html)
+        self.assertIn("baselined off whatever you declare", html)
+
+    def test_draft_health_panel_renders(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-health-panel"', html)
+        self.assertIn('id="draft-health-empty"', html)
+        self.assertIn('id="draft-health-content" hidden', html)
+        self.assertIn('id="draft-health-progression"', html)
+        self.assertIn('id="draft-health-risks"', html)
+        self.assertIn('id="draft-health-profiles"', html)
+        self.assertIn('data-go="decisions"', html)
+
+    def test_pitch_view_renders_with_always_visible_non_persistence_notice(self):
+        # Follow-up to the initial ship: the pitch view and the squad builder merged into one
+        # panel (players land on the pitch as they're added, instead of a separate flat
+        # "selected squad" list above a separate pitch section) -- the notice moved with it, but
+        # must stay just as visible, not a one-time toast, since the 15-player squad IS persisted.
+        html = render_dashboard(self._STATE)
+
+        self.assertIn(
+            '<div id="draft-pitch-session-notice" class="limitation-note" role="note">'
+            "Players land straight on the pitch below",
+            html,
+        )
+        self.assertIn('id="draft-pitch-empty"', html)
+        self.assertIn('id="draft-pitch"', html)
+        self.assertIn('id="draft-bench"', html)
+        # No longer a separate flat squad-grid list redundant with the pitch view below it.
+        self.assertNotIn('id="draft-selected"', html)
+
+    def test_draft_squad_editor_ids_unchanged_from_issue_61(self):
+        html = render_dashboard(self._STATE)
+
+        for element_id in [
+            "draft-count", "draft-budget", "draft-quota", "draft-warnings",
+            "draft-save-form", "draft-team-id", "draft-save", "draft-clear", "draft-message",
+            "draft-search", "draft-club-filter", "draft-position-filter",
+            "draft-locked-note",
+        ]:
+            self.assertIn(f'id="{element_id}"', html)
+
+    def test_add_players_list_is_paginated_with_a_price_sort(self):
+        # Follow-up: the "Add players" table silently truncated to 30 matches with no way to see
+        # the rest, and had no way to sort by price. Now a real paginated list beside the pitch.
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-results-list"', html)
+        self.assertIn('id="draft-results-count"', html)
+        self.assertIn('id="draft-results-prev"', html)
+        self.assertIn('id="draft-results-next"', html)
+        self.assertIn('id="draft-results-page"', html)
+        self.assertIn('id="draft-sort"', html)
+        self.assertIn('value="price-asc"', html)
+        self.assertIn('value="price-desc"', html)
+        # And the add-players list sits beside the pitch, not below a separate squad list.
+        self.assertIn('class="draft-builder-grid"', html)
+
+    def test_add_and_remove_place_players_directly_on_the_pitch(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function addDraftPlayer(id)", html)
+        self.assertIn("function removeDraftPlayer(id)", html)
+        self.assertIn("function renderDraftBuilder()", html)
+        self.assertIn("function renderDraftPitchBuilding()", html)
+        self.assertIn("function renderDraftPitchSaved(roll)", html)
+
+    def test_js_pitch_and_health_helpers_present(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function draftRollScenario()", html)
+        self.assertIn("function renderDraftHealth()", html)
+        self.assertIn("function renderDraftPitch()", html)
+        self.assertIn("function seedDraftPitch(roll)", html)
+        self.assertIn("draftXiMin", html)
+        self.assertIn("draftXiMax", html)
+
+
 class ProfileGatedTabsTests(unittest.TestCase):
     """Issue #108: Decision Center and Model Performance are each gated, at the tab level,
     behind an empty-state panel linking to My Profile when no profile is resolved for the
