@@ -1091,6 +1091,50 @@ dd {
   border: 0;
   padding: 0;
 }
+/* Preseason Decision Center reorganization: once a draft exists, the personalized weekly
+   decision is more relevant than the generic fresh-squad benchmark, and "Bench & model"/"Squad
+   & player detail" are advanced reference detail that don't need to be expanded by default while
+   someone's still building a draft. `#decisions-content` becomes a column flexbox purely so
+   `order` can reprioritize `decision-section-weekly` and the subnav ahead of the benchmark
+   without physically moving DOM nodes (and risking already-bound listeners/ids) -- toggled via
+   the `.draft-priority` class, set in dashboard.js's `renderWeeklyDecision`. */
+#decisions-content {
+  display: flex;
+  flex-direction: column;
+}
+#decisions-content.draft-priority > .decision-subnav {
+  order: -2;
+}
+#decisions-content.draft-priority > #decision-section-weekly {
+  order: -1;
+}
+.decision-details > summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 11px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.decision-details > summary::-webkit-details-marker {
+  display: none;
+}
+.decision-details > summary::before {
+  content: "▸";
+  color: var(--muted);
+  display: inline-block;
+  transition: transform .15s ease;
+}
+.decision-details[open] > summary::before {
+  transform: rotate(90deg);
+}
 .weekly-recommendation strong,.weekly-chip strong {
   color: var(--accent);
 }
