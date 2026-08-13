@@ -63,7 +63,8 @@ _TEMPLATE = r'''<!doctype html>
 <div id="draft-squad-editor">
 <div class="decision-summary"><div class="decision-metric"><b id="draft-count">0 / 15 selected</b><span>Squad size</span></div><div class="decision-metric"><b id="draft-budget">&pound;0.0m spent &middot; &pound;100.0m remaining</b><span>Budget</span></div><div class="decision-metric"><b id="draft-quota">0/2 GKP &middot; 0/5 DEF &middot; 0/5 MID &middot; 0/3 FWD</b><span>Formation quotas</span></div></div>
 <div id="draft-pitch-session-notice" class="limitation-note" role="note">Players land straight on the pitch below as you add them. The starting XI/bench arrangement and captain/vice-captain choice are for visualization only and reset on reload &mdash; only the 15-player squad itself is saved.</div>
-<div class="draft-builder-grid" style="margin-top:12px">
+<form id="draft-save-form" style="margin-top:12px"><div class="profile-form-grid"><div class="field"><label for="draft-team-id">FPL team ID</label><input id="draft-team-id" type="text" inputmode="numeric" placeholder="e.g. 1234567"></div></div><div style="display:flex;gap:14px;align-items:center;margin-top:12px"><button id="draft-save" class="refresh-button" type="submit" disabled>Save draft squad</button><button id="draft-clear" class="reset-filters" type="button" disabled>Clear draft</button></div><div id="draft-message" class="refresh-message" role="status" aria-live="polite"></div></form>
+<div class="draft-builder-grid" style="margin-top:14px">
 <div class="draft-builder-pitch-col">
 <div id="draft-warnings" class="limitation-note" role="note" hidden></div>
 <div class="section-heading"><h3 style="font-size:14px;margin:0">Starting XI</h3><span id="draft-pitch-formation" class="muted"></span></div>
@@ -80,7 +81,6 @@ _TEMPLATE = r'''<!doctype html>
 <div class="pagination"><button id="draft-results-prev" type="button">Previous</button><span id="draft-results-page">Page 1 of 1</span><button id="draft-results-next" type="button">Next</button></div>
 </div>
 </div>
-<form id="draft-save-form" style="margin-top:14px"><div class="profile-form-grid"><div class="field"><label for="draft-team-id">FPL team ID</label><input id="draft-team-id" type="text" inputmode="numeric" placeholder="e.g. 1234567"></div></div><div style="display:flex;gap:14px;align-items:center;margin-top:12px"><button id="draft-save" class="refresh-button" type="submit" disabled>Save draft squad</button><button id="draft-clear" class="reset-filters" type="button" disabled>Clear draft</button></div><div id="draft-message" class="refresh-message" role="status" aria-live="polite"></div></form>
 </div>
 </section>
 <section class="panel" id="draft-health-panel" style="margin-top:14px"><div class="section-heading"><div><div class="eyebrow">Draft health</div><h2 style="font-size:19px;margin-top:3px">How is your draft doing?</h2></div><button type="button" class="reset-filters" data-go="decisions">Full recommendations in Decision Center &rarr;</button></div>
