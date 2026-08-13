@@ -670,31 +670,58 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         self.assertIn('data-go="decisions"', html)
 
     def test_pitch_view_renders_with_always_visible_non_persistence_notice(self):
+        # Follow-up to the initial ship: the pitch view and the squad builder merged into one
+        # panel (players land on the pitch as they're added, instead of a separate flat
+        # "selected squad" list above a separate pitch section) -- the notice moved with it, but
+        # must stay just as visible, not a one-time toast, since the 15-player squad IS persisted.
         html = render_dashboard(self._STATE)
 
-        self.assertIn('id="draft-pitch-panel"', html)
-        # Not `hidden` -- the plan's explicit requirement is that this stays visible, not a
-        # one-time toast, since the 15-player squad above it IS persisted.
         self.assertIn(
             '<div id="draft-pitch-session-notice" class="limitation-note" role="note">'
-            "This lineup is for visualization only and resets on reload",
+            "Players land straight on the pitch below",
             html,
         )
         self.assertIn('id="draft-pitch-empty"', html)
-        self.assertIn('id="draft-pitch-content" hidden', html)
         self.assertIn('id="draft-pitch"', html)
         self.assertIn('id="draft-bench"', html)
+        # No longer a separate flat squad-grid list redundant with the pitch view below it.
+        self.assertNotIn('id="draft-selected"', html)
 
     def test_draft_squad_editor_ids_unchanged_from_issue_61(self):
         html = render_dashboard(self._STATE)
 
         for element_id in [
-            "draft-count", "draft-budget", "draft-quota", "draft-warnings", "draft-selected",
+            "draft-count", "draft-budget", "draft-quota", "draft-warnings",
             "draft-save-form", "draft-team-id", "draft-save", "draft-clear", "draft-message",
-            "draft-search", "draft-club-filter", "draft-position-filter", "draft-results",
+            "draft-search", "draft-club-filter", "draft-position-filter",
             "draft-locked-note",
         ]:
             self.assertIn(f'id="{element_id}"', html)
+
+    def test_add_players_list_is_paginated_with_a_price_sort(self):
+        # Follow-up: the "Add players" table silently truncated to 30 matches with no way to see
+        # the rest, and had no way to sort by price. Now a real paginated list beside the pitch.
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-results-list"', html)
+        self.assertIn('id="draft-results-count"', html)
+        self.assertIn('id="draft-results-prev"', html)
+        self.assertIn('id="draft-results-next"', html)
+        self.assertIn('id="draft-results-page"', html)
+        self.assertIn('id="draft-sort"', html)
+        self.assertIn('value="price-asc"', html)
+        self.assertIn('value="price-desc"', html)
+        # And the add-players list sits beside the pitch, not below a separate squad list.
+        self.assertIn('class="draft-builder-grid"', html)
+
+    def test_add_and_remove_place_players_directly_on_the_pitch(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function addDraftPlayer(id)", html)
+        self.assertIn("function removeDraftPlayer(id)", html)
+        self.assertIn("function renderDraftBuilder()", html)
+        self.assertIn("function renderDraftPitchBuilding()", html)
+        self.assertIn("function renderDraftPitchSaved(roll)", html)
 
     def test_js_pitch_and_health_helpers_present(self):
         html = render_dashboard(self._STATE)
