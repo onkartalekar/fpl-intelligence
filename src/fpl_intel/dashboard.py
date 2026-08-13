@@ -58,16 +58,29 @@ _TEMPLATE = r'''<!doctype html>
 </section>
 <section id="view-draft" class="view">
 <section class="panel" id="draft-purpose-banner"><div class="eyebrow">Preseason only</div><h2 style="font-size:19px;margin-top:3px">Draft Squad</h2><p class="muted">FPL hides your real Gameweek 1 picks until the deadline passes. Build a legal 15-player squad here to get personalized feedback in Decision Center before then -- everything downstream, from captain choices to transfer scenarios, is baselined off whatever you declare on this tab. Your real published squad takes over automatically once Gameweek 1 begins, and this tab stops being used.</p></section>
-<section class="panel" id="draft-squad-panel" style="margin-top:14px"><div class="section-heading"><div><div class="eyebrow">Squad</div><h2 style="font-size:19px;margin-top:3px">Declare your draft squad</h2></div><span class="muted">£100.0m maximum &middot; 2 GKP &middot; 5 DEF &middot; 5 MID &middot; 3 FWD &middot; max 3 per club</span></div>
+<section class="panel" id="draft-squad-panel" style="margin-top:14px"><div class="section-heading"><div><div class="eyebrow">Squad</div><h2 style="font-size:19px;margin-top:3px">Build your draft squad</h2></div><span class="muted">£100.0m maximum &middot; 2 GKP &middot; 5 DEF &middot; 5 MID &middot; 3 FWD &middot; max 3 per club</span></div>
 <div id="draft-locked-note" class="limitation-note" role="note" hidden></div>
 <div id="draft-squad-editor">
 <div class="decision-summary"><div class="decision-metric"><b id="draft-count">0 / 15 selected</b><span>Squad size</span></div><div class="decision-metric"><b id="draft-budget">&pound;0.0m spent &middot; &pound;100.0m remaining</b><span>Budget</span></div><div class="decision-metric"><b id="draft-quota">0/2 GKP &middot; 0/5 DEF &middot; 0/5 MID &middot; 0/3 FWD</b><span>Formation quotas</span></div></div>
 <div id="draft-warnings" class="limitation-note" role="note" hidden></div>
-<div id="draft-selected" class="squad-grid" style="margin-top:12px" aria-label="Selected draft squad"></div>
+<div id="draft-pitch-session-notice" class="limitation-note" role="note">Players land straight on the pitch below as you add them. The starting XI/bench arrangement and captain/vice-captain choice are for visualization only and reset on reload &mdash; only the 15-player squad itself is saved.</div>
+<div class="draft-builder-grid" style="margin-top:12px">
+<div class="draft-builder-pitch-col">
+<div class="section-heading"><h3 style="font-size:14px;margin:0">Starting XI</h3><span id="draft-pitch-formation" class="muted"></span></div>
+<div id="draft-pitch-empty" class="empty">Add players from the list on the right to start building your pitch view.</div>
+<div id="draft-pitch" class="formation-pitch" role="group" aria-label="Draft starting XI" hidden></div>
+<h3 style="margin-top:16px;font-size:14px">Bench</h3>
+<div id="draft-bench" class="weekly-bench" aria-label="Draft bench order"></div>
+</div>
+<div class="draft-builder-add-col">
+<h3 style="margin-top:0;font-size:14px">Add players</h3>
+<div class="player-toolbar"><div class="field"><label for="draft-search">Search</label><input id="draft-search" type="search" placeholder="Player name"></div><div class="field"><label for="draft-club-filter">Club</label><select id="draft-club-filter"><option value="all">All clubs</option></select></div><div class="field"><label for="draft-position-filter">Position</label><select id="draft-position-filter"><option value="all">All positions</option></select></div><div class="field"><label for="draft-sort">Sort</label><select id="draft-sort"><option value="price-desc">Price: high to low</option><option value="price-asc">Price: low to high</option><option value="name">Name</option></select></div></div>
+<div class="countline"><span id="draft-results-count">0 players</span></div>
+<div id="draft-results-list" class="decision-list"></div>
+<div class="pagination"><button id="draft-results-prev" type="button">Previous</button><span id="draft-results-page">Page 1 of 1</span><button id="draft-results-next" type="button">Next</button></div>
+</div>
+</div>
 <form id="draft-save-form" style="margin-top:14px"><div class="profile-form-grid"><div class="field"><label for="draft-team-id">FPL team ID</label><input id="draft-team-id" type="text" inputmode="numeric" placeholder="e.g. 1234567"></div></div><div style="display:flex;gap:14px;align-items:center;margin-top:12px"><button id="draft-save" class="refresh-button" type="submit" disabled>Save draft squad</button><button id="draft-clear" class="reset-filters" type="button" disabled>Clear draft</button></div><div id="draft-message" class="refresh-message" role="status" aria-live="polite"></div></form>
-<h3 style="margin-top:20px;font-size:15px">Add players</h3>
-<div class="player-toolbar"><div class="field"><label for="draft-search">Search</label><input id="draft-search" type="search" placeholder="Player name"></div><div class="field"><label for="draft-club-filter">Club</label><select id="draft-club-filter"><option value="all">All clubs</option></select></div><div class="field"><label for="draft-position-filter">Position</label><select id="draft-position-filter"><option value="all">All positions</option></select></div></div>
-<div style="overflow-x:auto"><table class="player-table"><thead><tr class="player-head"><th scope="col">Player</th><th scope="col">Club</th><th scope="col">Position</th><th scope="col">Price</th><th scope="col">Status</th><th scope="col"></th></tr></thead><tbody id="draft-results"></tbody></table></div>
 </div>
 </section>
 <section class="panel" id="draft-health-panel" style="margin-top:14px"><div class="section-heading"><div><div class="eyebrow">Draft health</div><h2 style="font-size:19px;margin-top:3px">How is your draft doing?</h2></div><button type="button" class="reset-filters" data-go="decisions">Full recommendations in Decision Center &rarr;</button></div>
@@ -78,15 +91,6 @@ _TEMPLATE = r'''<!doctype html>
 <div id="draft-health-risks" class="decision-list"></div>
 <h3 style="margin-top:16px;font-size:14px">Risk profile comparison</h3>
 <div id="draft-health-profiles" class="decision-list"></div>
-</div>
-</section>
-<section class="panel" id="draft-pitch-panel" style="margin-top:14px"><div class="section-heading"><div><div class="eyebrow">Starting XI</div><h2 style="font-size:19px;margin-top:3px">Build your pitch view</h2></div><span id="draft-pitch-formation" class="muted"></span></div>
-<div id="draft-pitch-session-notice" class="limitation-note" role="note">This lineup is for visualization only and resets on reload &mdash; only your 15-player squad above is saved.</div>
-<div id="draft-pitch-empty" class="empty">Save a complete, legal 15-player squad above to build your starting XI here.</div>
-<div id="draft-pitch-content" hidden>
-<div id="draft-pitch" class="formation-pitch" role="group" aria-label="Draft starting XI"></div>
-<h3 style="margin-top:16px;font-size:14px">Bench</h3>
-<div id="draft-bench" class="weekly-bench" aria-label="Draft bench order"></div>
 </div>
 </section>
 </section>
