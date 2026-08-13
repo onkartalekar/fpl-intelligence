@@ -627,6 +627,86 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertNotIn("X-Refresh-Token", html)
 
 
+class DraftSquadTabRenderTests(unittest.TestCase):
+    """Issue #152: the Draft Squad tab -- its own nav entry (moved out of "My Team"), explicit
+    preseason-only purpose framing, a draft-health summary, and a session-only pitch view."""
+
+    _STATE = {"fpl": {}, "transfers": [], "sources": []}
+
+    def test_nav_button_and_view_section_render(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('data-view="draft">Draft Squad</button>', html)
+        self.assertIn('id="view-draft" class="view"', html)
+        self.assertIn('<option value="draft">Draft Squad</option>', html)
+
+    def test_draft_squad_panel_moved_out_of_my_team_tab_into_its_own(self):
+        html = render_dashboard(self._STATE)
+
+        squad_start = html.index('<section id="view-squad"')
+        draft_start = html.index('<section id="view-draft"')
+        profile_start = html.index('<section id="view-profile"')
+        self.assertLess(squad_start, draft_start)
+        self.assertLess(draft_start, profile_start)
+        self.assertNotIn('id="draft-squad-panel"', html[squad_start:draft_start])
+        self.assertIn('id="draft-squad-panel"', html[draft_start:profile_start])
+
+    def test_purpose_framing_present(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-purpose-banner"', html)
+        self.assertIn("Preseason only", html)
+        self.assertIn("baselined off whatever you declare", html)
+
+    def test_draft_health_panel_renders(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-health-panel"', html)
+        self.assertIn('id="draft-health-empty"', html)
+        self.assertIn('id="draft-health-content" hidden', html)
+        self.assertIn('id="draft-health-progression"', html)
+        self.assertIn('id="draft-health-risks"', html)
+        self.assertIn('id="draft-health-profiles"', html)
+        self.assertIn('data-go="decisions"', html)
+
+    def test_pitch_view_renders_with_always_visible_non_persistence_notice(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn('id="draft-pitch-panel"', html)
+        # Not `hidden` -- the plan's explicit requirement is that this stays visible, not a
+        # one-time toast, since the 15-player squad above it IS persisted.
+        self.assertIn(
+            '<div id="draft-pitch-session-notice" class="limitation-note" role="note">'
+            "This lineup is for visualization only and resets on reload",
+            html,
+        )
+        self.assertIn('id="draft-pitch-empty"', html)
+        self.assertIn('id="draft-pitch-content" hidden', html)
+        self.assertIn('id="draft-pitch"', html)
+        self.assertIn('id="draft-bench"', html)
+
+    def test_draft_squad_editor_ids_unchanged_from_issue_61(self):
+        html = render_dashboard(self._STATE)
+
+        for element_id in [
+            "draft-count", "draft-budget", "draft-quota", "draft-warnings", "draft-selected",
+            "draft-save-form", "draft-team-id", "draft-save", "draft-clear", "draft-message",
+            "draft-search", "draft-club-filter", "draft-position-filter", "draft-results",
+            "draft-locked-note",
+        ]:
+            self.assertIn(f'id="{element_id}"', html)
+
+    def test_js_pitch_and_health_helpers_present(self):
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function draftRollScenario()", html)
+        self.assertIn("function renderDraftHealth()", html)
+        self.assertIn("function renderDraftPitch()", html)
+        self.assertIn("function seedDraftPitch(roll)", html)
+        self.assertIn("draftXiMin", html)
+        self.assertIn("draftXiMax", html)
+
+
 class ProfileGatedTabsTests(unittest.TestCase):
     """Issue #108: Decision Center and Model Performance are each gated, at the tab level,
     behind an empty-state panel linking to My Profile when no profile is resolved for the

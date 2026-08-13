@@ -1220,6 +1220,31 @@ dd {
 .pitch-player .projection-compact {
   display: none;
 }
+/* Issue 152: the draft tab's editable pitch view -- small per-card controls for the session-only
+   bench-swap/captain/vice-captain interaction, distinct from the read-only `.pitch-player` cards
+   used elsewhere (Decision Center's recommended/weekly XI, which have no such buttons). */
+.pitch-player-actions {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.pitch-player-actions button {
+  background: var(--panel2);
+  border: 1px solid var(--pitch-card-border);
+  border-radius: 6px;
+  color: var(--pitch-text);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 3px 6px;
+}
+.pitch-player-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.draft-bench-pending {
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .decision-hero {
   border-color: var(--hero-border);
   background: linear-gradient(135deg,var(--hero-grad-a),var(--panel));
