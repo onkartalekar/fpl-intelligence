@@ -783,6 +783,34 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # And the add-players list sits beside the pitch, not below a separate squad list.
         self.assertIn('class="draft-builder-grid"', html)
 
+    def test_save_and_clear_form_sits_above_the_pitch_grid(self):
+        # Follow-up per live feedback: the save form (team ID + Save/Clear) used to sit at the
+        # very bottom, below the whole pitch/add-players grid -- moved directly above the
+        # "Starting XI" heading, right after the session notice.
+        html = render_dashboard(self._STATE)
+
+        save_form_start = html.index('<form id="draft-save-form"')
+        grid_start = html.index('class="draft-builder-grid"')
+        starting_xi_start = html.index('>Starting XI<')
+        self.assertLess(save_form_start, grid_start)
+        self.assertLess(save_form_start, starting_xi_start)
+
+    def test_removing_the_last_player_clears_both_pitch_and_bench(self):
+        # Regression guard: renderDraftPitchBuilding's early return for an empty squad used to
+        # hide the pitch but never clear #draft-bench -- removing the very last player left a
+        # stale bench card (and a stale Remove-button listener pointing at an id no longer in
+        # draftSelection) on screen, so a second click on it was a silent no-op. Reported live as
+        # "add a player and team is incomplete, you can not remove player even after clicking
+        # remove."
+        html = render_dashboard(self._STATE)
+
+        early_return_start = html.index("if(!squadPlayers.length){")
+        early_return_end = html.index("return;}", early_return_start) + len("return;}")
+        early_return_body = html[early_return_start:early_return_end]
+        self.assertIn("byId('draft-pitch').hidden=true", early_return_body)
+        self.assertIn("byId('draft-pitch').innerHTML=''", early_return_body)
+        self.assertIn("byId('draft-bench').innerHTML=''", early_return_body)
+
     def test_add_and_remove_place_players_directly_on_the_pitch(self):
         html = render_dashboard(self._STATE)
 
