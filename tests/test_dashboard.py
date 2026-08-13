@@ -461,44 +461,52 @@ class DashboardRenderTests(unittest.TestCase):
             html,
         )
 
-    def test_fresh_squad_benchmark_defaults_open_and_bench_squad_default_closed(self):
-        # Preseason Decision Center reorganization: before any draft is declared, the fresh-squad
-        # benchmark is the only useful thing on the page (open by default). "Bench & model" and
-        # "Squad & player detail" are advanced reference detail, collapsed by default regardless
-        # -- JS only re-opens them once the season is under way (`decision.event !== 1`).
+    def test_fresh_squad_benchmark_is_one_unified_group_open_by_default(self):
+        # Decision Center reorganization, corrected after live feedback: the fresh-squad
+        # benchmark -- summary, risk profiles, XI/captaincy, bench & model, squad & player detail
+        # -- is ALL non-personalized content and must collapse/expand together as one single
+        # unit, not as three independently-toggling pieces (the original cut of this wrapped only
+        # summary on `weekly.draft`, and bench/squad separately on `decision.event`, which read as
+        # disjointed -- profiles and XI/captaincy weren't wrapped at all). Open by default: with
+        # no more relevant personalized recommendation available yet, it's the only useful thing
+        # on the page.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        summary_start = html.index('<details class="decision-details" id="decision-summary-details"')
-        summary_tag = html[summary_start:summary_start + 120]
-        self.assertIn(" open", summary_tag.split(">")[0])
-        self.assertIn('id="decision-summary-details-label">Preliminary recommendation<', html)
+        details_start = html.index('<details class="decision-details" id="decision-benchmark-details"')
+        details_tag = html[details_start:details_start + 120]
+        self.assertIn(" open", details_tag.split(">")[0])
+        self.assertIn('id="decision-benchmark-details-label">Preliminary recommendation<', html)
 
-        for details_id in ["decision-section-bench-details", "decision-section-squad-details"]:
-            start = html.index(f'<details class="decision-details" id="{details_id}"')
-            tag = html[start:start + 120].split(">")[0]
-            self.assertNotIn(" open", tag)
+        # Every one of the five benchmark sub-sections lives inside this one wrapper, in this
+        # order, and closes before the next `</details>` -- not their own separate wrappers.
+        details_end = html.index("</details>", details_start)
+        benchmark_block = html[details_start:details_end]
+        for marker in [
+            'id="decision-section-summary"', 'id="decision-section-profiles"',
+            'id="decision-section-xi"', 'id="decision-section-bench"', 'id="decision-section-squad"',
+        ]:
+            self.assertIn(marker, benchmark_block)
+        # No stale per-section wrapper ids from the original (disjointed) cut remain anywhere.
+        for stale_id in ["decision-summary-details", "decision-section-bench-details", "decision-section-squad-details"]:
+            self.assertNotIn(f'id="{stale_id}"', html)
 
-        # The ids the rest of dashboard.js already reads (subnav, IntersectionObserver, direct
-        # byId calls) stay on the original inner elements -- only a wrapper was added around them.
-        self.assertIn('<section class="panel decision-hero" id="decision-section-summary"', html)
-        self.assertIn('<div class="decision-layout" id="decision-section-bench">', html)
-        self.assertIn('<div class="decision-layout" id="decision-section-squad">', html)
+        # The personalized weekly section sits outside the benchmark wrapper, as its own sibling.
+        self.assertNotIn('id="decision-section-weekly"', benchmark_block)
 
-    def test_draft_priority_reorder_and_demote_js_present(self):
+    def test_weekly_priority_reorder_and_unified_demote_js_present(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("classList.toggle('draft-priority',!!weekly.draft)", html)
-        self.assertIn("summaryDetails.open=!weekly.draft", html)
-        self.assertIn(
-            "'For comparison only -- not personalized to your draft'", html,
-        )
-        self.assertIn("#decisions-content.draft-priority > .decision-subnav", html)
-        self.assertIn("#decisions-content.draft-priority > #decision-section-weekly", html)
-
-        # Preseason-only collapse for the two advanced/reference sections, independent of
-        # whether a draft exists -- gated on `decision.event`, not `weekly.draft`.
-        self.assertIn("decisionBenchDetails.open=!decisionPreseason", html)
-        self.assertIn("decisionSquadDetails.open=!decisionPreseason", html)
+        # Gated on `weekly.status==='active'`, not `weekly.draft` alone -- true both for a
+        # declared preseason draft and for a real published squad once GW1 has passed, so the
+        # benchmark stays demoted post-season-start too, instead of snapping back open the moment
+        # `weekly.draft` goes false again.
+        self.assertIn("const weeklyPersonalized=weekly.status==='active'", html)
+        self.assertIn("classList.toggle('weekly-priority',weeklyPersonalized)", html)
+        self.assertIn("benchmarkDetails.open=!weeklyPersonalized", html)
+        self.assertIn("'For comparison only -- not personalized to your draft'", html)
+        self.assertIn("'For comparison only -- see your personalized weekly decision above'", html)
+        self.assertIn("#decisions-content.weekly-priority > .decision-subnav", html)
+        self.assertIn("#decisions-content.weekly-priority > #decision-section-weekly", html)
 
         # Clicking a subnav chip must open a collapsed ancestor `<details>` before scrolling to
         # it, or it would scroll to an invisible (zero-height, collapsed) target.
@@ -783,6 +791,20 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         self.assertIn("function renderDraftBuilder()", html)
         self.assertIn("function renderDraftPitchBuilding()", html)
         self.assertIn("function renderDraftPitchSaved(roll)", html)
+
+    def test_no_reload_save_success_path_refreshes_draft_health_too(self):
+        # Regression guard: the no-reload save success path called renderDraftBuilder() (pitch +
+        # summary metrics + results list) but never renderDraftHealth() -- so after saving a
+        # squad materially different from whatever was loaded at page-load time, the health
+        # panel silently kept showing stale (or empty) data until the user left and re-entered
+        # the Draft tab. `renderDraftBuilder()` alone doesn't touch #draft-health-* at all.
+        html = render_dashboard(self._STATE)
+
+        success_start = html.index("refreshPayload.status==='ok'")
+        success_end = html.index("else{", success_start)
+        success_branch = html[success_start:success_end]
+        self.assertIn("renderDraftHealth()", success_branch)
+        self.assertIn("renderDraftBuilder()", success_branch)
 
     def test_js_pitch_and_health_helpers_present(self):
         html = render_dashboard(self._STATE)
