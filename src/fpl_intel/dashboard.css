@@ -1223,10 +1223,14 @@ dd {
 /* Issue 152: the draft tab's editable pitch view -- small per-card controls for the session-only
    bench-swap/captain/vice-captain interaction, distinct from the read-only `.pitch-player` cards
    used elsewhere (Decision Center's recommended/weekly XI, which have no such buttons). */
+/* flex-wrap, not a fixed row: a card can carry up to 4 buttons (Bench/Remove/C/VC) and
+   "Bench"/"Remove" are wider than the ~130px card can fit on one line alongside two more
+   buttons -- wrapping onto a second row beats overflowing the card, per live feedback. */
 .pitch-player-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   margin-top: 6px;
 }
 .pitch-player-actions button {
@@ -1235,8 +1239,9 @@ dd {
   border-radius: 6px;
   color: var(--pitch-text);
   cursor: pointer;
-  font-size: 10px;
-  padding: 3px 6px;
+  font-size: 9px;
+  padding: 2px 5px;
+  white-space: nowrap;
 }
 .pitch-player-actions button:disabled {
   opacity: 0.4;
@@ -1254,6 +1259,21 @@ dd {
 .draft-builder-add-col .decision-list {
   max-height: 640px;
   overflow-y: auto;
+}
+/* The narrower add-players column (as little as 280px) can't fit `.player-toolbar`'s normal
+   4-column grid (min 150px per filter, built for Player Explorer's full-width panel) -- it
+   squeezed Search down to a couple of characters and clipped Sort past the column's right edge.
+   A wrapping flex layout with Search on its own row fixes both, confirmed live. */
+.draft-builder-add-col .player-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.draft-builder-add-col .player-toolbar .field {
+  flex: 1 1 100%;
+}
+.draft-builder-add-col .player-toolbar .field:not(:first-child) {
+  flex: 1 1 120px;
 }
 .draft-result-row {
   display: flex;

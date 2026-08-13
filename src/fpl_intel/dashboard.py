@@ -62,10 +62,10 @@ _TEMPLATE = r'''<!doctype html>
 <div id="draft-locked-note" class="limitation-note" role="note" hidden></div>
 <div id="draft-squad-editor">
 <div class="decision-summary"><div class="decision-metric"><b id="draft-count">0 / 15 selected</b><span>Squad size</span></div><div class="decision-metric"><b id="draft-budget">&pound;0.0m spent &middot; &pound;100.0m remaining</b><span>Budget</span></div><div class="decision-metric"><b id="draft-quota">0/2 GKP &middot; 0/5 DEF &middot; 0/5 MID &middot; 0/3 FWD</b><span>Formation quotas</span></div></div>
-<div id="draft-warnings" class="limitation-note" role="note" hidden></div>
 <div id="draft-pitch-session-notice" class="limitation-note" role="note">Players land straight on the pitch below as you add them. The starting XI/bench arrangement and captain/vice-captain choice are for visualization only and reset on reload &mdash; only the 15-player squad itself is saved.</div>
 <div class="draft-builder-grid" style="margin-top:12px">
 <div class="draft-builder-pitch-col">
+<div id="draft-warnings" class="limitation-note" role="note" hidden></div>
 <div class="section-heading"><h3 style="font-size:14px;margin:0">Starting XI</h3><span id="draft-pitch-formation" class="muted"></span></div>
 <div id="draft-pitch-empty" class="empty">Add players from the list on the right to start building your pitch view.</div>
 <div id="draft-pitch" class="formation-pitch" role="group" aria-label="Draft starting XI" hidden></div>
