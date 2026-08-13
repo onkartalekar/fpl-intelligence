@@ -39,6 +39,23 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         self.assertIn('id="whats-new-subscribe-email"', html)
         self.assertIn("Get release notes by email", html)
 
+    def test_github_contribute_callout_renders_next_to_subscribe_card(self):
+        html = render_dashboard(self._BASE_STATE)
+
+        self.assertIn('id="whats-new-contribute-panel"', html)
+        self.assertIn("Interested in contributing?", html)
+        self.assertIn('href="https://github.com/onkartalekar/fpl-intelligence"', html)
+        self.assertIn('target="_blank"', html)
+        self.assertIn('rel="noopener noreferrer"', html)
+        # Sits beside the subscribe panel in the same two-column .grid, not below it -- that's
+        # the empty-space gap it was added to fill.
+        subscribe_start = html.index('id="whats-new-subscribe-panel"')
+        contribute_start = html.index('id="whats-new-contribute-panel"')
+        grid_start = html.rindex('<div class="grid"', 0, subscribe_start)
+        grid_end = html.index("</div>", contribute_start)
+        self.assertLess(grid_start, subscribe_start)
+        self.assertLess(contribute_start, grid_end)
+
     def test_release_notes_entries_are_embedded_in_dashboard_data(self):
         state = {
             **self._BASE_STATE,
