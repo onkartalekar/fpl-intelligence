@@ -239,6 +239,15 @@ try{const refreshResponse=await fetch(`/api/manager-view?team_id=${teamId}`);con
 // plans/issue-152-preseason-draft-ui.md's "Structural constraint" section.
 function draftRollScenario(){const weekly=decision.weekly_decisions||{};if(!weekly.draft||weekly.status!=='active')return null;const profiles=weekly.profiles||[];const selected=profiles.find(row=>row.id===(weekly.default_profile||'balanced'))||profiles[0];if(!selected)return null;return(selected.scenarios||[]).find(scenario=>scenario.action==='roll')||null;}
 
+// Bug fix: renderDraftPitchSaved can only render players present in `roll.squad` -- the
+// server-computed projections for whatever 15 was saved *last*. A player added (or removed) from
+// draftSelection since that save has no entry there at all, so they used to silently vanish from
+// both the pitch and the bench instead of appearing without projections. Gating on this match
+// means any local edit that diverges from the saved squad falls back to the no-projections
+// builder view (which reads live off draftSelection/draftPlayerById and already handles
+// add/remove/bench/start correctly) until the next save brings the two back in sync.
+function draftSquadMatchesSaved(roll){if(!roll)return false;const savedIds=new Set((roll.squad||[]).map(player=>player.id));if(savedIds.size!==draftSelection.length)return false;return draftSelection.every(id=>savedIds.has(id));}
+
 function renderDraftHealth(){const roll=draftRollScenario();const empty=byId('draft-health-empty');const content=byId('draft-health-content');if(!roll){empty.hidden=false;content.hidden=true;return;}empty.hidden=true;content.hidden=false;const squad=roll.squad||[];const totals=squad.reduce((sum,player)=>({xp1:sum.xp1+Number(player.xp_1||0),xp3:sum.xp3+Number(player.xp_3||0),xp5:sum.xp5+Number(player.xp_5||0)}),{xp1:0,xp3:0,xp5:0});byId('draft-health-progression').innerHTML=`<div class="decision-metric"><b>${totals.xp1.toFixed(1)}</b><span>Modeled points, next GW</span></div><div class="decision-metric"><b>${totals.xp3.toFixed(1)}</b><span>Modeled points, 3-GW horizon</span></div><div class="decision-metric"><b>${totals.xp5.toFixed(1)}</b><span>Modeled points, 5-GW horizon</span></div>`;const statuses={d:'Doubtful',i:'Injured',s:'Suspended',u:'Unavailable',n:'Not available'};const risky=squad.filter(player=>(player.status&&player.status!=='a')||player.confidence==='low');byId('draft-health-risks').innerHTML=risky.length?risky.map(player=>`<div class="decision-note"><strong>${esc(player.name)}</strong><br>${esc(statuses[player.status]||'Low-confidence projection')} &middot; ${esc(player.club)}</div>`).join(''):'<div class="empty">No availability or confidence concerns flagged in your declared draft.</div>';const weekly=decision.weekly_decisions||{};const profiles=weekly.profiles||[];byId('draft-health-profiles').innerHTML=profiles.map(profile=>{const recommendation=profile.recommendation||{};return `<div class="decision-note"><strong>${esc(profile.label)} &middot; ${Number(recommendation.net_gain_5gw||0).toFixed(1)} 5-GW edge</strong><br>${esc(recommendation.reason||'')}</div>`;}).join('');}
 
 // The formation/quota rules a starting XI must satisfy -- distinct from `draftQuotas` above,
@@ -264,6 +273,15 @@ function draftXiCanAdd(position,counts){
 }
 
 function draftXiPositionCounts(ids,squadById){const counts={GKP:0,DEF:0,MID:0,FWD:0};ids.forEach(id=>{const player=squadById[id];if(player)counts[player.position_short]=(counts[player.position_short]||0)+1;});return counts;}
+
+// Per live feedback: benching the only starting GKP left the XI with zero goalkeepers even
+// though the squad always carries a second one on the bench -- the user had to separately find
+// and click "Move to starting XI" on it themselves. Auto-promotes only when there's exactly one
+// unambiguous replacement (true for GKP by construction: draftQuotas has GKP:2 and draftXiMax
+// caps the XI at 1, so there's never more than one benched GKP to choose between). Positions with
+// more than one candidate on the bench are deliberately left alone -- picking among several DEF/
+// MID/FWD options is a real choice the user should make, not one to guess on their behalf.
+function draftAutoFillAfterBench(benchedPosition,benchedId,squadById){const counts=draftXiPositionCounts(draftStartingIds,squadById);if((counts[benchedPosition]||0)>=draftXiMin[benchedPosition])return;const candidates=draftSelection.filter(id=>id!==benchedId&&!draftStartingIds.includes(id)).map(id=>squadById[id]).filter(player=>player&&player.position_short===benchedPosition);if(candidates.length===1&&draftXiCanAdd(benchedPosition,counts))draftStartingIds=[...draftStartingIds,candidates[0].id];}
 
 // Seeds the session-only starting XI/captain/vice from the model's own already-computed best XI
 // for the roll scenario (`_lineup_view`'s `starting_xi`/`captain`/`vice_captain`) -- a better
@@ -310,14 +328,14 @@ function renderDraftPitchBuilding(){const squadPlayers=draftSelection.map(draftP
 // longer in draftSelection) on screen, making a second click on it a silent no-op. Both
 // containers must be cleared together whenever the squad is empty, not just the pitch.
 byId('draft-pitch').hidden=true;byId('draft-pitch').innerHTML='';byId('draft-bench').innerHTML='';return;}const startingPlayers=draftStartingIds.map(draftPlayerById).filter(Boolean);const benchPlayers=squadPlayers.filter(player=>!draftStartingIds.includes(player.id));byId('draft-pitch').hidden=false;byId('draft-pitch').setAttribute('aria-label',`Draft pitch in progress: ${startingPlayers.map(player=>player.name).join(', ')||'no starters chosen yet'}`);byId('draft-pitch').innerHTML=['FWD','MID','DEF','GKP'].map(position=>`<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers.filter(player=>player.position_short===position).map(draftPitchCardHtmlBuilding).join('')}</div>`).join('');byId('draft-bench').innerHTML=benchPlayers.map(draftBenchCardHtmlBuilding).join('');
-document.querySelectorAll('[data-draft-bench]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftBench);draftStartingIds=draftStartingIds.filter(existing=>existing!==id);if(draftCaptainId===id)draftCaptainId=draftStartingIds[0]||null;if(draftViceId===id||(draftCaptainId!==null&&draftViceId===draftCaptainId))draftViceId=draftStartingIds.find(existing=>existing!==draftCaptainId)||null;renderDraftPitch();}));
+document.querySelectorAll('[data-draft-bench]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftBench);const benched=draftPlayerById(id);draftStartingIds=draftStartingIds.filter(existing=>existing!==id);if(draftCaptainId===id)draftCaptainId=draftStartingIds[0]||null;if(draftViceId===id||(draftCaptainId!==null&&draftViceId===draftCaptainId))draftViceId=draftStartingIds.find(existing=>existing!==draftCaptainId)||null;if(benched){const squadById=Object.fromEntries(draftSelection.map(playerId=>[playerId,draftPlayerById(playerId)]));draftAutoFillAfterBench(benched.position_short,id,squadById);}renderDraftPitch();}));
 document.querySelectorAll('[data-draft-start]').forEach(button=>{if(button.disabled)return;button.addEventListener('click',()=>{const id=Number(button.dataset.draftStart);draftStartingIds=[...draftStartingIds,id];renderDraftPitch();});});
 document.querySelectorAll('[data-draft-captain]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftCaptain);if(draftViceId===id)draftViceId=draftCaptainId;draftCaptainId=id;renderDraftPitch();}));
 document.querySelectorAll('[data-draft-vice]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftVice);if(id===draftCaptainId)return;draftViceId=id;renderDraftPitch();}));
 document.querySelectorAll('[data-draft-remove]').forEach(button=>button.addEventListener('click',()=>removeDraftPlayer(Number(button.dataset.draftRemove))));
 }
 
-function renderDraftPitch(){const empty=byId('draft-pitch-empty');const roll=draftRollScenario();if(roll){empty.hidden=true;byId('draft-pitch').hidden=false;renderDraftPitchSaved(roll);return;}empty.hidden=!!draftSelection.length;renderDraftPitchBuilding();}
+function renderDraftPitch(){const empty=byId('draft-pitch-empty');const roll=draftRollScenario();if(roll&&draftSquadMatchesSaved(roll)){empty.hidden=true;byId('draft-pitch').hidden=false;renderDraftPitchSaved(roll);return;}empty.hidden=!!draftSelection.length;renderDraftPitchBuilding();}
 
 // Issue #108: Decision Center and Model Performance are both personalized to a manager's own
 // team and have nothing meaningful to show without one. Rather than gating inside each of their
