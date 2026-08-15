@@ -99,6 +99,17 @@ function renderRotationPlan(selected,squad){const panel=byId('decision-rotation-
 // renderDecision() below so every existing call site keeps working unchanged.
 function renderProfileComparison(profileId=null){
 const weekly=decision.weekly_decisions||{};const personalized=weekly.status==='active';
+// Bug fix: decision-section-profiles lives, by default, inside <details id="decision-benchmark-
+// details"> -- fine while it only ever showed the generic benchmark, but that <details> collapses
+// shut (renderWeeklyDecision's weekly-priority demote) the moment personalized data exists, which
+// silently hid the one thing inside it that had just become personalized and relevant. Relocate
+// the actual section node itself (not a copy -- there's only ever one) into the always-visible
+// "Personalized weekly decision" section when personalized, and back to its usual spot inside the
+// benchmark details otherwise. Safe to move: every listener inside it is rebound fresh on each
+// render via bindTabs, nothing here depends on the node's position remaining stable, and
+// IntersectionObserver/scrollIntoView track the element by reference, not by DOM location.
+const profilesSection=byId('decision-section-profiles');const weeklyMount=byId('weekly-profile-comparison-mount');const homeAnchor=byId('decision-section-profiles-home');
+if(personalized&&weeklyMount)weeklyMount.appendChild(profilesSection);else if(homeAnchor)homeAnchor.after(profilesSection);
 const benchmarkProfiles=decision.profile_recommendations||[];const legacy={id:'balanced',label:'Balanced',summary:'Central projection baseline',risk_note:'Preliminary model uncertainty.',objective:'Central five-gameweek projection',metrics:{}};
 const availableProfiles=personalized?(weekly.profiles||[]):(benchmarkProfiles.length?benchmarkProfiles:[legacy]);
 byId('profile-comparison-heading').textContent=personalized?'Compare risk profiles for your squad':'Compare risk profiles';
