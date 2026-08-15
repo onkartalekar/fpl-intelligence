@@ -1970,26 +1970,64 @@ def create_server(
                 _render_reminder_confirm_page(True, "Deadline reminders are confirmed for this team.")
             )
 
+        def _client_ip(self):
+            # `self.client_address` is set by socketserver.BaseRequestHandler.__init__ before
+            # setup()/handle() ever run, so it's always available here.
+            return self.client_address[0] if getattr(self, "client_address", None) else "-"
+
+        def _client_user_agent(self):
+            # `self.headers` is only populated once parse_request() succeeds, which never happens
+            # for a connection that times out before sending a full request line (log_error's
+            # primary TimeoutError case below), so that has to be guarded rather than assumed
+            # present. User-Agent is attacker-controlled input written straight into logs --
+            # collapsing whitespace neutralizes the trivial newline-injection case (a crafted
+            # header forging a fake extra log line) without needing a real sanitizer for what's
+            # just an access log.
+            headers = getattr(self, "headers", None)
+            return " ".join((headers.get("User-Agent", "-") if headers else "-").split()) or "-"
+
         def _client_label(self):
             # Bug fix: the override below used to print only the timestamp and message, dropping
             # the client IP the stdlib's own default log_message normally includes, and never
             # capturing User-Agent at all -- every line looked identical regardless of who sent
             # it, with no way to tell a platform health check, an uptime monitor, a crawler, or a
-            # real visitor apart after the fact. `self.client_address` is set by
-            # socketserver.BaseRequestHandler.__init__ before setup()/handle() ever run, so it's
-            # always available here -- but `self.headers` is only populated once parse_request()
-            # succeeds, which never happens for a connection that times out before sending a full
-            # request line (log_error's primary TimeoutError case below), so that has to be
-            # guarded rather than assumed present. User-Agent is attacker-controlled input being
-            # written straight into logs for the first time in this file -- collapsing whitespace
-            # neutralizes the trivial newline-injection case (a crafted header forging a fake
-            # extra log line) without needing a real sanitizer for what's just an access log.
-            address = self.client_address[0] if getattr(self, "client_address", None) else "-"
-            headers = getattr(self, "headers", None)
-            user_agent = " ".join((headers.get("User-Agent", "-") if headers else "-").split()) or "-"
-            return f'{address} "{user_agent}"'
+            # real visitor apart after the fact.
+            return f'{self._client_ip()} "{self._client_user_agent()}"'
+
+        def log_request(self, code="-", size="-"):
+            # Structured access log: one JSON object per completed request/response, printed to
+            # stdout instead of a plain "[date] ip "UA" "METHOD /path HTTP/1.1" status -" line.
+            # Railway's Log Explorer auto-parses top-level fields of single-line JSON stdout into
+            # filterable @attributes ("message"/"level" are recognized specially; every other key
+            # becomes "@fieldname") -- see docs.railway.com/guides/structured-logging-production.
+            # That turns "calls per API" / "status codes per API" from a substring search over
+            # free text into exact filters like `@route:/api/profile AND @status:400`, which is
+            # what an Observability dashboard panel's saved filter keys off of.
+            #
+            # Every response in this handler flows through self.send_response() (via _json/
+            # _send_html, plus the one direct 204 for /favicon.ico), which is the stdlib's single
+            # call site for log_request -- so this one override covers every route uniformly.
+            # `code` is always a plain int here (200/204/403/404/421/...), never HTTPStatus, so no
+            # extra unwrapping is needed the way the stdlib default's log_request does it.
+            route = urlsplit(self.path).path
+            level = "error" if isinstance(code, int) and code >= 500 else (
+                "warn" if isinstance(code, int) and code >= 400 else "info"
+            )
+            print(json.dumps({
+                "message": f'{self._client_label()} "{self.requestline}" {code} {size}',
+                "level": level,
+                "method": self.command,
+                "route": route,
+                "status": code,
+                "ip": self._client_ip(),
+                "user_agent": self._client_user_agent(),
+            }))
 
         def log_message(self, message, *args):
+            # Connection-level diagnostics that never reach log_request above (a connection that
+            # timed out or dropped before any response was sent -- log_error's two quiet-line
+            # cases below) stay plain text: there's no route/status to attach as attributes for,
+            # and Railway still ingests the line fine, just without custom @fields.
             print(f"[{self.log_date_time_string()}] {self._client_label()} {message % args}")
 
         def log_error(self, format, *args):
