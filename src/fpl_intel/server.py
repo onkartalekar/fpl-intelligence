@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -2043,7 +2044,11 @@ def create_server(
             # clearly-labeled line via log_message (the override just above) instead of the
             # generic default message, which would otherwise read like a real per-request
             # failure. Anything else (a genuine error) still goes through log_message unchanged.
-            if args and isinstance(args[0], TimeoutError):
+            # socket.timeout is included explicitly for Python < 3.10: from 3.10 on it's just an
+            # alias for the builtin TimeoutError, but on 3.9 and earlier it's a separate OSError
+            # subclass, so isinstance(args[0], TimeoutError) alone silently misses it there and
+            # this whole branch falls through to the generic (noisy) log_message call below.
+            if args and isinstance(args[0], (TimeoutError, socket.timeout)):
                 self.log_message("connection timed out (idle/slow client, %ss limit)", self.timeout)
                 return
             # Bug fix: the client-went-away sibling of the timeout case above -- confirmed live,
