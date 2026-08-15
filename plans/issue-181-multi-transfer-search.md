@@ -1,0 +1,73 @@
+# Multi-transfer (3+) search (issue #181)
+
+## Context
+
+Issue #181 (surfaced while discussing #176) confirms the transfer search never generates a candidate with more than 2 transfers in one gameweek: grepping every `"action"` value ever produced in `src/fpl_intel/transfer_decisions.py` finds exactly three -- `"roll"`, `"single_transfer"`, `"double_transfer"` -- for both the immediate-gameweek recommendation (`build_transfer_decisions`) and every step of the 5-gameweek planner. `maximum_free_transfers` defaults to 5 (`transfer_decisions.py:792`), matching FPL's real 2024/25+ banking rule, so a manager can genuinely have 3-5 free transfers banked with no way for this tool to ever discover or recommend using them together.
+
+## Structural constraint found before evaluating candidates
+
+**This is a documented product specification, not an oversight.** `SPECIFICATION.md`'s "Weekly transfer and chip contract" section states the scope explicitly:
+
+> "For Conservative, Balanced, and Aggressive profiles, compare rolling the transfer, one transfer, and two transfers."
+>
+> "The weekly planner ... searches legal roll, single-transfer, and double-transfer branches..."
+
+No rationale is given in the spec text for the ceiling of two -- most likely an original tractability-driven scoping decision from early in the project (brute-force enumeration genuinely can't reach a third leg with the current approach, confirmed below), never revisited since. There's no "Considered and declined" entry in `IMPLEMENTATION_PLAN.md` about this either -- it was never previously deliberated and rejected, it's simply the scope as originally written.
+
+**This means building anything here requires amending `SPECIFICATION.md`'s documented contract first, not just picking an implementation.** That's a product decision (does the spec's scope change), separate from the algorithmic question of *how* to search a wider space once it does. This plan treats both as open, in that order.
+
+## Why brute-force enumeration can't just be extended (confirmed with real numbers)
+
+`_best_double`'s existing double-transfer search (`transfer_decisions.py:234-273`) already nests `single_moves[:35]` (first leg) x squad (15 slots) x `candidates_by_position` (≤35 per position) -- 35 x 15 x 35 = **18,375** combinations, each fully evaluated via `_squad_objective`. This is already near the edge of what's practical (per #176, this loop alone was ~2.7s of real per-call time even after the #177/#180 memoization fixes). Naively adding a third leg the same way multiplies this by roughly another `x15 x35` factor -- on the order of **9.6 million** combinations, fully brute-forced, per profile. Not viable with the current enumerate-and-score-everything strategy; any 3+-leg search needs a fundamentally different approach.
+
+## Candidate operationalizations
+
+Evaluated assuming the spec question resolves to "yes, extend the contract" -- these are the *how*, not the *whether*.
+
+### (a) Full brute-force to N legs -- DECLINE
+
+**What:** Extend `_best_double`'s exact nested-loop shape by one more level per additional leg.
+
+**Verdict: decline.** Already shown above to be computationally infeasible past 2 legs (~9.6M combinations for a third leg alone, growing combinatorially for each additional one). Not a viable path regardless of the spec question's answer.
+
+### (b) Greedy incremental leg-by-leg construction -- viable, but has a real blind spot
+
+**What:** Reuse `_candidate_moves` (already a general "find the best single transfer from an arbitrary squad state" function, not specific to the starting squad) as a repeatable building block. Starting from the current squad, run it once to find the best single transfer, apply that transfer, then run it *again* on the resulting squad to find the best next transfer, repeating up to the leg count being evaluated. At each leg count (1 through `maximum_free_transfers`), compute `net_gain_5gw` the same way `_scenario` already does today (gross gain minus accumulated hit cost) and keep whichever leg-count nets out best -- exactly generalizing how `roll`/`single`/`double` are already three separate candidates compared today, just with more of them.
+
+**Cost:** `_candidate_moves` truncates to 45 candidates per position and evaluates up to 15 x 45 = 675 combinations per call (confirmed reading the code, `transfer_decisions.py:208`). A greedy search up to 5 legs costs roughly `5 x 675 = 3,375` evaluations -- **cheaper than today's existing double-transfer search (18,375)**, not more expensive.
+
+**The real risk, and it's not the same risk as the pruning idea already declined on #176.** Greedy construction has no backtracking: the locally-best first transfer might consume budget or a position slot in a way that blocks a better *combined* first+second choice a joint search would have found. This is a real quality gap versus an exhaustive search. But -- important distinction from the pruning idea declined on #176 -- that idea would have made an *already-working, exhaustive* 2-transfer search worse to save time. This is going from *zero capability* (nothing recommended for 3+ transfers today) to *an approximate but real* recommendation. The downside of greedy is "might not find the mathematically optimal N-transfer combination," not "might recommend something worse than what the tool already tells a visitor today."
+
+### (c) Beam search over transfer legs -- BUILD, primary recommendation
+
+**What:** The same idea as (b), but instead of collapsing to a single best candidate after each leg, keep a beam of the top-B partial candidates and expand every one of them by one more leg before re-truncating to the top-B again. This directly generalizes `_best_double`'s own existing shape (its `single_moves[:35]` truncation *is* effectively a beam of width 35 for the first leg, before searching second legs) and mirrors the 5-gameweek planner's already-working `_best_planner_continuation` beam search (`beam_width=8` there) -- both real, proven precedents already in this codebase to build from, not a new algorithmic paradigm being introduced.
+
+**Cost:** roughly `B x legs x 675` evaluations. At a beam width of 10 and up to 5 legs: `10 x 5 x 675 = 33,750` -- about 1.8x today's existing double-transfer search cost, still a small fraction of `build_transfer_decisions`'s total per-call time. At B=20: `67,500`, about 3.7x -- still reasonable. Exact beam width is a tuning knob, not decided here (see Open questions).
+
+**Why this over (b):** for modest additional cost -- still cheap relative to what the tool already spends today -- beam search substantially closes (b)'s blind spot by keeping multiple promising partial combinations alive instead of committing early to one. There's no meaningful reason to accept greedy's quality gap to save a cost difference this small; recommending beam over greedy is an engineering call I'm comfortable making, unlike the deeper "should we risk quality for speed" trade-off already declined on #176 (that traded away an existing exhaustive baseline's guarantees; this only ever compares against "nothing," so there's no equivalent baseline being weakened).
+
+### (d) Meet-in-the-middle / exact combinatorial optimization -- not recommended, noted for completeness
+
+**What:** A more sophisticated exact technique (split the legs into two halves, enumerate each half's combinations separately, merge to find the true optimum) that could in principle guarantee the mathematically best N-leg combination without full brute force.
+
+**Verdict: not recommended.** Meaningfully more complex to implement and reason about correctly than (c), for a guarantee (finding the *provably* optimal combination, not just a good one) that the beam-search approach's cost/quality trade-off likely doesn't need. Worth knowing this exists if beam search's quality turns out to be insufficient in practice, but not the starting point.
+
+## Interaction check: does this touch anything else?
+
+Confirmed no interaction needed with wildcard/free-hit evaluation (`_chip_recommendation`/`_exclusive_chip_scenario`) -- those are a separate, mutually-exclusive mechanism (`_optimize_squad`'s full-squad reoptimization) already evaluated independently of the ordinary-transfer search, unaffected by how many ordinary-transfer legs get searched.
+
+Confirmed the hit-cost economics genuinely don't need to change (per #181's own body): `point_cost = max(0, transfer_count - free_transfers) * 4` and `net_gain_5gw = gross_gain_5gw - point_cost` are already written generically for any `transfer_count`.
+
+## Open questions -- not decided here
+
+- **The spec question itself**: does `SPECIFICATION.md`'s "Weekly transfer and chip contract" get amended to allow more than 2 transfers? This is the primary decision this plan surfaces rather than makes.
+- **Immediate recommendation only, or also the 5-gameweek planner?** The planner calls its per-step search far more often (up to 4 continuations x 5 steps x up to 8 beam nodes), so extending multi-leg search there multiplies cost much further than the immediate-only case. `_planner_single_moves` already uses a much smaller candidate cap (top-8 per position, `limit=6` results) than `_candidate_moves` (top-45, unlimited) specifically because it's called so much more often -- an existing precedent for tuning per-call cost down when call volume is high, directly relevant if/when this extends into the planner. Recommend starting with the immediate-gameweek recommendation only, measuring with #179's benchmark, and treating planner integration as a deliberately separate follow-on decision once real numbers exist.
+- **Beam width and max legs to actually support.** `maximum_free_transfers` (today defaulting to 5) is the natural ceiling, but whether to search all the way to 5 or cap lower (e.g. 3-4, on the theory that 5-transfer-banked scenarios are rare) is a product/cost tuning call, not decided here.
+
+## Recommendation
+
+1. **First**, get an explicit decision on the spec question: does `SPECIFICATION.md`'s "Weekly transfer and chip contract" change to allow more than 2 transfers. Nothing below should be built without that.
+2. If yes: build (c), beam search over transfer legs, reusing `_candidate_moves` as the per-leg building block and mirroring the existing planner's beam-search shape -- not (b) greedy, for the reasons above; not (a) or (d).
+3. Scope the first version to the immediate-gameweek recommendation only (`build_transfer_decisions`/`build_draft_decisions`'s `_scenario` candidates), not the 5-gameweek planner -- measure real cost with #179's benchmark before deciding whether planner integration is warranted.
+4. Verify (don't just assume) that the existing hit-cost/net-gain formulas hold unchanged once real 3+-leg candidates exist to feed them.
+5. Tune beam width and max-legs-to-search empirically against #179's benchmark once built, rather than guessing a value up front.
