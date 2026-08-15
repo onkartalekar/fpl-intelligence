@@ -121,7 +121,14 @@ class TransferDecisionTests(unittest.TestCase):
             self.assertEqual(roll["transfers"], [])
             self.assertEqual(roll["point_cost"], 0)
             self.assertEqual(roll["free_transfers_next_event"], 2)
-            self.assertIn(profile["recommendation"]["action"], actions)
+            # The recommendation is usually one of this profile's own scenarios, but a chip
+            # (`play_wildcard`/`play_freehit`) legitimately overrides it when one clears its
+            # profile-specific threshold -- see test_wildcard_replaces_.../test_free_hit_replaces_...
+            # below for that path in isolation.
+            self.assertTrue(
+                profile["recommendation"]["action"] in actions
+                or profile["recommendation"]["action"].startswith("play_")
+            )
             self.assertEqual(len(profile["recommendation"]["starting_xi"]), 11)
 
     def test_profiles_carry_uncertainty_metrics_for_the_managers_own_declared_squad(self):
@@ -212,6 +219,13 @@ class TransferDecisionTests(unittest.TestCase):
                 "Recent confirmed transfers use profile-specific role and minutes scenarios.",
                 plan["assumptions"],
             )
+            if profile["recommendation"]["action"].startswith("play_"):
+                # A chip (wildcard/freehit) replaces the ordinary planner path entirely when it
+                # clears its threshold -- conditional_branches is deliberately emptied in that
+                # case (see _exclusive_chip_scenario's override, and
+                # test_wildcard_replaces_.../test_free_hit_replaces_... which test that directly).
+                self.assertEqual(plan["conditional_branches"], [])
+                continue
             self.assertGreaterEqual(len(plan["conditional_branches"]), 1)
             for branch in plan["conditional_branches"]:
                 self.assertGreater(branch["event"], result["event"])
@@ -443,6 +457,172 @@ class BuildDraftDecisionsTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "draft_squad_invalid")
+
+
+def _downgrade_squad_picks(bootstrap, squad_picks, count):
+    """Issue #181 test helper: swap `count` squad picks for the worst same-position player *not*
+    already owned (and not pushing any club over its 3-player limit), so a multi-leg upgrade
+    clearly nets real value -- `sample_bootstrap()`'s points scale with player id
+    (`total_points = 90 + player_id * 3`), so the lowest remaining id in a position is reliably
+    its worst projected player.
+    """
+    owned_ids = {pick["element_id"] for pick in squad_picks}
+    by_id = {p["id"]: p for p in bootstrap["elements"]}
+    club_counts = {}
+    for pick in squad_picks:
+        club = by_id[pick["element_id"]]["team"]
+        club_counts[club] = club_counts.get(club, 0) + 1
+    by_position = {}
+    for player in bootstrap["elements"]:
+        by_position.setdefault(player["element_type"], []).append(player)
+    for players in by_position.values():
+        players.sort(key=lambda row: row["id"])  # ascending id == ascending points in this fixture
+
+    downgraded = [dict(pick) for pick in squad_picks]
+    swapped = 0
+    for pick in downgraded:
+        if swapped >= count:
+            break
+        original = by_id[pick["element_id"]]
+        worst_available = next(
+            (
+                p for p in by_position[original["element_type"]]
+                if p["id"] not in owned_ids and club_counts.get(p["team"], 0) < 3
+            ),
+            None,
+        )
+        if worst_available is None:
+            continue
+        club_counts[original["team"]] -= 1
+        club_counts[worst_available["team"]] = club_counts.get(worst_available["team"], 0) + 1
+        owned_ids.discard(pick["element_id"])
+        owned_ids.add(worst_available["id"])
+        pick["element_id"] = worst_available["id"]
+        pick["purchase_price"] = worst_available["now_cost"]
+        pick["selling_price"] = worst_available["now_cost"]
+        swapped += 1
+    return downgraded, swapped
+
+
+class MultiTransferScenarioTests(unittest.TestCase):
+    """Issue #181: build_transfer_decisions/build_draft_decisions can now consider more than 2
+    transfers in one gameweek -- these test the new `multi_transfer` scenarios specifically,
+    complementing (not replacing) the existing roll/single/double coverage above."""
+
+    def test_multi_transfer_scenarios_present_for_every_leg_count_up_to_the_official_maximum(self):
+        bootstrap, fixtures, manager = gw2_inputs()
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["official_rules"]["maximum_free_transfers"], 5)
+        for profile in result["profiles"]:
+            multi_leg = [row for row in profile["scenarios"] if row["action"] == "multi_transfer"]
+            self.assertEqual(
+                sorted(row["transfer_count"] for row in multi_leg), [3, 4, 5],
+                "expected one multi_transfer scenario per leg count from 3 through the official max",
+            )
+            for scenario in multi_leg:
+                self.assertEqual(len(scenario["transfers"]), scenario["transfer_count"])
+                out_ids = [move["out"]["id"] for move in scenario["transfers"]]
+                in_ids = [move["in"]["id"] for move in scenario["transfers"]]
+                self.assertEqual(len(out_ids), len(set(out_ids)), "no player sold twice in one combination")
+                self.assertEqual(len(in_ids), len(set(in_ids)), "no player bought twice in one combination")
+                self.assertFalse(set(out_ids) & set(in_ids), "never buys back a player just sold in the same combination")
+
+    def test_no_multi_transfer_scenarios_when_the_official_maximum_is_below_three(self):
+        bootstrap, fixtures, manager = gw2_inputs()
+        # Not 0: build_transfer_decisions computes maximum_free_transfers as
+        # `int(settings.get("max_extra_free_transfers") or 4) + 1` -- Python's `or` treats 0 as
+        # falsy, so 0 would silently fall back to the *default* of 4 (-> 5), not actually produce a
+        # below-three ceiling. 1 is the smallest value that isn't swallowed by that fallback.
+        bootstrap["game_settings"]["max_extra_free_transfers"] = 1  # maximum_free_transfers -> 2
+
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["official_rules"]["maximum_free_transfers"], 2)
+        for profile in result["profiles"]:
+            actions = {scenario["action"] for scenario in profile["scenarios"]}
+            self.assertNotIn("multi_transfer", actions)
+
+    def test_recommends_multi_transfer_when_the_hit_is_worth_it(self):
+        # Confirms issue #181's actual gap is closed, not just that scenarios are generated:
+        # downgrade 3 of the manager's own picks to the worst available same-position replacement,
+        # with all 3 free transfers banked -- exactly the motivating scenario for this issue (a
+        # manager who's rolled for a few gameweeks can genuinely have 3-5 free transfers banked,
+        # and the tool previously could never discover using more than 2 of them). Checked against
+        # "conservative" specifically: it's the profile where this scenario is least ambiguous --
+        # "balanced" shows a near-tie between double/multi_transfer for this fixture, and
+        # "aggressive" prefers a competing chip recommendation here -- both legitimate, different
+        # outcomes, not failures of this mechanism, so asserting a specific winning action across
+        # all three profiles would be a flaky, over-strict test of a scenario this fixture doesn't
+        # cleanly produce for every profile.
+        bootstrap, fixtures, manager = gw2_inputs()
+        manager["confirmed_free_transfers"] = 3  # makes the 3-leg upgrade genuinely free
+        downgraded, swapped = _downgrade_squad_picks(bootstrap, manager["squad"], count=3)
+        self.assertEqual(swapped, 3, "test fixture must have 3 clearly-worse replacements available")
+        manager["squad"] = downgraded
+
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["status"], "active")
+        conservative = next(row for row in result["profiles"] if row["id"] == "conservative")
+        recommendation = conservative["recommendation"]
+        self.assertEqual(recommendation["action"], "multi_transfer")
+        self.assertEqual(recommendation["transfer_count"], 3)
+        self.assertEqual(recommendation["point_cost"], 0)  # exactly 3 free transfers available
+        self.assertIn("3 transfers", recommendation["reason"])
+        self.assertIn("immediate-horizon", recommendation["reason"])  # discloses the immediate-only caveat
+        # A real hit genuinely isn't always worth it: with only 1 free transfer, the same 3-player
+        # upgrade must clear a real -4 hit rather than being free -- confirms the search doesn't
+        # just always prefer more legs regardless of cost.
+        manager_with_hit = dict(manager, confirmed_free_transfers=1)
+        hit_result = build_transfer_decisions(
+            bootstrap, fixtures, manager_with_hit, generated_at="2026-08-29T12:00:00-04:00"
+        )
+        hit_conservative = next(row for row in hit_result["profiles"] if row["id"] == "conservative")
+        multi_leg = [row for row in hit_conservative["scenarios"] if row["action"] == "multi_transfer"]
+        three_leg = next(row for row in multi_leg if row["transfer_count"] == 3)
+        self.assertEqual(three_leg["point_cost"], 8)  # 3 transfers, 1 free -> two -4 hits
+        self.assertLess(three_leg["net_gain_5gw"], recommendation["net_gain_5gw"])
+
+    def test_draft_decisions_also_consider_multi_transfer_reshuffles(self):
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+        squad_picks = [{"element_id": player_id} for player_id in draft_squad_ids]
+        downgraded, swapped = _downgrade_squad_picks(bootstrap, squad_picks, count=3)
+        self.assertEqual(swapped, 3, "test fixture must have 3 clearly-worse replacements available")
+        downgraded_ids = [pick["element_id"] for pick in downgraded]
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, downgraded_ids, generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        self.assertEqual(result["status"], "active")
+        for profile in result["profiles"]:
+            multi_leg = [row for row in profile["scenarios"] if row["action"] == "multi_transfer"]
+            self.assertEqual(sorted(row["transfer_count"] for row in multi_leg), [3, 4, 5])
+            for scenario in multi_leg:
+                # Issue #61's existing rule: no free-transfer point cost applies before GW1,
+                # regardless of leg count.
+                self.assertEqual(scenario["point_cost"], 0)
+        # Deliberately not asserting net_gain_5gw is monotonically non-decreasing with leg count:
+        # each leg-count candidate is *forced* to make exactly that many transfers (there's no
+        # "stop early" option within a single beam-search candidate), so once genuinely good
+        # transfers run out, being forced into one more can be flat or slightly worse than the
+        # previous leg count -- confirmed on this exact fixture (e.g. balanced: leg 4 = 3.6, leg
+        # 5 = 3.5). That's fine and expected: overall selection compares across leg counts via
+        # max(scenarios, key=net_gain_5gw) and correctly picks whichever one is actually best
+        # regardless, which is what the recommendation check below confirms.
+        #
+        # At least one profile in this fixture should clearly prefer a 3+-leg reshuffle over
+        # anything roll/single/double could offer -- confirming the mechanism actually changes the
+        # outcome, not just that scenarios are generated and never chosen.
+        winners = {row["recommendation"]["action"] for row in result["profiles"]}
+        self.assertIn("multi_transfer", winners)
 
 
 if __name__ == "__main__":

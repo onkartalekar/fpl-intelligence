@@ -655,7 +655,25 @@ def _event_lineup_schedule(squad, profile, horizon=5, include_value_bands=True, 
                 captain_value = float(captain_points[event_index]) if event_index < len(captain_points) else 0.0
                 return sum(values) + captain_value
 
-            row["central_points"] = total(lambda player: player.get("fixture_xp") or [])
+            # Issue #181: central_points now equals profile_points above -- the same
+            # profile-adjusted score (_profile_event_score) the lineup/transfer search itself
+            # ranks candidates by, not the plain, risk-blind fixture_xp it used to read. Before
+            # this, a transfer the search correctly favored (e.g. conservative trading a little
+            # raw upside for a lot more reliability) could still be *reported* to the user as a
+            # point loss, because this number never reflected the profile's own risk view at all --
+            # confirmed on real data while investigating #181's multi-leg search: for a squad with
+            # a low-confidence, high-projection player, conservative's search valued swapping him
+            # out at +0.73/GW (0.09 -> 0.82, on the discounted scale it actually optimizes), while
+            # this field reported the identical swap as a 0.17/GW *loss* (4.74 -> 4.57 on the plain
+            # scale it used to read) -- the same decision, judged as a win by one number and a loss
+            # by the other. lower_points/upper_points intentionally still read the fixed
+            # conservative/aggressive bounds regardless of `profile` -- those describe the full
+            # plausible outcome range for the uncertainty-interval display, not "what this profile
+            # expects," a different and still-valid use. Bench value remains excluded here (XI
+            # only, matching this field's pre-existing scope) even though _squad_objective (the
+            # search's own ranking metric) does credit bench depth -- a separate, smaller gap left
+            # as-is.
+            row["central_points"] = row["profile_points"]
             row["lower_points"] = total(lambda player: (player.get("profile_fixture_xp") or {}).get("conservative") or [])
             row["upper_points"] = total(lambda player: (player.get("profile_fixture_xp") or {}).get("aggressive") or [])
         schedule.append(row)

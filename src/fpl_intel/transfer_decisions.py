@@ -273,6 +273,104 @@ def _best_double(single_moves, eligible, quotas, club_limit, profile, cache=None
     return best
 
 
+def _leg_moves(squad, eligible, cash, quotas, club_limit, profile, sold_ids, bought_ids, cache=None, position_pool_size=35):
+    """Issue #181: legal one-player swaps from `squad`, ranked only by the cheap per-player score
+    already used to build `_candidate_moves`/`_best_double`'s own candidate pools -- deliberately
+    *not* scored with the expensive `_squad_objective` here, unlike `_candidate_moves`. This is the
+    per-leg expansion step inside `_beam_multi_transfer`'s beam search, which re-ranks the
+    *combined* multi-leg squad once a leg is added -- pre-ranking each individual leg by its own
+    squad-level score here would be real work thrown away the moment it's combined with the next
+    leg, since the combined squad's own objective is what actually gets compared.
+
+    `sold_ids`/`bought_ids` track transfers already made earlier in the same combination, so this
+    never proposes undoing one of them (selling a player just bought, or buying back a player just
+    sold) -- the same guard `_best_double` already applies for its one earlier leg, generalized to
+    however many legs have accumulated so far.
+    """
+    candidates_by_position = {
+        position: sorted(
+            (row for row in eligible if row["position_short"] == position),
+            key=lambda row: _profile_player_score(row, profile, 5),
+            reverse=True,
+        )[:position_pool_size]
+        for position in quotas
+    }
+    owned_ids = {row["id"] for row in squad}
+    moves = []
+    for index, outgoing in enumerate(squad):
+        if outgoing["id"] in bought_ids:
+            continue
+        for incoming in candidates_by_position[outgoing["position_short"]]:
+            if incoming["id"] in owned_ids or incoming["id"] in sold_ids:
+                continue
+            remaining = cash + outgoing["selling_price"] - incoming["price"]
+            if remaining < -1e-9:
+                continue
+            proposal = list(squad)
+            proposal[index] = {**incoming, "purchase_price": incoming["price"], "selling_price": incoming["price"]}
+            if not _structure_legal(proposal, quotas, club_limit):
+                continue
+            moves.append({
+                "squad": proposal,
+                "cash": round(remaining, 1),
+                "transfer": _move_record(outgoing, incoming),
+            })
+    return moves
+
+
+def _beam_multi_transfer(squad, eligible, cash, quotas, club_limit, profile, max_legs, beam_width=10, cache=None):
+    """Issue #181: beam search over transfer legs, generalizing `_candidate_moves`/`_best_double`'s
+    single/double-transfer search to up to `max_legs` transfers within one gameweek. Brute-forcing
+    this the way `_best_double` brute-forces 2 legs is computationally infeasible past 2 (see
+    plans/issue-181-multi-transfer-search.md: ~9.6M combinations for a 3rd leg alone) -- this keeps
+    only the top `beam_width` partial combinations alive at each leg count, expanding all of them
+    by one more leg before re-truncating, rather than exploring everything.
+
+    Returns `{leg_count: best_candidate_at_that_leg_count}` for every leg count in `1..max_legs`
+    that has at least one legal combination -- deliberately parallel to how `roll`/`single`/`double`
+    are each already independently scenario-compared today (via `net_gain_5gw`), just with more
+    leg counts available to compare across. Each candidate dict has the same
+    `{"squad", "cash", "transfers"}` shape `_best_double` already returns.
+    """
+    if max_legs < 1:
+        return {}
+    best_by_leg_count = {}
+    beam = []
+    for move in _leg_moves(squad, eligible, cash, quotas, club_limit, profile, sold_ids=set(), bought_ids=set(), cache=cache):
+        beam.append({
+            "squad": move["squad"],
+            "cash": move["cash"],
+            "transfers": [move["transfer"]],
+            "sold_ids": {move["transfer"]["out"]["id"]},
+            "bought_ids": {move["transfer"]["in"]["id"]},
+        })
+    if not beam:
+        return {}
+    beam.sort(key=lambda row: _squad_objective(row["squad"], profile, cache=cache), reverse=True)
+    beam = beam[:beam_width]
+    best_by_leg_count[1] = beam[0]
+    for leg_count in range(2, max_legs + 1):
+        expanded = []
+        for candidate in beam:
+            for move in _leg_moves(
+                candidate["squad"], eligible, candidate["cash"], quotas, club_limit, profile,
+                sold_ids=candidate["sold_ids"], bought_ids=candidate["bought_ids"], cache=cache,
+            ):
+                expanded.append({
+                    "squad": move["squad"],
+                    "cash": move["cash"],
+                    "transfers": candidate["transfers"] + [move["transfer"]],
+                    "sold_ids": candidate["sold_ids"] | {move["transfer"]["out"]["id"]},
+                    "bought_ids": candidate["bought_ids"] | {move["transfer"]["in"]["id"]},
+                })
+        if not expanded:
+            break
+        expanded.sort(key=lambda row: _squad_objective(row["squad"], profile, cache=cache), reverse=True)
+        beam = expanded[:beam_width]
+        best_by_leg_count[leg_count] = beam[0]
+    return best_by_leg_count
+
+
 def _scenario(action, candidate, baseline, profile, free_transfers, maximum_free_transfers, cache=None):
     squad = candidate["squad"]
     transfer_count = len(candidate["transfers"])
@@ -852,6 +950,41 @@ def build_transfer_decisions(
                 f"The five-gameweek planner prefers {ordinary_recommendation['action'].replace('_', ' ')} after hits, "
                 "churn, and future flexibility are included."
             )
+        # Issue #181: roll/single/double above get the full five-gameweek planner treatment
+        # (build_multiweek_plan's beam search over future gameweeks, weighing hit cost against
+        # retained flexibility). 3+ transfers this gameweek deliberately do not -- per
+        # plans/issue-181-multi-transfer-search.md, this is scoped to the immediate gameweek only,
+        # not fed into the planner's own continuation (which stays limited to roll/single/double,
+        # a separate follow-on decision). Brute-forcing 3+ legs the way _best_double brute-forces 2
+        # is computationally infeasible (see _beam_multi_transfer's docstring), so this uses a beam
+        # search instead and compares purely on this gameweek's net_gain_5gw -- an immediate,
+        # not full-future-flexibility-aware, comparison. That asymmetry is disclosed in the
+        # resulting reason text below rather than left implicit.
+        multi_leg_scenarios = []
+        if maximum_free_transfers >= 3:
+            beam_results = _beam_multi_transfer(
+                squad, eligible, bank, quotas, club_limit, profile, maximum_free_transfers,
+                cache=event_score_cache,
+            )
+            for leg_count in range(3, maximum_free_transfers + 1):
+                candidate = beam_results.get(leg_count)
+                if candidate is None:
+                    continue
+                multi_leg_scenarios.append(
+                    _scenario(
+                        "multi_transfer", candidate, squad, profile, free_transfers,
+                        maximum_free_transfers, cache=event_score_cache,
+                    )
+                )
+        best_multi_leg = max(multi_leg_scenarios, key=lambda row: row["net_gain_5gw"], default=None)
+        if best_multi_leg is not None and best_multi_leg["net_gain_5gw"] > ordinary_recommendation["net_gain_5gw"]:
+            ordinary_recommendation = dict(best_multi_leg)
+            ordinary_recommendation["reason"] = (
+                f"Making {ordinary_recommendation['transfer_count']} transfers this gameweek projects the strongest "
+                "five-gameweek net gain of any option modeled -- an immediate-horizon comparison only, unlike the "
+                "five-gameweek planner's roll/single/double comparison above, which also weighs future flexibility."
+            )
+        scenarios = scenarios + multi_leg_scenarios
         chip = _chip_recommendation(
             profile, ordinary_recommendation, inventory, eligible, quotas, total_sale_budget, club_limit,
             cache=event_score_cache,
@@ -959,6 +1092,12 @@ def build_draft_decisions(
     # move is reported with no point cost, so pass an unlimited free-transfer allowance into the
     # existing scenario accounting rather than adding a second, cost-free code path.
     unlimited_free_transfers = len(squad)
+    # Issue #181: the search bound for multi-leg reshuffles below, distinct from
+    # unlimited_free_transfers above -- that one is about *hit-cost accounting* (none applies
+    # preseason), this one is about how many transfer legs are even worth searching. The official
+    # maximum banked free transfers is the natural real-world ceiling (matches
+    # build_transfer_decisions's own bound) rather than searching up to the full 15-player squad.
+    max_search_legs = int(settings.get("max_extra_free_transfers") or 4) + 1
     profiles = []
     for profile in ("conservative", "balanced", "aggressive"):
         # Issue #176: see the matching comment in build_transfer_decisions -- separate from
@@ -976,6 +1115,26 @@ def build_draft_decisions(
             _scenario("single_transfer", singles[0], squad, profile, unlimited_free_transfers, unlimited_free_transfers, cache=event_score_cache),
             _scenario("double_transfer", double, squad, profile, unlimited_free_transfers, unlimited_free_transfers, cache=event_score_cache),
         ]
+        # Issue #181: no separate "planner vs immediate" comparison needed here, unlike
+        # build_transfer_decisions -- build_draft_decisions never calls build_multiweek_plan, it
+        # already just picks the single best scenario by net_gain_5gw below. Appending multi-leg
+        # candidates to the same list before that pick means they compete on equal footing, no
+        # extra comparison logic required.
+        if max_search_legs >= 3:
+            beam_results = _beam_multi_transfer(
+                squad, eligible, bank, quotas, club_limit, profile, max_search_legs,
+                cache=event_score_cache,
+            )
+            for leg_count in range(3, max_search_legs + 1):
+                candidate = beam_results.get(leg_count)
+                if candidate is None:
+                    continue
+                scenarios.append(
+                    _scenario(
+                        "multi_transfer", candidate, squad, profile, unlimited_free_transfers,
+                        unlimited_free_transfers, cache=event_score_cache,
+                    )
+                )
         # Issue #158: metrics/evaluation_horizons for the visitor's own *declared* draft squad
         # (`squad`, identical across all three profiles), not whatever this profile ends up
         # recommending. Powers a personalized "Compare risk profiles" panel.
@@ -984,6 +1143,11 @@ def build_draft_decisions(
         if recommendation["action"] == "roll":
             recommendation["reason"] = (
                 "No suggested swap projects more five-gameweek points than your declared squad as-is."
+            )
+        elif recommendation["action"] == "multi_transfer":
+            recommendation["reason"] = (
+                f"Making {recommendation['transfer_count']} transfers projects the strongest five-gameweek "
+                "improvement over your declared squad, with no cost before Gameweek 1."
             )
         else:
             recommendation["reason"] = (

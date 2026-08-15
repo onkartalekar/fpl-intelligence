@@ -67,7 +67,26 @@ Confirmed the hit-cost economics genuinely don't need to change (per #181's own 
 ## Recommendation
 
 1. ~~Get an explicit decision on the spec question.~~ **Done -- `SPECIFICATION.md` updated 2026-08-15.**
-2. Build (c), beam search over transfer legs, reusing `_candidate_moves` as the per-leg building block and mirroring the existing planner's beam-search shape -- not (b) greedy, for the reasons above; not (a) or (d).
-3. Scope the first version to the immediate-gameweek recommendation only (`build_transfer_decisions`/`build_draft_decisions`'s `_scenario` candidates), not the 5-gameweek planner -- measure real cost with #179's benchmark before deciding whether planner integration is warranted.
-4. Verify (don't just assume) that the existing hit-cost/net-gain formulas hold unchanged once real 3+-leg candidates exist to feed them.
-5. Tune beam width and max-legs-to-search empirically against #179's benchmark once built, rather than guessing a value up front.
+2. ~~Build (c), beam search over transfer legs...~~ **Done -- `_leg_moves`/`_beam_multi_transfer` in `transfer_decisions.py`, wired into `build_transfer_decisions` and `build_draft_decisions`, plus `dashboard.js` display support.**
+3. ~~Scope the first version to the immediate-gameweek recommendation only...~~ **Done as scoped -- the 5-gameweek planner's own per-step branching is untouched.**
+4. ~~Verify (don't just assume) that the existing hit-cost/net-gain formulas hold unchanged...~~ **Done, and this step found a real, separate bug along the way** (see below) -- `net_gain_5gw` itself was subtly broken for *all* transfer counts, not just 3+, just invisible enough with 1-2 legs to go unnoticed until testing 3-5 exposed it clearly.
+5. ~~Tune beam width and max-legs-to-search empirically...~~ Shipped with `beam_width=10` (the module-level default), untuned beyond confirming it produces correct, sensible results on realistic data. Revisit if real-world use shows it's too narrow or unnecessarily wide.
+
+## Unplanned finding: `_squad_objective`/`_central_points` divergence (fixed as part of this work)
+
+While building test coverage (step 4 above), a real, pre-existing bug surfaced: `_squad_objective` (what `_candidate_moves`/`_best_double`/this beam search rank candidates by) and `_central_points` (what `net_gain_5gw` -- the number that actually decides which scenario wins, and what the dashboard displays as "5-GW gain" -- is built from) used *different* scoring rulers. `_squad_objective` read each player's profile-adjusted score; `_central_points` always read the plain, risk-blind central estimate regardless of profile. A transfer the search correctly favored (e.g. conservative trading a little raw upside for a lot more reliability) could be *reported* as a point loss, because the reporting number never reflected the profile's own risk view at all.
+
+Confirmed this was pre-existing, not introduced by the beam search: the *same* mismatch was already present (just small enough to go unnoticed) on the existing single-transfer path -- for one squad, a single transfer that improved `_squad_objective` by +4.21 was already reported as a -0.2 loss in `net_gain_5gw`, before this issue touched anything. Extending to 3-5 legs made the same latent bug compound into something clearly visible (up to -15 points) instead of a rounding-sized discrepancy.
+
+**Fixed**: `_event_lineup_schedule`'s `central_points` field now equals `profile_points` (`recommendations.py`) -- both already the same profile-adjusted score, just computed for two different purposes before. Verified: `_squad_objective` and `_central_points` now move together (within the small, separate, and unchanged bench-exclusion gap -- `_squad_objective` credits bench value, `_central_points` still doesn't, left as-is).
+
+**A second-order consequence, spun into its own issue rather than fixed here**: `_chip_recommendation`'s wildcard/freehit marginal-value calculation also calls `_central_points`, and compares it against fixed `_THRESHOLDS` constants that were calibrated against the old, profile-blind scale. Confirmed on real data: aggressive's freehit marginal value jumped to 49.4 against a threshold of 12.0 (a huge, not marginal, margin) once the scale changed; conservative's swung to -40.6. This needs its own recalibration, validated against historical data per `SPECIFICATION.md`'s own model-change rule -- tracked as #184, not decided or fixed here.
+
+## Real-scale performance (measured with #179's benchmark, Python 3.11)
+
+| | Before #181 | After #181 |
+|---|---|---|
+| `build_transfer_decisions` | 7.66s | 11.01s |
+| `build_draft_decisions` | (not separately tracked pre-#181) | 7.67s |
+
+The added cost is the beam search's own work (up to `maximum_free_transfers - 2` additional legs, each expanding a beam of candidates) -- an expected, real trade-off for a genuinely new capability, not a regression in the existing roll/single/double path (verified byte-identical when no multi-leg scenario wins). Whether this needs its own optimization pass is a question for a future #176-style investigation once real usage data exists, not decided here.
