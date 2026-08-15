@@ -56,16 +56,47 @@ class TargetDateTests(unittest.TestCase):
         self.assertEqual(prn.target_date(now), date(2026, 8, 10))
 
 
-class IsCorrectScheduledHourTests(unittest.TestCase):
-    def test_true_at_the_target_hour(self):
+class IsCorrectScheduledTriggerTests(unittest.TestCase):
+    """Bug fix: the previous design compared actual wall-clock time against a fixed target hour
+    (now.hour == 8), which broke silently the moment GitHub Actions' routine scheduled-trigger
+    delay pushed a run's real start past 8 AM ET -- both daily triggers then failed that check,
+    every day, with no error. Checking github.event.schedule against today's actual DST regime
+    instead is delay-proof by construction; test_survives_a_run_delayed_well_past_its_target_hour
+    is the direct regression guard for the live incident this fixes."""
+
+    def test_edt_cron_correct_during_daylight_saving(self):
         now = datetime(2026, 8, 11, 8, 15, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
 
-        self.assertTrue(prn.is_correct_scheduled_hour(now))
+        self.assertTrue(prn.is_correct_scheduled_trigger(prn._SCHEDULE_EDT_CRON, now))
 
-    def test_false_outside_the_target_hour(self):
-        now = datetime(2026, 8, 11, 9, 0, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+    def test_edt_cron_wrong_during_standard_time(self):
+        now = datetime(2026, 1, 11, 8, 15, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
 
-        self.assertFalse(prn.is_correct_scheduled_hour(now))
+        self.assertFalse(prn.is_correct_scheduled_trigger(prn._SCHEDULE_EDT_CRON, now))
+
+    def test_est_cron_correct_during_standard_time(self):
+        now = datetime(2026, 1, 11, 8, 15, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+
+        self.assertTrue(prn.is_correct_scheduled_trigger(prn._SCHEDULE_EST_CRON, now))
+
+    def test_est_cron_wrong_during_daylight_saving(self):
+        now = datetime(2026, 8, 11, 8, 15, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+
+        self.assertFalse(prn.is_correct_scheduled_trigger(prn._SCHEDULE_EST_CRON, now))
+
+    def test_survives_a_run_delayed_well_past_its_target_hour(self):
+        # The exact live bug: a run nominally scheduled for 8 AM ET that actually starts at
+        # 10:30 AM ET (a routine GitHub Actions scheduling delay) must still be recognized as the
+        # correct trigger for today, since it's still the only cron matching today's DST regime.
+        now = datetime(2026, 8, 11, 10, 30, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+
+        self.assertTrue(prn.is_correct_scheduled_trigger(prn._SCHEDULE_EDT_CRON, now))
+
+    def test_unrecognized_or_empty_schedule_is_never_correct(self):
+        now = datetime(2026, 8, 11, 8, 15, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+
+        self.assertFalse(prn.is_correct_scheduled_trigger("", now))
+        self.assertFalse(prn.is_correct_scheduled_trigger("not a cron", now))
 
 
 class CategorizePrTests(unittest.TestCase):
@@ -434,15 +465,45 @@ class BackfillTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    def test_wrong_hour_trigger_is_a_quiet_no_op_without_requiring_config(self):
+    def test_missing_schedule_trigger_is_a_quiet_no_op_without_requiring_config(self):
+        # No --schedule at all (e.g. a bare invocation, or a non-schedule trigger that forgot
+        # --skip-hour-check) is never treated as correct -- there's nothing to match it to.
         with patch.object(prn, "datetime", _FrozenDateTime):
-            _FrozenDateTime._frozen = datetime(2026, 8, 11, 9, 0, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+            _FrozenDateTime._frozen = datetime(2026, 8, 11, 8, 0, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
             captured = io.StringIO()
             with patch.dict("os.environ", {}, clear=True), redirect_stdout(captured):
                 exit_code = prn.main([])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("outside the 8 AM ET", captured.getvalue())
+        self.assertIn("does not match today's DST regime", captured.getvalue())
+
+    def test_wrong_cron_for_todays_dst_regime_is_a_quiet_no_op(self):
+        # The EST cron firing during EDT (daylight saving in effect) -- the intentionally-wrong
+        # trigger for the day, expected to no-op even though it's a recognized cron string.
+        with patch.object(prn, "datetime", _FrozenDateTime):
+            _FrozenDateTime._frozen = datetime(2026, 8, 11, 8, 0, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+            captured = io.StringIO()
+            with patch.dict("os.environ", {}, clear=True), redirect_stdout(captured):
+                exit_code = prn.main(["--schedule", prn._SCHEDULE_EST_CRON])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("does not match today's DST regime", captured.getvalue())
+
+    def test_correct_cron_proceeds_even_when_the_run_started_hours_late(self):
+        # Direct regression guard for the live incident: the correct cron for today's DST regime
+        # must proceed past the gate even when the actual run started well past 8 AM ET (a
+        # routine GitHub Actions scheduling delay) -- the exact scenario that silently no-op'd
+        # every run from 2026-08-12 onward under the old wall-clock-hour design.
+        with patch.object(prn, "datetime", _FrozenDateTime):
+            _FrozenDateTime._frozen = datetime(2026, 8, 11, 10, 30, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+            captured_err = io.StringIO()
+            with patch.dict("os.environ", {}, clear=True), redirect_stdout(io.StringIO()), \
+                 patch("sys.stderr", captured_err):
+                exit_code = prn.main(["--schedule", prn._SCHEDULE_EDT_CRON])
+
+        # Proceeds past the gate to the next check (missing dashboard config), not a silent no-op.
+        self.assertEqual(exit_code, 1)
+        self.assertIn(prn.DASHBOARD_BASE_URL_ENV_VAR, captured_err.getvalue())
 
     def test_missing_config_on_a_real_run_at_the_correct_hour_is_an_error(self):
         with patch.object(prn, "datetime", _FrozenDateTime):
@@ -450,7 +511,7 @@ class MainTests(unittest.TestCase):
             captured_err = io.StringIO()
             with patch.dict("os.environ", {}, clear=True), redirect_stdout(io.StringIO()), \
                  patch("sys.stderr", captured_err):
-                exit_code = prn.main([])
+                exit_code = prn.main(["--schedule", prn._SCHEDULE_EDT_CRON])
 
         self.assertEqual(exit_code, 1)
         self.assertIn("Configuration error", captured_err.getvalue())
