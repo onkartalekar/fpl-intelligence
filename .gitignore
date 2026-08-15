@@ -242,6 +242,7 @@ data/dashboard-state.json
 data/fpl-manager-latest.json
 data/current-generation.json
 data/fpl-bootstrap-latest.json
+data/model-performance.json
 data/generations/
 
 # Bugfix (volume-shadowed seed files): these three used to be git-tracked directly at data/,
