@@ -13,6 +13,17 @@ name: Tests
 # (and presumably Railway's deploy target) -- the repo declares no other supported version
 # anywhere (no runtime.txt, no python_requires), so testing an undeclared version here would be
 # scope beyond "add CI."
+#
+# Split into a 4-way matrix rather than one `unittest discover` job: measured locally, 5 of the
+# 32 test modules account for ~99% of the suite's wall time (test_transfer_decisions.py alone is
+# ~283s / 24 tests -- ~12s/test, apparently real combinatorial cost in the transfer-decision
+# engine, not a test-harness artifact; test_server.py, test_send_deadline_reminder.py,
+# test_refresh.py, and test_recommendations.py are the other four). The other 27 modules combined
+# run in about a second. A single serial job pays the full ~730s sum (and took ~19min on GitHub's
+# shared runners, slower than the ~12min measured locally); grouping the heavy modules into their
+# own parallel jobs bounds wall time by the slowest *group* instead. Groups are sized off that
+# measurement, not file count -- rebalance them if `tests/` timing shifts enough to make one
+# group the new outlier.
 
 on:
   pull_request:
@@ -27,6 +38,27 @@ jobs:
   run-tests:
     name: Run test suite
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: transfer-decisions
+            modules: tests.test_transfer_decisions
+          - group: server-and-recommendations
+            modules: tests.test_server tests.test_recommendations
+          - group: refresh-and-reminders
+            modules: tests.test_refresh tests.test_send_deadline_reminder
+          - group: everything-else
+            modules: >-
+              tests.test_archive_team_forecasts tests.test_backtest tests.test_catalog
+              tests.test_coefficients tests.test_dashboard tests.test_deadline_windows
+              tests.test_fpl_data tests.test_live_regression_check tests.test_manager_data
+              tests.test_minutes tests.test_ml_minutes tests.test_model_performance
+              tests.test_news_signals tests.test_pl_transfers tests.test_profiles tests.test_projection
+              tests.test_publish_release_notes tests.test_rate_limit tests.test_refresh_safety
+              tests.test_release_notes tests.test_release_notes_subscribers tests.test_relevance
+              tests.test_reminder_confirmation tests.test_start_dashboard tests.test_team_strength
+              tests.test_transfers tests.test_trigger_scheduled_refresh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,4 +69,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run test suite
-        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
+        run: PYTHONPATH=src python3 -m unittest ${{ matrix.modules }} -v
