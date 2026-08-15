@@ -592,6 +592,32 @@ class DashboardRenderTests(unittest.TestCase):
         decision_start = html.index("function renderDecision(profileId=null){")
         self.assertIn("renderProfileComparison(profileId)", html[decision_start:decision_start + 200])
 
+    def test_personalized_compare_risk_profiles_panel_relocates_out_of_the_collapsed_benchmark(self):
+        # Bug fix, live-reported: decision-section-profiles lives by default inside <details
+        # id="decision-benchmark-details">, which collapses shut (the weekly-priority demote) the
+        # instant personalized data exists -- silently burying the one panel inside it that had
+        # just become personalized and relevant. "I do not see enhanced risk profile either for
+        # draft in the decision center. See second screenshot from the comparison only section."
+        # Fix: relocate the actual section node (not a copy) into the always-visible personalized
+        # weekly section when personalized, and back to its home spot otherwise.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('<div id="decision-section-profiles-home"></div>', html)
+        self.assertIn('<div id="weekly-profile-comparison-mount"></div>', html)
+        # The home anchor sits inside the collapsible benchmark details, right before the section
+        # it anchors -- the mount point sits inside the always-visible weekly section.
+        details_start = html.index('id="decision-benchmark-details"')
+        details_end = html.index("</details>", details_start)
+        self.assertIn("decision-section-profiles-home", html[details_start:details_end])
+        weekly_start = html.index('id="decision-section-weekly"')
+        self.assertIn("weekly-profile-comparison-mount", html[weekly_start:weekly_start + 600])
+
+        comparison_start = html.index("function renderProfileComparison(profileId=null)")
+        comparison_end = html.index("\nfunction renderDecision(profileId=null){", comparison_start)
+        comparison_body = html[comparison_start:comparison_end]
+        self.assertIn("weeklyMount.appendChild(profilesSection)", comparison_body)
+        self.assertIn("homeAnchor.after(profilesSection)", comparison_body)
+
     def test_player_and_performance_datasets_use_semantic_tables(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
