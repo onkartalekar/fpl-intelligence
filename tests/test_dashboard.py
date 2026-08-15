@@ -811,6 +811,35 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         self.assertIn("byId('draft-pitch').innerHTML=''", early_return_body)
         self.assertIn("byId('draft-bench').innerHTML=''", early_return_body)
 
+    def test_saved_pitch_only_used_when_local_selection_matches_the_last_save(self):
+        # Regression guard: renderDraftPitchSaved can only render players present in the last-
+        # saved roll.squad -- a player added (or removed) locally since that save has no entry
+        # there, so it used to silently vanish from both pitch and bench instead of appearing
+        # without projections. Reported live as "I removed pedro and added watkins but it does
+        # not show up on the pitch." Fix: only take the projected/saved render path when
+        # draftSelection still matches what roll.squad actually contains; any local drift falls
+        # back to the no-projections builder view, which reads live off draftSelection.
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function draftSquadMatchesSaved(roll)", html)
+        dispatcher_start = html.index("function renderDraftPitch(){")
+        dispatcher_end = html.index("}", html.index("renderDraftPitchBuilding();", dispatcher_start)) + 1
+        dispatcher_body = html[dispatcher_start:dispatcher_end]
+        self.assertIn("roll&&draftSquadMatchesSaved(roll)", dispatcher_body)
+
+    def test_benching_the_only_starting_gkp_auto_promotes_the_other_one(self):
+        # Live feedback: "when I bench GK, other one should automatically added in playing XI -
+        # does not happen today." draftQuotas always carries GKP:2 with draftXiMax.GKP:1, so
+        # there's never more than one benched GKP to choose between -- benching the starter
+        # should auto-promote the other one instead of leaving the XI with zero goalkeepers.
+        html = render_dashboard(self._STATE)
+
+        self.assertIn("function draftAutoFillAfterBench(benchedPosition,benchedId,squadById)", html)
+        bench_handler_start = html.index("document.querySelectorAll('[data-draft-bench]')")
+        bench_handler_end = html.index("renderDraftPitch();}));", bench_handler_start)
+        bench_handler_body = html[bench_handler_start:bench_handler_end]
+        self.assertIn("draftAutoFillAfterBench(benched.position_short,id,squadById)", bench_handler_body)
+
     def test_add_and_remove_place_players_directly_on_the_pitch(self):
         html = render_dashboard(self._STATE)
 
