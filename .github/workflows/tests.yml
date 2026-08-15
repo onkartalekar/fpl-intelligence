@@ -36,7 +36,12 @@ permissions:
 
 jobs:
   run-tests:
-    name: Run test suite
+    # Explicit name pinned to just matrix.group: left to its default, GitHub concatenates every
+    # matrix key/value into the check-run name and truncates at 100 chars, which made the
+    # everything-else group's context end in a literal "..." -- fragile to depend on for branch
+    # protection's required-checks list. Naming it explicitly keeps the four check names short,
+    # clean, and stable regardless of how long any group's module list gets.
+    name: Run test suite (${{ matrix.group }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
