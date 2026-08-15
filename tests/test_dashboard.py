@@ -524,8 +524,8 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("const weeklyPersonalized=weekly.status==='active'", html)
         self.assertIn("classList.toggle('weekly-priority',weeklyPersonalized)", html)
         self.assertIn("benchmarkDetails.open=!weeklyPersonalized", html)
-        self.assertIn("'For comparison only -- not personalized to your draft'", html)
-        self.assertIn("'For comparison only -- see your personalized weekly decision above'", html)
+        self.assertIn("'Reference: from-scratch squad (ignores your draft)'", html)
+        self.assertIn("'Reference: from-scratch squad (see your weekly decision above)'", html)
         self.assertIn("#decisions-content.weekly-priority > .decision-subnav", html)
         self.assertIn("#decisions-content.weekly-priority > #decision-section-weekly", html)
 
