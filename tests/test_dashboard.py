@@ -80,6 +80,21 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         embedded = json.loads(match.group(1))
         self.assertEqual(embedded["release_notes"][0]["headline"], "Sharper filters for preseason movement tracking")
 
+    def test_entry_summary_drops_the_per_entry_change_count_badge(self):
+        # Per request: the "N changes" badge on each release-note entry's summary row -- useless
+        # to the customer, so dropped. The date/headline pair stays; only the trailing count is
+        # gone. (The page-level "N entries" count at the top of the tab is a different element,
+        # #whats-new-count, and is untouched.)
+        html = render_dashboard(self._BASE_STATE)
+
+        entry_start = html.index("function renderWhatsNew(){")
+        entry_end = html.index("}\nfunction ", entry_start)
+        entry_body = html[entry_start:entry_end]
+        self.assertIn("whats-new-date", entry_body)
+        self.assertIn("whats-new-headline", entry_body)
+        self.assertNotIn("change${changes.length===1?'':'s'}", entry_body)
+        self.assertNotIn("${changes.length} change", entry_body)
+
     def test_renders_without_release_notes_key_present(self):
         # Mirrors every other new-view addition to this template: absence of the key (a fresh
         # install that has never had /api/release-notes POSTed to it) must not raise or leave
