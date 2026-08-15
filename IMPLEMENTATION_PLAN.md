@@ -1282,4 +1282,11 @@ zero new infrastructure, matches how `MODEL.md`/`SPECIFICATION.md`/
 `IMPLEMENTATION_PLAN.md` already ship. **Update (2026-08-10):** the user
 confirmed the plain-Markdown file for now, with GitHub Pages to be set
 up separately later, at which point this entry should be revisited
-rather than treated as a final no.
+rather than treated as a final no. **Update (2026-08-15):**
+`RELEASE_NOTES.md` was deleted after issue #143 shipped the dated
+What's New tab/`release-notes/` archive — the always-current snapshot
+had no automation keeping it accurate (it silently went stale, e.g.
+still describing a Manager-profile form field issue #164 had already
+removed) and duplicated what the dashboard itself now shows directly.
+GitHub Pages remains undeployed; revisit only if a real need for a
+second public URL emerges.

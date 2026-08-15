@@ -1,6 +1,6 @@
 # Architecture
 
-A visual companion to `README.md`'s "Hosted deployment" section and `MODEL.md`'s prose pipeline
+A visual companion to `README.md`'s "Environment variables" section and `MODEL.md`'s prose pipeline
 description (issue #127) -- neither has a picture of how its pieces actually fit together, and
 tracing that today means reading both docs plus several `plans/issue-*.md` files and the code
 itself. Two diagrams: the system (this repo's runtime components and how they call each other),
@@ -45,8 +45,8 @@ flowchart TB
     llmApi[["LLM API (optional)<br/>FPL_INTEL_RELEASE_NOTES_LLM_*"]]
 
     visitor -->|"GET /, /dashboard.html<br/>GET /api/status"| server
-    visitor -->|"POST /api/profile, /draft-squad,<br/>/lookup-opt-out, /reminder-opt-in,<br/>/contact (open, per-source rate-limited)"| server
-    visitor -->|"GET /api/reminder-confirm<br/>(one-time token in link)"| server
+    visitor -->|"POST /api/profile, /draft-squad,<br/>/lookup-opt-out, /reminder-opt-in,<br/>/release-notes-subscribe,<br/>/release-notes-unsubscribe,<br/>/contact (open, per-source rate-limited)"| server
+    visitor -->|"GET /api/reminder-confirm,<br/>/api/release-notes-confirm-subscription<br/>(one-time token in link)"| server
 
     server <-.->|"read/write"| profilesDb
     server <-.->|"read/write"| artifacts
@@ -55,6 +55,7 @@ flowchart TB
 
     scheduledRefresh -->|"live bootstrap fetch<br/>(decides whether to trigger,<br/>independent of Railway's own state)"| fplApi
     scheduledRefresh -->|"POST /api/refresh<br/>(X-Refresh-Token)"| server
+    scheduledRefresh -->|"GET /api/registered-teams,<br/>POST /api/archive-team-forecast<br/>(X-Refresh-Token, issue #102)"| server
     server -->|"fetch bootstrap/fixtures"| fplApi
     server -->|"fetch official transfers"| transferSources
 
@@ -76,7 +77,7 @@ flowchart TB
     class gha ephemeral
 ```
 
-**Why the two GitHub Actions workflows call back into Railway over HTTP instead of reading its
+**Why the GitHub Actions workflows call back into Railway over HTTP instead of reading its
 files directly**: a GitHub Actions runner is a fresh VM per run with no shared filesystem with
 Railway's volume. Three issues independently hit this before it was recognized as one structural
 gap and closed for good (issue #125): #101 (script needed live FPL data unrelated to Railway's own
@@ -119,7 +120,7 @@ flowchart TB
 
 ## See also
 
-- `README.md`'s "Hosted deployment" section -- the prose walkthrough of getting a deployment running.
+- `README.md`'s "Environment variables" section -- the prose walkthrough of getting a deployment running.
 - `MODEL.md` -- the full prose treatment of every model-pipeline stage above, including exact
   formulas and coefficient provenance.
 - `SPECIFICATION.md` -- the behavioral contract (what the app promises never to do, e.g. never
