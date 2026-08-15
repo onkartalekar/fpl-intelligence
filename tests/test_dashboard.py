@@ -80,6 +80,21 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         embedded = json.loads(match.group(1))
         self.assertEqual(embedded["release_notes"][0]["headline"], "Sharper filters for preseason movement tracking")
 
+    def test_entry_summary_drops_the_per_entry_change_count_badge(self):
+        # Per request: the "N changes" badge on each release-note entry's summary row -- useless
+        # to the customer, so dropped. The date/headline pair stays; only the trailing count is
+        # gone. (The page-level "N entries" count at the top of the tab is a different element,
+        # #whats-new-count, and is untouched.)
+        html = render_dashboard(self._BASE_STATE)
+
+        entry_start = html.index("function renderWhatsNew(){")
+        entry_end = html.index("}\nfunction ", entry_start)
+        entry_body = html[entry_start:entry_end]
+        self.assertIn("whats-new-date", entry_body)
+        self.assertIn("whats-new-headline", entry_body)
+        self.assertNotIn("change${changes.length===1?'':'s'}", entry_body)
+        self.assertNotIn("${changes.length} change", entry_body)
+
     def test_renders_without_release_notes_key_present(self):
         # Mirrors every other new-view addition to this template: absence of the key (a fresh
         # install that has never had /api/release-notes POSTed to it) must not raise or leave
@@ -592,6 +607,32 @@ class DashboardRenderTests(unittest.TestCase):
         decision_start = html.index("function renderDecision(profileId=null){")
         self.assertIn("renderProfileComparison(profileId)", html[decision_start:decision_start + 200])
 
+    def test_personalized_compare_risk_profiles_panel_relocates_out_of_the_collapsed_benchmark(self):
+        # Bug fix, live-reported: decision-section-profiles lives by default inside <details
+        # id="decision-benchmark-details">, which collapses shut (the weekly-priority demote) the
+        # instant personalized data exists -- silently burying the one panel inside it that had
+        # just become personalized and relevant. "I do not see enhanced risk profile either for
+        # draft in the decision center. See second screenshot from the comparison only section."
+        # Fix: relocate the actual section node (not a copy) into the always-visible personalized
+        # weekly section when personalized, and back to its home spot otherwise.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn('<div id="decision-section-profiles-home"></div>', html)
+        self.assertIn('<div id="weekly-profile-comparison-mount"></div>', html)
+        # The home anchor sits inside the collapsible benchmark details, right before the section
+        # it anchors -- the mount point sits inside the always-visible weekly section.
+        details_start = html.index('id="decision-benchmark-details"')
+        details_end = html.index("</details>", details_start)
+        self.assertIn("decision-section-profiles-home", html[details_start:details_end])
+        weekly_start = html.index('id="decision-section-weekly"')
+        self.assertIn("weekly-profile-comparison-mount", html[weekly_start:weekly_start + 600])
+
+        comparison_start = html.index("function renderProfileComparison(profileId=null)")
+        comparison_end = html.index("\nfunction renderDecision(profileId=null){", comparison_start)
+        comparison_body = html[comparison_start:comparison_end]
+        self.assertIn("weeklyMount.appendChild(profilesSection)", comparison_body)
+        self.assertIn("homeAnchor.after(profilesSection)", comparison_body)
+
     def test_player_search_folds_diacritics_in_both_search_boxes(self):
         # Reported live: searching "guehi" found nothing for Marc Guéhi, while "guimar" found
         # Bruno Guimarães -- not because one accented name worked and another didn't, but because
@@ -735,6 +776,38 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertNotIn('id="profile-free-transfers-event"', html)
         self.assertNotIn('for="profile-free-transfers">Confirmed free transfers</label>', html)
         self.assertNotIn('for="profile-free-transfers-event">Free transfers gameweek</label>', html)
+        # Per request: only the Team ID field is actually required to save (setupProfileForm's
+        # own validation only blocks submission on a missing/invalid team ID -- timezone always
+        # has a value because it's a <select>). Removed the reassurance copy since it read as a
+        # claim about the fields themselves, not just this app's own auth.
+        self.assertNotIn("no password, no account required", html)
+
+    def test_no_account_no_password_reassurance_copy_removed_everywhere(self):
+        # Follow-up per request: the same "no account required"/"no password" reassurance existed,
+        # worded slightly differently, on four other panels beyond Manager profile -- Team lookup,
+        # Deadline reminders, Contact Us, What's New's subscribe card -- plus a standalone "Account
+        # boundary" panel on Model Status that existed solely to make this claim. Removed all of it.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertNotIn("No account needed", html)
+        self.assertNotIn("no account required", html)
+        self.assertNotIn("No password is stored", html)
+        self.assertNotIn("Account boundary", html)
+        # The genuinely informative half of each subtitle survives -- only the reassurance clause
+        # was stripped, not the whole line.
+        self.assertIn('<h2>Look up a team</h2><span class="muted">Nothing is saved</span>', html)
+        self.assertIn(
+            '<h2>Deadline reminders</h2><span class="muted">One email before each gameweek deadline</span>',
+            html,
+        )
+        self.assertIn(
+            '<h2>Contact Us</h2><span class="muted">Report a bug, request a feature, or leave feedback</span>',
+            html,
+        )
+        self.assertIn(
+            'Get release notes by email</h2><span class="muted">One email each time a new entry publishes</span>',
+            html,
+        )
         # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
         # longer gates -- the save request must not send it.
         self.assertNotIn("X-Refresh-Token", html)

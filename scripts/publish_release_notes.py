@@ -4,7 +4,7 @@
 See plans/issue-143-whats-new-tab.md for the full design. Trigger-agnostic like
 `send_deadline_reminder.py`/`live_regression_check.py`: this script takes no opinion on what
 invokes it. Today it is invoked twice daily by `.github/workflows/release-notes.yml` (12:00 and
-13:00 UTC, covering both EDT/EST 8 AM ET -- see `is_correct_scheduled_hour` below for why two
+13:00 UTC, covering both EDT/EST 8 AM ET -- see `is_correct_scheduled_trigger` below for why two
 triggers exist and how the "wrong" one for the current DST regime is expected to no-op, not fail).
 
 What it does, each run:
@@ -85,7 +85,11 @@ _CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 _CLAUDE_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 _TIMEZONE = "America/New_York"
-_TARGET_HOUR = 8
+# Bug fix: the two cron strings this workflow actually schedules (release-notes.yml) -- compared
+# against `github.event.schedule` (the exact cron GitHub Actions says fired this run), not against
+# wall-clock time. See is_correct_scheduled_trigger's docstring for why.
+_SCHEDULE_EDT_CRON = "0 12 * * *"  # nominally 8 AM EDT
+_SCHEDULE_EST_CRON = "0 13 * * *"  # nominally 8 AM EST
 _REQUEST_TIMEOUT_SECONDS = 30
 _LLM_TIMEOUT_SECONDS = 60
 
@@ -134,17 +138,33 @@ def target_date(now=None):
     return (now.date() - timedelta(days=1))
 
 
-def is_correct_scheduled_hour(now=None, target_hour=_TARGET_HOUR):
-    """True only when the current `America/New_York` wall-clock hour matches `target_hour`.
+def is_correct_scheduled_trigger(schedule, now=None):
+    """True only when `schedule` -- the exact cron string GitHub Actions fired this run from
+    (`github.event.schedule`) -- is the one that's actually correct for today's DST regime.
 
     This script runs from two fixed-UTC cron triggers (12:00 and 13:00 UTC -- see the workflow
     file), because a single hardcoded UTC time can't stay correct for "8 AM ET" across DST
-    transitions. Exactly one of the two triggers lands on the real 8 AM ET on any given day;
-    `main()` calls this to no-op the other, non-error, by design -- same no-op discipline as
-    "nothing merged yesterday".
+    transitions. The original version of this check compared the *actual* wall-clock hour at
+    execution time against a fixed target hour (`now.hour == 8`) -- which broke silently:
+    GitHub Actions `schedule` triggers are commonly delayed under platform load, sometimes by an
+    hour or more, so a run that starts even a few minutes into the "9 AM" wall-clock hour failed
+    that check on *both* daily triggers, not just the intentionally-wrong one. Confirmed live:
+    every run reported success from 2026-08-12 onward, yet nothing was actually published --
+    every single run had drifted past its target hour and silently no-op'd.
+
+    Checking which cron the platform says fired this run against which cron is correct for
+    today's real DST regime is delay-proof by construction: it doesn't matter whether the run
+    started at 8:00 or 10:30, only whether `America/New_York` is presently observing daylight
+    time. An unrecognized or empty `schedule` (a non-`schedule` trigger, e.g. `workflow_dispatch`
+    without `--skip-hour-check`) is never treated as correct -- there's nothing to match it to.
     """
     now = now or datetime.now(zoneinfo.ZoneInfo(_TIMEZONE))
-    return now.hour == target_hour
+    daylight_saving = bool(now.dst())
+    if schedule == _SCHEDULE_EDT_CRON:
+        return daylight_saving
+    if schedule == _SCHEDULE_EST_CRON:
+        return not daylight_saving
+    return False
 
 
 def _et_day_bounds_in_utc(date):
@@ -494,7 +514,13 @@ def main(argv=None):
     )
     parser.add_argument(
         "--skip-hour-check", action="store_true",
-        help="Bypass is_correct_scheduled_hour's DST-safe gate (for manual workflow_dispatch runs).",
+        help="Bypass is_correct_scheduled_trigger's DST-safe gate (for manual workflow_dispatch runs).",
+    )
+    parser.add_argument(
+        "--schedule", default="",
+        help="The exact cron expression GitHub Actions fired this run from (github.event.schedule). "
+             "Checked against today's actual DST regime by is_correct_scheduled_trigger; empty/"
+             "unrecognized is never treated as correct. Irrelevant with --skip-hour-check.",
     )
     parser.add_argument(
         "--backfill-start", metavar="YYYY-MM-DD",
@@ -538,8 +564,8 @@ def main(argv=None):
         print(f"backfill complete: {len(written)} day(s) with entries between {start} and {end}")
         return 0
 
-    if not args.skip_hour_check and not is_correct_scheduled_hour():
-        print("checked: outside the 8 AM ET scheduling window for this trigger -- no action")
+    if not args.skip_hour_check and not is_correct_scheduled_trigger(args.schedule):
+        print("checked: this cron trigger does not match today's DST regime -- no action")
         return 0
 
     dashboard_base_url = refresh_token = None
