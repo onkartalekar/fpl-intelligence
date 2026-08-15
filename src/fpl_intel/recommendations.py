@@ -818,17 +818,16 @@ def _selection_rationale(squad, eligible, alternatives_per_player=2):
     return rationale
 
 
-def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit, initial_squad=None, event=1):
-    squad = _optimize_squad(eligible, quotas, budget, club_limit, profile, initial_squad)
-    by_id = {player["id"]: player for player in squad}
-    one_gameweek_score = lambda player: _profile_player_score(player, profile, 1)
-    first_schedule = _event_lineup_schedule(squad, profile, 1)[0]
-    starting_xi = [by_id[player_id] for player_id in first_schedule["lineup_player_ids"]]
-    formation = first_schedule["formation"]
-    bench = [by_id[player_id] for player_id in first_schedule["bench_player_ids"]]
-    captain = by_id[first_schedule["captain_id"]]
-    vice_captain = by_id[first_schedule["vice_captain_id"]]
-    captaincy = sorted(starting_xi, key=one_gameweek_score, reverse=True)
+def _profile_metrics_for_squad(squad, profile, event=1):
+    """Per-profile uncertainty bands and squad-composition stats for a *fixed* squad.
+
+    Issue #158: extracted from `_build_profile_recommendation` below so the same computation can
+    run against a squad that was never optimized here at all -- a manager's own declared draft or
+    real squad, evaluated under three risk lenses rather than three different optimized squads.
+    `_event_lineup_schedule`/`_team_uncertainty_interval` already take an arbitrary `squad` list
+    and never touch `_optimize_squad`, so nothing here actually required the squad to have come
+    from it -- see plans/issue-158-personalized-risk-profiles.md.
+    """
     horizon_totals = {}
     evaluation_horizons = {}
     for horizon in (1, 3, 5):
@@ -853,7 +852,42 @@ def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit,
             "lineup_semantics": "event_specific",
         }
         horizon_totals[horizon] = _team_uncertainty_interval(squad, profile, horizon, schedule)
-    gw1_points = horizon_totals[1]["central"]
+    return {
+        "evaluation_horizons": evaluation_horizons,
+        "metrics": {
+            "central_1gw": round(horizon_totals[1]["central"], 1),
+            "lower_1gw": round(horizon_totals[1]["lower"], 1),
+            "upper_1gw": round(horizon_totals[1]["upper"], 1),
+            "central_3gw": round(horizon_totals[3]["central"], 1),
+            "lower_3gw": round(horizon_totals[3]["lower"], 1),
+            "upper_3gw": round(horizon_totals[3]["upper"], 1),
+            "central_5gw": round(horizon_totals[5]["central"], 1),
+            "lower_5gw": round(horizon_totals[5]["lower"], 1),
+            "upper_5gw": round(horizon_totals[5]["upper"], 1),
+            "uncertainty_method": horizon_totals[5]["method"],
+            "uncertainty_same_event_correlation": horizon_totals[5]["same_event_correlation"],
+            "uncertainty_cross_event_correlation": horizon_totals[5]["cross_event_correlation"],
+            "average_ownership": round(sum(player["ownership"] for player in squad) / len(squad), 1),
+            "average_expected_minutes": round(sum(player["expected_minutes"] for player in squad) / len(squad), 1),
+            "low_confidence_players": sum(player["confidence"] == "low" for player in squad),
+            "medium_confidence_players": sum(player["confidence"] == "medium" for player in squad),
+        },
+    }
+
+
+def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit, initial_squad=None, event=1):
+    squad = _optimize_squad(eligible, quotas, budget, club_limit, profile, initial_squad)
+    by_id = {player["id"]: player for player in squad}
+    one_gameweek_score = lambda player: _profile_player_score(player, profile, 1)
+    first_schedule = _event_lineup_schedule(squad, profile, 1)[0]
+    starting_xi = [by_id[player_id] for player_id in first_schedule["lineup_player_ids"]]
+    formation = first_schedule["formation"]
+    bench = [by_id[player_id] for player_id in first_schedule["bench_player_ids"]]
+    captain = by_id[first_schedule["captain_id"]]
+    vice_captain = by_id[first_schedule["vice_captain_id"]]
+    captaincy = sorted(starting_xi, key=one_gameweek_score, reverse=True)
+    profile_metrics = _profile_metrics_for_squad(squad, profile, event)
+    gw1_points = profile_metrics["metrics"]["central_1gw"]
     definition = _PROFILE_DEFINITIONS[profile]
     return {
         "id": profile,
@@ -874,25 +908,7 @@ def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit,
             "starting_xi_xp_5": round(sum(player["xp_5"] for player in starting_xi), 1),
         },
         "captaincy": captaincy[:5],
-        "evaluation_horizons": evaluation_horizons,
-        "metrics": {
-            "central_1gw": round(horizon_totals[1]["central"], 1),
-            "lower_1gw": round(horizon_totals[1]["lower"], 1),
-            "upper_1gw": round(horizon_totals[1]["upper"], 1),
-            "central_3gw": round(horizon_totals[3]["central"], 1),
-            "lower_3gw": round(horizon_totals[3]["lower"], 1),
-            "upper_3gw": round(horizon_totals[3]["upper"], 1),
-            "central_5gw": round(horizon_totals[5]["central"], 1),
-            "lower_5gw": round(horizon_totals[5]["lower"], 1),
-            "upper_5gw": round(horizon_totals[5]["upper"], 1),
-            "uncertainty_method": horizon_totals[5]["method"],
-            "uncertainty_same_event_correlation": horizon_totals[5]["same_event_correlation"],
-            "uncertainty_cross_event_correlation": horizon_totals[5]["cross_event_correlation"],
-            "average_ownership": round(sum(player["ownership"] for player in squad) / len(squad), 1),
-            "average_expected_minutes": round(sum(player["expected_minutes"] for player in squad) / len(squad), 1),
-            "low_confidence_players": sum(player["confidence"] == "low" for player in squad),
-            "medium_confidence_players": sum(player["confidence"] == "medium" for player in squad),
-        },
+        **profile_metrics,
     }
 
 

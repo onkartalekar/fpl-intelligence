@@ -10,6 +10,7 @@ from .recommendations import (
     _next_event_id,
     _number,
     _optimize_squad,
+    _profile_metrics_for_squad,
     _profile_player_score,
     _squad_objective,
     project_players,
@@ -790,6 +791,11 @@ def build_transfer_decisions(
             _scenario("single_transfer", singles[0], squad, profile, free_transfers, maximum_free_transfers),
             _scenario("double_transfer", double, squad, profile, free_transfers, maximum_free_transfers),
         ]
+        # Issue #158: metrics/evaluation_horizons for the visitor's own *declared* squad
+        # (`squad`, identical across all three profiles -- unlike `recommendation` below, which
+        # may end up describing a different, post-transfer squad), not whatever this profile ends
+        # up recommending. Powers a personalized "Compare risk profiles" panel.
+        profile_metrics = _profile_metrics_for_squad(squad, profile, event)
         multiweek_plan = build_multiweek_plan(
             scenarios, eligible, quotas, club_limit, profile, event,
             free_transfers, maximum_free_transfers, horizon=horizon,
@@ -839,6 +845,7 @@ def build_transfer_decisions(
             "multiweek_plan": multiweek_plan,
             "scenarios": scenarios,
             "chip_recommendation": chip,
+            **profile_metrics,
         })
     return {
         "status": "active",
@@ -923,6 +930,10 @@ def build_draft_decisions(
             _scenario("single_transfer", singles[0], squad, profile, unlimited_free_transfers, unlimited_free_transfers),
             _scenario("double_transfer", double, squad, profile, unlimited_free_transfers, unlimited_free_transfers),
         ]
+        # Issue #158: metrics/evaluation_horizons for the visitor's own *declared* draft squad
+        # (`squad`, identical across all three profiles), not whatever this profile ends up
+        # recommending. Powers a personalized "Compare risk profiles" panel.
+        profile_metrics = _profile_metrics_for_squad(squad, profile, event)
         recommendation = dict(max(scenarios, key=lambda row: row["net_gain_5gw"]))
         if recommendation["action"] == "roll":
             recommendation["reason"] = (
@@ -948,6 +959,7 @@ def build_draft_decisions(
             "recommendation": recommendation,
             "scenarios": scenarios,
             "chip_recommendation": chip_recommendation,
+            **profile_metrics,
         })
     return {
         "status": "active",
