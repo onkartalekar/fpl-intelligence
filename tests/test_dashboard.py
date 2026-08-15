@@ -592,6 +592,36 @@ class DashboardRenderTests(unittest.TestCase):
         decision_start = html.index("function renderDecision(profileId=null){")
         self.assertIn("renderProfileComparison(profileId)", html[decision_start:decision_start + 200])
 
+    def test_player_search_folds_diacritics_in_both_search_boxes(self):
+        # Reported live: searching "guehi" found nothing for Marc Guéhi, while "guimar" found
+        # Bruno Guimarães -- not because one accented name worked and another didn't, but because
+        # a plain substring match can never span *through* an accented character at all. "guimar"
+        # only "worked" because it happened to end before Guimarães' accented "ã"; any query
+        # reaching an accent (like "guehi" needing to match through "é") always failed. Both the
+        # Player Explorer and the Draft tab's "Add players" search share this same query logic.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn(
+            "const foldDiacritics=value=>String(value??'').normalize('NFD')"
+            ".replace(/[\\u0300-\\u036f]/g,'');",
+            html,
+        )
+        player_search_start = html.index("function renderPlayers(){")
+        self.assertIn(
+            "foldDiacritics(byId('player-search').value.trim().toLocaleLowerCase())",
+            html[player_search_start:player_search_start + 400],
+        )
+        self.assertIn(
+            "foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase())"
+            ".includes(query)",
+            html[player_search_start:player_search_start + 800],
+        )
+        draft_search_start = html.index("function draftResultRows(){")
+        self.assertIn(
+            "foldDiacritics(byId('draft-search').value.trim().toLocaleLowerCase())",
+            html[draft_search_start:draft_search_start + 400],
+        )
+
     def test_player_and_performance_datasets_use_semantic_tables(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
