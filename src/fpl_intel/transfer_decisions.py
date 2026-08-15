@@ -30,10 +30,25 @@ _CHIP_RULES = {
     "bboost": "Points scored by all benched players are added to the Gameweek total.",
     "3xc": "The captain scores triple rather than double points for the Gameweek.",
 }
+# Issue #184: wildcard/freehit compare _central_points on each profile's own scale (issue
+# #181's fix made that scale profile-adjusted, where it used to be one shared plain scale).
+# balanced's scale never moved -- recommendations.py builds profile_fixture_xp["balanced"]
+# from the exact same array as plain fixture_xp -- so its two entries are unchanged from
+# before #181. conservative and aggressive did move (confirmed on real squads across a
+# downgrade-severity sweep, see plans/issue-184-chip-threshold-recalibration.md): conservative
+# freehit's marginal value now runs deeply negative even for an already-strong squad and only
+# creeps toward zero as the squad gets much worse, so its threshold has to sit well below zero
+# to ever be reachable without being reachable *always*; aggressive wildcard/freehit's marginal
+# values now run high even for an already-strong squad, so their thresholds have to rise to
+# avoid firing on every squad regardless of quality. These four numbers are a re-tuned
+# heuristic, not a backtested one -- the same epistemic status the original constants already
+# had (there is no historical decision-level backtest harness in this codebase to validate
+# against; see the plan doc). bboost/3xc are untouched: they read _profile_player_score/xp_1,
+# a separate code path #181 never changed.
 _THRESHOLDS = {
-    "conservative": {"wildcard": 22.0, "freehit": 18.0, "bboost": 18.0, "3xc": 9.0},
+    "conservative": {"wildcard": 22.0, "freehit": -30.0, "bboost": 18.0, "3xc": 9.0},
     "balanced": {"wildcard": 18.0, "freehit": 15.0, "bboost": 16.0, "3xc": 8.0},
-    "aggressive": {"wildcard": 14.0, "freehit": 12.0, "bboost": 14.0, "3xc": 7.0},
+    "aggressive": {"wildcard": 20.0, "freehit": 65.0, "bboost": 14.0, "3xc": 7.0},
 }
 
 
