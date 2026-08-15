@@ -3772,8 +3772,8 @@ class ConnectionTimeoutTests(unittest.TestCase):
     def test_timeout_is_logged_as_one_quiet_labeled_line_not_a_traceback(self):
         # log_error (like this file's pre-existing log_message override it delegates to) writes
         # to stdout -- this file's established convention for routine per-request/operational
-        # logging, e.g. the "GET /dashboard.html HTTP/1.1 200" access-log style lines every
-        # request already produces, as opposed to stderr, which every genuine-error call site in
+        # logging, e.g. the structured JSON access-log line every request already produces via
+        # log_request, as opposed to stderr, which every genuine-error call site in
         # this file (`except Exception: print(..., file=sys.stderr)`) and the base
         # `handle_error`'s traceback dump both use. So the "quiet line instead of a traceback"
         # contrast is proven by: the quiet line appears on stdout, and stderr stays clean.
@@ -4066,6 +4066,65 @@ class AccessLogClientLabelTests(unittest.TestCase):
 
         self.assertIn("203.0.113.5", label)
         self.assertIn("-", label)
+
+
+class AccessLogIsStructuredJSONTests(unittest.TestCase):
+    """log_request now prints one JSON object per completed request instead of a plain-text
+    line, so Railway's Log Explorer can parse route/status/method as filterable @attributes
+    (@route, @status, @method) rather than requiring substring search over free text."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def _last_log_line(self, captured):
+        lines = [line for line in captured.getvalue().splitlines() if line.strip()]
+        return json.loads(lines[-1])
+
+    def test_a_successful_request_logs_route_method_status_as_json_fields(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            urlopen(f"http://127.0.0.1:{self.server.server_port}/api/status", timeout=3)
+
+        record = self._last_log_line(captured)
+        self.assertEqual(record["route"], "/api/status")
+        self.assertEqual(record["method"], "GET")
+        self.assertEqual(record["status"], 200)
+        self.assertEqual(record["level"], "info")
+        self.assertIn("127.0.0.1", record["ip"])
+
+    def test_route_strips_the_query_string_to_keep_it_a_low_cardinality_attribute(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            urlopen(f"http://127.0.0.1:{self.server.server_port}/?team_id=364759", timeout=3)
+
+        record = self._last_log_line(captured)
+        self.assertEqual(record["route"], "/")
+
+    def test_a_client_error_status_is_logged_at_warn_level(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            try:
+                urlopen(f"http://127.0.0.1:{self.server.server_port}/api/does-not-exist", timeout=3)
+            except HTTPError:
+                pass
+
+        record = self._last_log_line(captured)
+        self.assertEqual(record["status"], 404)
+        self.assertEqual(record["level"], "warn")
 
 
 if __name__ == "__main__":
