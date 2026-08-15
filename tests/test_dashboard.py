@@ -730,6 +730,39 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-save"', html)
         self.assertIn('id="profile-message"', html)
         self.assertIn("fetch('/api/profile'", html)
+        # Per request: only the Team ID field is actually required to save (setupProfileForm's
+        # own validation only blocks submission on a missing/invalid team ID -- timezone always
+        # has a value because it's a <select>, confirmed free transfers is genuinely optional, and
+        # its gameweek is only required when that field is filled in). Removed the reassurance copy
+        # since it read as a claim about the fields themselves, not just this app's own auth.
+        self.assertNotIn("no password, no account required", html)
+
+    def test_no_account_no_password_reassurance_copy_removed_everywhere(self):
+        # Follow-up per request: the same "no account required"/"no password" reassurance existed,
+        # worded slightly differently, on four other panels beyond Manager profile -- Team lookup,
+        # Deadline reminders, Contact Us, What's New's subscribe card -- plus a standalone "Account
+        # boundary" panel on Model Status that existed solely to make this claim. Removed all of it.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertNotIn("No account needed", html)
+        self.assertNotIn("no account required", html)
+        self.assertNotIn("No password is stored", html)
+        self.assertNotIn("Account boundary", html)
+        # The genuinely informative half of each subtitle survives -- only the reassurance clause
+        # was stripped, not the whole line.
+        self.assertIn('<h2>Look up a team</h2><span class="muted">Nothing is saved</span>', html)
+        self.assertIn(
+            '<h2>Deadline reminders</h2><span class="muted">One email before each gameweek deadline</span>',
+            html,
+        )
+        self.assertIn(
+            '<h2>Contact Us</h2><span class="muted">Report a bug, request a feature, or leave feedback</span>',
+            html,
+        )
+        self.assertIn(
+            'Get release notes by email</h2><span class="muted">One email each time a new entry publishes</span>',
+            html,
+        )
         # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
         # longer gates -- the save request must not send it.
         self.assertNotIn("X-Refresh-Token", html)
