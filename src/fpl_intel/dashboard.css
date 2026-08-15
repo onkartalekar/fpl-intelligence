@@ -1136,6 +1136,19 @@ dd {
 .decision-details[open] > summary::before {
   transform: rotate(90deg);
 }
+/* #decision-benchmark-details is the generic, non-personalized "from-scratch squad"
+   reference panel -- deliberately the opposite of a recommendation once a personalized
+   weekly decision exists. Give it muted resting/focus styling so it doesn't borrow the
+   accent-border treatment used elsewhere (.profile-option.active, .scenario-card.recommended)
+   to mean "this is the recommended pick" -- that visual language on a "don't act on this"
+   panel is what caused it to read as prominent/important instead of secondary. */
+#decision-benchmark-details > summary {
+  color: var(--muted);
+  font-weight: 600;
+}
+#decision-benchmark-details > summary:focus-visible {
+  outline-color: var(--muted);
+}
 .weekly-recommendation strong,.weekly-chip strong {
   color: var(--accent);
 }
