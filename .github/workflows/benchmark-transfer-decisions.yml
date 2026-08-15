@@ -1,0 +1,79 @@
+name: Benchmark transfer decisions
+
+# Issue #176: nothing in this repo tracked build_transfer_decisions' actual wall-clock cost over
+# time before this -- every number quoted in #176/#177's writeups came from ad-hoc one-off runs.
+# scripts/benchmark_transfer_decisions.py (#179) is the repeatable, checked-in version; this
+# workflow is what actually runs it periodically, so a future regression has a chance of being
+# noticed instead of only ever being found by someone manually re-profiling.
+#
+# Deliberately informational, not a required/blocking check: GitHub's shared runners are noisy
+# (this repo's own tests.yml matrix has shown ~140s-190s swings for identical code depending on
+# runner load), so a hard pass/fail threshold on wall-clock time would either be loose enough to
+# miss real regressions or tight enough to false-alarm on ordinary noise. This publishes numbers
+# for a human to look at (job summary + a downloadable artifact for comparing across runs), it
+# doesn't gate merges on them. See #176 for the still-open question of whether stronger automatic
+# regression detection is worth the added complexity later.
+#
+# Weekly cron, not daily/hourly like this repo's other scheduled workflows: unlike
+# live-regression-check.yml's target (the live, constantly-changing hosted app) or
+# deadline-reminder.yml's target (a real deadline clock), this benchmark's target only changes
+# when someone edits transfer_decisions.py/recommendations.py -- weekly is enough to catch drift
+# without runs that are almost always identical to the last one. workflow_dispatch covers running
+# it on demand right after a specific change.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Monday, 9am UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Benchmark transfer decisions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run benchmark
+        run: PYTHONPATH=src python3 scripts/benchmark_transfer_decisions.py --json benchmark-results.json
+
+      - name: Write job summary
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+
+          with open("benchmark-results.json") as f:
+              data = json.load(f)
+
+          lines = [
+              "## Transfer decisions benchmark",
+              "",
+              f"- Commit: `{data['git_sha']}`",
+              f"- Python: {data['python_version']}",
+              f"- Synthetic pool: {data['player_pool_size']} players",
+              "",
+              "| Function | Time |",
+              "| --- | --- |",
+          ]
+          for row in data["results"]:
+              lines.append(f"| `{row['label']}` | {row['seconds']}s |")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PYEOF
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: benchmark-results.json
+          retention-days: 90
