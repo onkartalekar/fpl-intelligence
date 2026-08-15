@@ -568,6 +568,30 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("['ArrowLeft','ArrowRight','Home','End']", html)
         self.assertIn("next.focus()", html)
 
+    def test_compare_risk_profiles_panel_can_switch_to_the_visitors_own_squad(self):
+        # Issue #158: "Compare risk profiles" used to always be built inline inside
+        # renderDecision() from decision.profile_recommendations alone -- a freshly optimized,
+        # generic squad, never the visitor's own declared draft or real squad. Split into its own
+        # function so it can independently source weekly.profiles (now carrying the same
+        # metrics/evaluation_horizons shape) once weekly.status==='active'.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        self.assertIn("function renderProfileComparison(profileId=null)", html)
+        self.assertIn('id="profile-comparison-heading">Compare risk profiles</h2>', html)
+        self.assertIn('id="profile-comparison-subtitle">', html)
+        comparison_start = html.index("function renderProfileComparison(profileId=null)")
+        comparison_end = html.index("\nfunction renderDecision(profileId=null){", comparison_start)
+        comparison_body = html[comparison_start:comparison_end]
+        self.assertIn("weekly.status==='active'", comparison_body)
+        self.assertIn("weekly.profiles", comparison_body)
+        # Captaincy-delta framing replaces the benchmark's "changed players in/out" sentence for
+        # the personalized case, since squad membership never varies across profiles there.
+        self.assertIn("captains", comparison_body)
+        self.assertIn("Same captain and lineup across all three profiles", comparison_body)
+        # renderDecision() calls the extracted function so every existing call site keeps working.
+        decision_start = html.index("function renderDecision(profileId=null){")
+        self.assertIn("renderProfileComparison(profileId)", html[decision_start:decision_start + 200])
+
     def test_player_and_performance_datasets_use_semantic_tables(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 

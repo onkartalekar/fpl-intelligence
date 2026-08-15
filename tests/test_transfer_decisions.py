@@ -124,6 +124,32 @@ class TransferDecisionTests(unittest.TestCase):
             self.assertIn(profile["recommendation"]["action"], actions)
             self.assertEqual(len(profile["recommendation"]["starting_xi"]), 11)
 
+    def test_profiles_carry_uncertainty_metrics_for_the_managers_own_declared_squad(self):
+        # Issue #158: the "Compare risk profiles" panel needs the same rich metrics/
+        # evaluation_horizons shape recommendations.py's _build_profile_recommendation computes --
+        # but evaluated against the manager's own real squad, not a freshly optimized one, and not
+        # whatever a profile's `recommendation` might separately suggest transferring to.
+        bootstrap, fixtures, manager = gw2_inputs()
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+
+        own_squad_ids = {pick["element_id"] for pick in manager["squad"]}
+        for profile in result["profiles"]:
+            metrics = profile["metrics"]
+            for key in (
+                "central_1gw", "lower_1gw", "upper_1gw",
+                "central_3gw", "lower_3gw", "upper_3gw",
+                "central_5gw", "lower_5gw", "upper_5gw",
+                "average_ownership", "average_expected_minutes", "low_confidence_players",
+            ):
+                self.assertIn(key, metrics)
+            self.assertLessEqual(metrics["lower_5gw"], metrics["central_5gw"])
+            self.assertLessEqual(metrics["central_5gw"], metrics["upper_5gw"])
+            horizon_one = profile["evaluation_horizons"]["1"]
+            self.assertTrue(set(horizon_one["lineup_player_ids"]) <= own_squad_ids)
+            self.assertIn(horizon_one["captain_id"], own_squad_ids)
+
     def test_recommends_roll_when_no_move_clears_profile_threshold(self):
         bootstrap, fixtures, manager = gw2_inputs()
         result = build_transfer_decisions(
@@ -363,6 +389,24 @@ class BuildDraftDecisionsTests(unittest.TestCase):
             self.assertIn(profile["recommendation"]["action"], actions)
             self.assertEqual(len(profile["recommendation"]["starting_xi"]), 11)
             self.assertIn("reason", profile["recommendation"])
+
+    def test_profiles_carry_uncertainty_metrics_for_the_declared_draft_squad(self):
+        # Issue #158, draft-side counterpart to the build_transfer_decisions test above.
+        bootstrap, fixtures, draft_squad_ids = draft_inputs()
+
+        result = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids, generated_at="2026-07-01T12:00:00-04:00"
+        )
+
+        for profile in result["profiles"]:
+            metrics = profile["metrics"]
+            for key in ("central_1gw", "central_3gw", "central_5gw", "lower_5gw", "upper_5gw"):
+                self.assertIn(key, metrics)
+            self.assertLessEqual(metrics["lower_5gw"], metrics["central_5gw"])
+            self.assertLessEqual(metrics["central_5gw"], metrics["upper_5gw"])
+            horizon_one = profile["evaluation_horizons"]["1"]
+            self.assertTrue(set(horizon_one["lineup_player_ids"]) <= set(draft_squad_ids))
+            self.assertIn(horizon_one["captain_id"], draft_squad_ids)
 
     def test_reports_the_declared_squads_unspent_budget(self):
         bootstrap, fixtures, draft_squad_ids = draft_inputs()
