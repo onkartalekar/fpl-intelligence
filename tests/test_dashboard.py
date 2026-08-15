@@ -725,11 +725,16 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-team-id"', html)
         self.assertIn('id="profile-timezone"', html)
         self.assertIn('id="profile-risk"', html)
-        self.assertIn('id="profile-free-transfers"', html)
-        self.assertIn('id="profile-free-transfers-event"', html)
         self.assertIn('id="profile-save"', html)
         self.assertIn('id="profile-message"', html)
         self.assertIn("fetch('/api/profile'", html)
+        # Per request: the "Confirmed free transfers"/"Free transfers gameweek" override was
+        # dropped from the form entirely -- UI-only, the backend fields stay nullable and untouched
+        # (transfer_decisions.py's derive_free_transfers fallback already handles them being unset).
+        self.assertNotIn('id="profile-free-transfers"', html)
+        self.assertNotIn('id="profile-free-transfers-event"', html)
+        self.assertNotIn('for="profile-free-transfers">Confirmed free transfers</label>', html)
+        self.assertNotIn('for="profile-free-transfers-event">Free transfers gameweek</label>', html)
         # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
         # longer gates -- the save request must not send it.
         self.assertNotIn("X-Refresh-Token", html)
