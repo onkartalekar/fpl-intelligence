@@ -19,7 +19,11 @@ Deterministic (formula-based player stats, no randomness) so re-runs are compara
 and to numbers quoted in issue writeups. Stdlib-only, matching this repo's dependency policy.
 """
 
+import argparse
+from datetime import datetime, timezone
+import json
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -140,16 +144,33 @@ def _draft_inputs():
     return bootstrap, fixtures, draft_squad_ids
 
 
-def _time(label, func):
+def _time(label, func, results):
     start = time.perf_counter()
     result = func()
     elapsed = time.perf_counter() - start
     status = result.get("status", "?")
     print(f"  {label:30s} {elapsed:7.3f}s  (status={status})")
+    results.append({"label": label, "seconds": round(elapsed, 3), "status": status})
     return elapsed
 
 
+def _git_sha():
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json", metavar="PATH",
+        help="Also write a machine-readable summary (timings, interpreter, git SHA) to this path.",
+    )
+    args = parser.parse_args()
+
     if sys.version_info[:2] < (3, 10):
         print(
             f"WARNING: running under Python {sys.version_info.major}.{sys.version_info.minor}. "
@@ -162,11 +183,14 @@ def main():
     total_players = sum(_POSITION_COUNTS.values())
     print(f"Synthetic pool: {total_players} players across {_TEAM_COUNT} teams (matches real FPL's actual position split)\n")
 
+    results = []
+
     bootstrap, fixtures, manager = _gw2_manager_inputs()
     print("build_transfer_decisions (GW2, real published squad):")
     _time(
         "build_transfer_decisions",
         lambda: build_transfer_decisions(bootstrap, fixtures, manager, generated_at="2026-09-02T12:00:00Z"),
+        results,
     )
 
     print("\nbuild_draft_decisions (preseason, declared draft squad):")
@@ -176,11 +200,23 @@ def main():
         lambda: build_draft_decisions(
             draft_bootstrap, draft_fixtures, draft_squad_ids, generated_at="2026-07-05T12:00:00Z"
         ),
+        results,
     )
     print(
         "\nFor comparison, issue #176's numbers on tests/test_transfer_decisions.py's 28-player "
         "fixture: 4.79s before PR #177's memoization fix, 2.65s after."
     )
+
+    if args.json:
+        summary = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "git_sha": _git_sha(),
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "player_pool_size": total_players,
+            "results": results,
+        }
+        Path(args.json).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        print(f"\nWrote machine-readable summary to {args.json}")
 
 
 if __name__ == "__main__":
