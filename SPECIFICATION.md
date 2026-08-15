@@ -195,17 +195,30 @@ The local dashboard is a dense monitor, not a decorative marketing page. It will
 8. Original source links
 9. Decision log and forecast review
 
-**Spec amendment (2026-08-10) — alpha release notes, documentation
-only.** The dashboard itself is the operational surface described above;
-a separate, human-authored `RELEASE_NOTES.md` at the repo root is the
-user-facing companion document for alpha testers, describing only
-features live on `main` at time of writing, never planned or
-in-progress work (issue #112, `plans/issue-112-release-notes-hosting.md`).
-It is plain Markdown rendered by GitHub's own file viewer today; GitHub
-Pages hosting was considered and deferred (see
-`IMPLEMENTATION_PLAN.md`'s "Considered and declined" entry for the same
-date). This does not add a new data source, dashboard view, or
-recommendation input — it is documentation of what already exists above.
+**Spec amendment (2026-08-10, superseded 2026-08-15) — alpha release
+notes, documentation only.** A separate, human-authored `RELEASE_NOTES.md`
+was published at the repo root as a user-facing companion document for
+alpha testers, describing only features live on `main` at time of
+writing, never planned or in-progress work (issue #112,
+`plans/issue-112-release-notes-hosting.md`). Superseded below.
+
+**Spec amendment (2026-08-11) — day-by-day release notes, a dashboard
+view (issue #143).** A live "What's New" tab was added to the dashboard
+itself: dated, per-day entries (Feature/Fix/Data/Docs/Chore), searchable
+and filterable, generated daily from merged pull requests and also
+committed to the git-tracked `release-notes/` archive. This does not add
+a new data source or recommendation input — it is documentation of what
+already exists elsewhere in this specification.
+
+**Spec amendment (2026-08-15) — `RELEASE_NOTES.md` removed.** The
+repo-root snapshot from the 2026-08-10 amendment was deleted: nothing
+automated kept it in sync with the app (unlike the What's New tab's
+daily generation job), and it had already gone stale at least once — it
+still described a Manager-profile form field removed by issue #164 days
+after that change shipped. The dashboard's What's New tab and its
+`release-notes/` archive are now the only user-facing release-notes
+surface; "what the app does today" is answered by reading the dashboard
+itself.
 
 A quiet or not-yet-launched dataset is shown honestly. No fake player projections, confidence scores, trends, or transfer claims will be generated.
 
@@ -225,7 +238,7 @@ A quiet or not-yet-launched dataset is shown honestly. No fake player projection
 - Produce one final deadline report
 - If the manager is unavailable near the deadline, show the safest actionable plan and conditional alternatives
 
-No scheduler is created in this foundation phase. Scheduling will be considered only after an interactive refresh has been verified. That verification has since happened (the Refresh button → `/api/refresh` path), and issue #55's opt-in, admin-configured deadline-reminder GitHub Actions workflow (`.github/workflows/deadline-reminder.yml`, invoking the trigger-agnostic `scripts/send_deadline_reminder.py`) is the anticipated post-verification scheduling exception: it lives outside `server.py` and the refresh pipeline, which still never act on their own, and is slated to move onto issue #27's eventual hosted deployment's own scheduler once that lands.
+No scheduler is created in this foundation phase. Scheduling will be considered only after an interactive refresh has been verified. That verification has since happened (the Refresh button → `/api/refresh` path), and two GitHub Actions workflows are the post-verification scheduling exceptions: issue #55's opt-in, admin-configured deadline-reminder workflow (`.github/workflows/deadline-reminder.yml`, invoking the trigger-agnostic `scripts/send_deadline_reminder.py`) and issue #101's scheduled-refresh workflow (`.github/workflows/scheduled-refresh.yml`), which calls the same operator-only `POST /api/refresh` endpoint automatically at fixed checkpoints before each gameweek deadline. Both live outside `server.py` and the refresh pipeline, which still never act on their own, and both now run against issue #27's hosted Railway deployment -- this GitHub-Actions-over-HTTP pattern is the permanent scheduling architecture (see [ARCHITECTURE.md](ARCHITECTURE.md)), not an interim state pending further migration.
 
 ## Decision-report contract
 

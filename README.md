@@ -3,8 +3,9 @@
 A local, source-backed foundation for 2026/27 FPL (Fantasy Premier
 League) decisions.
 
-For a plain-English tour of what the dashboard actually does today, see
-[RELEASE_NOTES.md](RELEASE_NOTES.md).
+For a plain-English, day-by-day account of what shipped and when, see the
+dashboard's own **What's New** tab (also archived as dated Markdown under
+[`release-notes/`](release-notes/)).
 
 ## Current status
 
@@ -20,9 +21,8 @@ For a plain-English tour of what the dashboard actually does today, see
 The easiest way is in the dashboard itself: start the local server (see
 below), open the **My Profile** view, and fill in the **Manager profile**
 form there. Enter your FPL team ID (found in your FPL entry URL,
-`fantasy.premierleague.com/entry/<team_id>/...`), pick your timezone and
-risk profile, and optionally confirm your free-transfer count for the
-current gameweek. Saving writes straight to `config/user-profile.json` on
+`fantasy.premierleague.com/entry/<team_id>/...`) and pick your timezone
+and risk profile. Saving writes straight to `config/user-profile.json` on
 your machine and triggers a refresh -- no password or account access is
 ever requested.
 
@@ -41,11 +41,14 @@ ID. Without it, the dashboard's "My Team" panel stays in a
 Only a few fields in this file are read by the dashboard right now:
 `manager.team_id`, `manager.timezone`, `manager.risk_profile`, and
 `manager.confirmed_free_transfers` (with
-`manager.confirmed_free_transfers_event`). The rest --
-`deadline_availability`, `weekly_time_budget_minutes`, `primary_goal`,
-`mini_leagues`, and `experience.previous_entry_id` -- are recorded for
-your own reference only; editing them doesn't change model behavior yet,
-and they aren't exposed in the in-UI form.
+`manager.confirmed_free_transfers_event`). The last two correct the
+app's own estimate of your free-transfer balance, but per request (issue
+#164) the in-UI form no longer offers a way to set them -- editing the
+file directly is now the only way to set a confirmed free-transfer
+count. The rest -- `deadline_availability`, `weekly_time_budget_minutes`,
+`primary_goal`, `mini_leagues`, and `experience.previous_entry_id` -- are
+recorded for your own reference only; editing them doesn't change model
+behavior yet, and they aren't exposed in the in-UI form either.
 
 ## Open the dashboard
 
@@ -129,9 +132,9 @@ It writes:
 - `data/dashboard-state.json`
 - `dashboard.html`
 
-The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. No scheduler is configured for the app itself, by explicit choice.
+The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. `server.py` and the refresh pipeline never self-trigger -- by explicit choice, nothing inside this app schedules its own actions.
 
-The one anticipated exception is issue #55's opt-in deadline-email reminder: `.github/workflows/deadline-reminder.yml` is a scheduled GitHub Actions workflow (hourly) that invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. It is admin/secrets-configured (recipient team IDs, emails, and SMTP credentials live in Actions secrets, not in this repo), runs entirely outside `server.py` and the refresh pipeline -- neither of which gains any new self-triggered behavior -- and is expected to move onto issue #27's hosted deployment's own scheduler once that lands.
+Two GitHub Actions workflows call that same manual endpoint automatically, on a schedule, from outside the app: issue #101's `.github/workflows/scheduled-refresh.yml` (hourly cron) checks four fixed checkpoints before each gameweek deadline (T-2d, T-1d, T-12h, T-3h) and calls `POST /api/refresh` with `X-Refresh-Token` only when one matches, keeping the shared hosted dashboard's data from going stale between manual refreshes; and issue #55's opt-in deadline-email reminder, `.github/workflows/deadline-reminder.yml` (also hourly), invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. Both are admin/secrets-configured (tokens and, for the reminder, recipient team IDs/emails/SMTP credentials live in Actions secrets, not in this repo) and run entirely outside `server.py` and the refresh pipeline, which still never act on their own -- an external scheduled caller hitting the same endpoint a human would click is not the app scheduling itself. This is the app's permanent scheduling architecture (see [ARCHITECTURE.md](ARCHITECTURE.md)), not a stopgap pending further migration.
 
 ## Keep dashboard.html in sync with dashboard.py
 
@@ -196,7 +199,7 @@ pip install -r requirements.txt
 
 Everything below is optional for local use -- the dashboard, refresh pipeline, and tests all
 run with none of these set, exactly as `## Open the dashboard` describes. They only matter for
-the hosted deployment (issue #27) and its three GitHub Actions workflows, or for the still-unwired
+the hosted deployment (issue #27) and its four GitHub Actions workflows, or for the still-unwired
 LLM-based news parsing feature.
 
 None of these are read from a `.env` file -- this codebase has no dotenv loading, by the same
@@ -275,6 +278,13 @@ actually wired into something.
 cd <path-to-clone>/fpl-intelligence
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
+
+`.github/workflows/tests.yml` (issue #170) runs this same suite automatically on every pull
+request and push to `main`, split into a 4-way matrix by measured runtime rather than one serial
+job. `scripts/run_tests_parallel.py` (issue #178) mirrors that same grouping locally as parallel
+subprocesses -- faster than the serial command above for a full local run before considering a
+change done; see `.claude/skills/run-full-tests/SKILL.md` for the exact invocation and why it
+needs an explicit `--python` path.
 
 ## Important evidence rule
 
