@@ -293,7 +293,22 @@ def _scenario(action, candidate, baseline, profile, free_transfers, maximum_free
     }
 
 
-def _planner_player_score(player, profile, relative_event, horizon=5):
+def _planner_player_score(player, profile, relative_event, horizon=5, cache=None):
+    # Issue #176: a player's score for a given (profile, relative_event, horizon) is pure -- it
+    # only reads static per-player projection fields that don't change during a single
+    # build_transfer_decisions/build_draft_decisions call -- but the beam planner below calls this
+    # for the same players over and over across different candidate branches that share most of
+    # their squad. Profiled at ~10.9M calls for one recommendation (28-player test fixture); an
+    # optional per-call cache, keyed on player id rather than the unhashable player dict, collapses
+    # that down to one real computation per (id, profile, relative_event, horizon) combination.
+    # `cache=None` (every call site outside this module's planner, e.g. direct test calls) keeps
+    # today's uncached behavior exactly, so this is purely additive.
+    cache_key = None
+    if cache is not None:
+        cache_key = (player["id"], profile, relative_event, horizon)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
     profile_points = (player.get("profile_fixture_xp") or {}).get(profile)
     if profile_points is not None:
         score = sum(profile_points[relative_event:horizon])
@@ -303,35 +318,43 @@ def _planner_player_score(player, profile, relative_event, horizon=5):
                 "aggressive", player.get("expected_minutes", 0.0)
             )
             minutes_penalty = max(0.0, 50.0 - scenario_minutes) * 0.045
-            return score + differential - minutes_penalty
-        return score
-    fixture_points = player.get("fixture_xp") or []
-    central = sum(fixture_points[relative_event:horizon])
-    uncertainty = {"high": 0.16, "medium": 0.25, "low": 0.38}.get(player.get("confidence"), 0.38)
-    if profile == "conservative":
-        return central * (1 - uncertainty)
-    if profile == "aggressive":
-        differential = min(0.3, max(0.0, 20.0 - player.get("ownership", 0.0)) * 0.015)
-        minutes_penalty = max(0.0, 50.0 - player.get("expected_minutes", 0.0)) * 0.045
-        return central * (1 + uncertainty) + differential - minutes_penalty
-    return central
+            result = score + differential - minutes_penalty
+        else:
+            result = score
+    else:
+        fixture_points = player.get("fixture_xp") or []
+        central = sum(fixture_points[relative_event:horizon])
+        uncertainty = {"high": 0.16, "medium": 0.25, "low": 0.38}.get(player.get("confidence"), 0.38)
+        if profile == "conservative":
+            result = central * (1 - uncertainty)
+        elif profile == "aggressive":
+            differential = min(0.3, max(0.0, 20.0 - player.get("ownership", 0.0)) * 0.015)
+            minutes_penalty = max(0.0, 50.0 - player.get("expected_minutes", 0.0)) * 0.045
+            result = central * (1 + uncertainty) + differential - minutes_penalty
+        else:
+            result = central
+    if cache_key is not None:
+        cache[cache_key] = result
+    return result
 
 
-def _planner_event_points(squad, profile, relative_event):
-    score = lambda player: _planner_player_score(player, profile, relative_event, relative_event + 1)
+def _planner_event_points(squad, profile, relative_event, cache=None):
+    score = lambda player: _planner_player_score(
+        player, profile, relative_event, relative_event + 1, cache=cache
+    )
     lineup, _ = _best_xi(squad, score)
     captain = max(lineup, key=score)
     return sum(score(player) for player in lineup) + score(captain)
 
 
-def _planner_remaining_value(squad, profile, relative_event, horizon=5):
+def _planner_remaining_value(squad, profile, relative_event, horizon=5, cache=None):
     return sum(
-        _planner_event_points(squad, profile, event_index)
+        _planner_event_points(squad, profile, event_index, cache=cache)
         for event_index in range(relative_event, horizon)
     )
 
 
-def _planner_single_moves(squad, eligible, cash, quotas, club_limit, profile, relative_event, limit=6):
+def _planner_single_moves(squad, eligible, cash, quotas, club_limit, profile, relative_event, limit=6, cache=None):
     owned_ids = {player["id"] for player in squad}
     by_position = {}
     for position in quotas:
@@ -340,16 +363,19 @@ def _planner_single_moves(squad, eligible, cash, quotas, club_limit, profile, re
                 player for player in eligible
                 if player["position_short"] == position and player["id"] not in owned_ids
             ),
-            key=lambda player: _planner_player_score(player, profile, relative_event),
+            key=lambda player: _planner_player_score(player, profile, relative_event, cache=cache),
             reverse=True,
         )[:8]
     outgoing = []
     for position in quotas:
         outgoing.extend(sorted(
             (player for player in squad if player["position_short"] == position),
-            key=lambda player: _planner_player_score(player, profile, relative_event),
+            key=lambda player: _planner_player_score(player, profile, relative_event, cache=cache),
         )[:2])
     moves = []
+    # baseline is loop-invariant (squad/profile/relative_event never change across sold x bought) --
+    # hoisted out rather than recomputed on every one of the loop's iterations.
+    baseline_value = _planner_remaining_value(squad, profile, relative_event, cache=cache)
     for sold in outgoing:
         for bought in by_position[sold["position_short"]]:
             remaining = cash + sold["selling_price"] - bought["price"]
@@ -362,9 +388,7 @@ def _planner_single_moves(squad, eligible, cash, quotas, club_limit, profile, re
             ]
             if not _structure_legal(proposal, quotas, club_limit):
                 continue
-            gain = _planner_remaining_value(proposal, profile, relative_event) - _planner_remaining_value(
-                squad, profile, relative_event
-            )
+            gain = _planner_remaining_value(proposal, profile, relative_event, cache=cache) - baseline_value
             moves.append({
                 "squad": proposal,
                 "cash": round(remaining, 1),
@@ -375,10 +399,10 @@ def _planner_single_moves(squad, eligible, cash, quotas, club_limit, profile, re
     return moves[:limit]
 
 
-def _planner_action_candidates(squad, eligible, cash, quotas, club_limit, profile, relative_event):
+def _planner_action_candidates(squad, eligible, cash, quotas, club_limit, profile, relative_event, cache=None):
     roll = {"action": "roll", "squad": squad, "cash": cash, "transfers": []}
     singles = _planner_single_moves(
-        squad, eligible, cash, quotas, club_limit, profile, relative_event
+        squad, eligible, cash, quotas, club_limit, profile, relative_event, cache=cache
     )
     actions = [roll] + [{**move, "action": "single_transfer"} for move in singles]
     doubles = []
@@ -386,7 +410,8 @@ def _planner_action_candidates(squad, eligible, cash, quotas, club_limit, profil
         sold_ids = {row["out"]["id"] for row in first["transfers"]}
         bought_ids = {row["in"]["id"] for row in first["transfers"]}
         seconds = _planner_single_moves(
-            first["squad"], eligible, first["cash"], quotas, club_limit, profile, relative_event, limit=4
+            first["squad"], eligible, first["cash"], quotas, club_limit, profile, relative_event,
+            limit=4, cache=cache,
         )
         for second in seconds:
             second_move = second["transfers"][0]
@@ -403,14 +428,14 @@ def _planner_action_candidates(squad, eligible, cash, quotas, club_limit, profil
     return actions + doubles[:3]
 
 
-def _planner_step(node, candidate, profile, event, relative_event, maximum_free_transfers):
+def _planner_step(node, candidate, profile, event, relative_event, maximum_free_transfers, cache=None):
     transfer_count = len(candidate["transfers"])
     point_cost = max(0, transfer_count - node["free_transfers"]) * 4
     free_next = min(
         maximum_free_transfers,
         max(0, node["free_transfers"] - transfer_count) + 1,
     )
-    event_points = _planner_event_points(candidate["squad"], profile, relative_event)
+    event_points = _planner_event_points(candidate["squad"], profile, relative_event, cache=cache)
     churn_penalty = {"conservative": 0.45, "balanced": 0.2, "aggressive": 0.0}[profile]
     action_value = event_points - point_cost - churn_penalty * transfer_count
     path_row = {
@@ -433,7 +458,7 @@ def _planner_step(node, candidate, profile, event, relative_event, maximum_free_
 
 def _best_planner_continuation(
     initial_node, eligible, quotas, club_limit, profile, start_event,
-    start_relative_event, maximum_free_transfers, horizon=5, beam_width=8,
+    start_relative_event, maximum_free_transfers, horizon=5, beam_width=8, cache=None,
 ):
     beam = [initial_node]
     for relative_event in range(start_relative_event, horizon):
@@ -441,21 +466,22 @@ def _best_planner_continuation(
         expanded = []
         for node in beam:
             for candidate in _planner_action_candidates(
-                node["squad"], eligible, node["cash"], quotas, club_limit, profile, relative_event
+                node["squad"], eligible, node["cash"], quotas, club_limit, profile, relative_event,
+                cache=cache,
             ):
                 expanded.append(_planner_step(
-                    node, candidate, profile, event, relative_event, maximum_free_transfers
+                    node, candidate, profile, event, relative_event, maximum_free_transfers, cache=cache
                 ))
         if not expanded:
             break
         expanded.sort(
             key=lambda node: node["cumulative_value"]
-            + 0.12 * _planner_remaining_value(node["squad"], profile, relative_event + 1),
+            + 0.12 * _planner_remaining_value(node["squad"], profile, relative_event + 1, cache=cache),
             reverse=True,
         )
         beam = expanded[:beam_width]
     for node in beam:
-        terminal_squad = 0.08 * _planner_remaining_value(node["squad"], profile, 0)
+        terminal_squad = 0.08 * _planner_remaining_value(node["squad"], profile, 0, cache=cache)
         terminal_flexibility = 0.35 * node["free_transfers"] + 0.04 * node["cash"]
         node["plan_value"] = node["cumulative_value"] + terminal_squad + terminal_flexibility
     return max(beam, key=lambda node: node["plan_value"])
@@ -498,6 +524,11 @@ def build_multiweek_plan(
     free_transfers, maximum_free_transfers, horizon=5,
 ):
     """Evaluate five events but recommend only the immediate action."""
+    # Issue #176: one cache for this whole planning pass (every initial_scenarios branch plus the
+    # roll_option_value comparison below) -- these branches share most of their squad, so scores
+    # computed evaluating one branch are frequently reusable evaluating the next. See
+    # _planner_player_score's docstring comment for what this eliminates and why it's safe.
+    cache = {}
     evaluated = []
     for scenario in initial_scenarios:
         initial_candidate = {
@@ -514,11 +545,11 @@ def build_multiweek_plan(
             "path": [],
         }
         first = _planner_step(
-            root, initial_candidate, profile, event, 0, maximum_free_transfers
+            root, initial_candidate, profile, event, 0, maximum_free_transfers, cache=cache
         )
         best = _best_planner_continuation(
             first, eligible, quotas, club_limit, profile, event, 1,
-            maximum_free_transfers, horizon=horizon,
+            maximum_free_transfers, horizon=horizon, cache=cache,
         )
         best["post_initial_node"] = first
         best["immediate_scenario"] = scenario
@@ -533,7 +564,7 @@ def build_multiweek_plan(
         reduced_initial["free_transfers"] = max(0, reduced_initial["free_transfers"] - 1)
         without_extra = _best_planner_continuation(
             reduced_initial, eligible, quotas, club_limit, profile, event, 1,
-            maximum_free_transfers, horizon=horizon,
+            maximum_free_transfers, horizon=horizon, cache=cache,
         )
         roll_option_value = max(0.0, roll["plan_value"] - without_extra["plan_value"])
     alternatives = []
