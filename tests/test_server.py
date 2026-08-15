@@ -3890,6 +3890,183 @@ class QuietTimeoutLoggingDoesNotSwallowRealErrorsTests(unittest.TestCase):
         finally:
             server.server_close()
 
+    def test_a_server_level_handle_error_for_a_broken_pipe_logs_just_one_quiet_line(self):
+        # Bug fix, confirmed live: a client disconnecting mid-response (browser tab closed, flaky
+        # network, or a proxy/load balancer with a short read timeout) raises BrokenPipeError
+        # from wfile.write inside do_GET, which escapes the request thread and lands exactly
+        # here (ThreadingMixIn.process_request_thread routes it to _DashboardServer.handle_error)
+        # -- same reasoning as the existing TimeoutError case just above, extended to the client-
+        # went-away sibling exceptions.
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        try:
+            for exception_cls in (BrokenPipeError, ConnectionResetError):
+                with self.subTest(exception=exception_cls.__name__):
+                    captured = io.StringIO()
+                    try:
+                        raise exception_cls("simulated client disconnect")
+                    except exception_cls:
+                        with redirect_stderr(captured):
+                            server.handle_error(request=None, client_address=("203.0.113.1", 12345))
+
+                    output = captured.getvalue()
+                    self.assertIn("disconnected before the response finished sending", output)
+                    self.assertNotIn("Traceback", output)
+        finally:
+            server.server_close()
+
+    def test_log_error_for_a_broken_pipe_logs_just_one_quiet_line(self):
+        # log_error's counterpart to the handle_error test above -- same DashboardHandler class
+        # ConnectionTimeoutTests reaches via server.RequestHandlerClass, constructed bare (no live
+        # socket needed) since log_message/log_date_time_string don't touch connection state.
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        try:
+            handler = object.__new__(server.RequestHandlerClass)
+            for exception_cls in (BrokenPipeError, ConnectionResetError):
+                with self.subTest(exception=exception_cls.__name__):
+                    captured = io.StringIO()
+                    with redirect_stdout(captured):
+                        handler.log_error("%s", exception_cls("simulated client disconnect"))
+
+                    self.assertIn(
+                        "disconnected before the response finished sending", captured.getvalue()
+                    )
+        finally:
+            server.server_close()
+
+
+class HeadRequestTests(unittest.TestCase):
+    """Bug fix: BaseHTTPRequestHandler has no default HEAD support -- only defining do_GET/
+    do_POST left every HEAD request (routine for uptime/health-check probes -- confirmed live,
+    Railway's own platform health check hits "/" this way) falling through to the stdlib's
+    generic "Unsupported method" 501, spamming logs with nothing actionable."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_head_on_the_dashboard_returns_200_with_no_body_but_the_real_content_length(self):
+        get_response = urlopen(f"http://127.0.0.1:{self.server.server_port}/", timeout=3)
+        get_body = get_response.read()
+
+        head_request = Request(f"http://127.0.0.1:{self.server.server_port}/", method="HEAD")
+        head_response = urlopen(head_request, timeout=3)
+        head_body = head_response.read()
+
+        self.assertEqual(head_response.status, 200)
+        self.assertEqual(head_body, b"")
+        # Per HTTP semantics, HEAD's Content-Length describes what the GET body would have been,
+        # even though it's never actually sent.
+        self.assertEqual(head_response.headers["Content-Length"], str(len(get_body)))
+        self.assertEqual(head_response.headers["Content-Type"], get_response.headers["Content-Type"])
+
+    def test_head_on_a_json_endpoint_returns_200_with_no_body(self):
+        head_request = Request(f"http://127.0.0.1:{self.server.server_port}/api/status", method="HEAD")
+        head_response = urlopen(head_request, timeout=3)
+
+        self.assertEqual(head_response.status, 200)
+        self.assertEqual(head_response.read(), b"")
+        self.assertEqual(head_response.headers["Content-Type"], "application/json; charset=utf-8")
+
+    def test_head_on_an_unknown_path_still_404s_with_no_body(self):
+        head_request = Request(f"http://127.0.0.1:{self.server.server_port}/nope", method="HEAD")
+        with self.assertRaises(HTTPError) as raised:
+            urlopen(head_request, timeout=3)
+
+        self.assertEqual(raised.exception.code, 404)
+        self.assertEqual(raised.exception.read(), b"")
+
+    def test_a_head_request_never_appears_as_an_unsupported_method_501(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            urlopen(Request(f"http://127.0.0.1:{self.server.server_port}/", method="HEAD"), timeout=3)
+
+        self.assertNotIn("501", captured.getvalue())
+        self.assertNotIn("Unsupported method", captured.getvalue())
+
+
+class AccessLogClientLabelTests(unittest.TestCase):
+    """Bug fix: DashboardHandler.log_message's override used to print only the timestamp and
+    message, dropping the client IP the stdlib's own default normally includes and never
+    capturing User-Agent at all -- every access-log line looked identical regardless of who sent
+    it. Reported live: repeating unexplained "HEAD / ... 501" bursts with no way to tell a
+    platform health check, an uptime monitor, or a crawler apart after the fact."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_a_normal_request_logs_the_client_ip_and_its_real_user_agent(self):
+        request = Request(
+            f"http://127.0.0.1:{self.server.server_port}/",
+            headers={"User-Agent": "HealthCheckBot/2.1"},
+        )
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            urlopen(request, timeout=3)
+
+        output = captured.getvalue()
+        self.assertIn("127.0.0.1", output)
+        self.assertIn("HealthCheckBot/2.1", output)
+
+    def test_a_crafted_user_agent_cannot_forge_extra_log_lines(self):
+        # Log injection: User-Agent is attacker-controlled input now written straight into logs
+        # for the first time in this file. A newline inside it must not let a client fabricate
+        # what looks like a second, independent log line. Tested via direct construction, not a
+        # real request -- http.client's own header validation already refuses to *send* a raw
+        # CRLF inside a header value (ValueError: Invalid header value), so a real attacker would
+        # have to reach the server some other way (a non-validating client, a raw socket, or
+        # obsolete HTTP header line-folding) to get a literal embedded newline into a parsed
+        # header value in the first place; _client_label's own collapsing is what has to hold
+        # regardless of how that value got there.
+        handler = object.__new__(self.server.RequestHandlerClass)
+        handler.client_address = ("203.0.113.5", 54321)
+        handler.headers = {"User-Agent": "evil\r\n[15/Aug/2026 00:00:00] FAKE ADMIN LOGIN SUCCESS"}
+
+        label = handler._client_label()
+
+        self.assertNotIn("\n", label)
+        self.assertNotIn("\r", label)
+        self.assertIn("evil [15/Aug/2026 00:00:00] FAKE ADMIN LOGIN SUCCESS", label)
+
+    def test_client_label_survives_a_connection_with_no_headers_parsed_yet(self):
+        # _client_label is called from log_error's TimeoutError path too, which fires precisely
+        # when a connection times out *before* a full request line (and therefore self.headers)
+        # was ever received -- must not raise AttributeError in that case.
+        handler = object.__new__(self.server.RequestHandlerClass)
+        handler.client_address = ("203.0.113.5", 54321)
+        # Deliberately no self.headers set at all, mirroring the real pre-parse_request() state.
+
+        label = handler._client_label()
+
+        self.assertIn("203.0.113.5", label)
+        self.assertIn("-", label)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1142,7 +1142,10 @@ def create_server(
             for name, value in (extra_headers or {}).items():
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            # HEAD gets every header a GET would (including the real Content-Length -- per HTTP
+            # semantics, describing what the body *would* have been), just never the body itself.
+            if not getattr(self, "_head_request", False):
+                self.wfile.write(body)
 
         def _expected_origin(self):
             # Per-request, not cached at server-creation time: the default branch reads
@@ -1172,7 +1175,9 @@ def create_server(
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.end_headers()
-            self.wfile.write(body)
+            # See _json's matching comment -- same HEAD-vs-GET body distinction.
+            if not getattr(self, "_head_request", False):
+                self.wfile.write(body)
 
         def _rate_limit_exempt(self):
             """Issue #125: a caller holding the operator token is exempt from the visitor-tuned
@@ -1662,6 +1667,21 @@ def create_server(
                 return
             self._json(404, {"status": "error", "message": "Not found"})
 
+        def do_HEAD(self):
+            # Bug fix: BaseHTTPRequestHandler has no default HEAD support -- only defining
+            # do_GET/do_POST left every HEAD request (routine for uptime/health-check probes,
+            # confirmed live: Railway's own platform health check hits "/" this way) falling
+            # through to the stdlib's generic "Unsupported method" 501, spamming logs with
+            # nothing actionable in them. Reuses do_GET's exact routing rather than duplicating
+            # it -- every response path already funnels through _json/_send_html, both of which
+            # skip the body write (but still send the real headers, Content-Length included) when
+            # this flag is set.
+            self._head_request = True
+            try:
+                self.do_GET()
+            finally:
+                self._head_request = False
+
         def do_POST(self):
             if self._reject_untrusted_host():
                 return
@@ -1950,8 +1970,27 @@ def create_server(
                 _render_reminder_confirm_page(True, "Deadline reminders are confirmed for this team.")
             )
 
+        def _client_label(self):
+            # Bug fix: the override below used to print only the timestamp and message, dropping
+            # the client IP the stdlib's own default log_message normally includes, and never
+            # capturing User-Agent at all -- every line looked identical regardless of who sent
+            # it, with no way to tell a platform health check, an uptime monitor, a crawler, or a
+            # real visitor apart after the fact. `self.client_address` is set by
+            # socketserver.BaseRequestHandler.__init__ before setup()/handle() ever run, so it's
+            # always available here -- but `self.headers` is only populated once parse_request()
+            # succeeds, which never happens for a connection that times out before sending a full
+            # request line (log_error's primary TimeoutError case below), so that has to be
+            # guarded rather than assumed present. User-Agent is attacker-controlled input being
+            # written straight into logs for the first time in this file -- collapsing whitespace
+            # neutralizes the trivial newline-injection case (a crafted header forging a fake
+            # extra log line) without needing a real sanitizer for what's just an access log.
+            address = self.client_address[0] if getattr(self, "client_address", None) else "-"
+            headers = getattr(self, "headers", None)
+            user_agent = " ".join((headers.get("User-Agent", "-") if headers else "-").split()) or "-"
+            return f'{address} "{user_agent}"'
+
         def log_message(self, message, *args):
-            print(f"[{self.log_date_time_string()}] {message % args}")
+            print(f"[{self.log_date_time_string()}] {self._client_label()} {message % args}")
 
         def log_error(self, format, *args):
             # Issue #28: this is the actual interception point for the `timeout` set above --
@@ -1969,6 +2008,14 @@ def create_server(
             if args and isinstance(args[0], TimeoutError):
                 self.log_message("connection timed out (idle/slow client, %ss limit)", self.timeout)
                 return
+            # Bug fix: the client-went-away sibling of the timeout case above -- confirmed live,
+            # a client (browser tab closed, flaky network, or a proxy/load balancer with a short
+            # read timeout) disconnecting mid-response raised BrokenPipeError from wfile.write and
+            # dumped a full traceback per occurrence, even though it's exactly as routine as a
+            # slow-loris timeout, not a real server-side error.
+            if args and isinstance(args[0], (BrokenPipeError, ConnectionResetError)):
+                self.log_message("client disconnected before the response finished sending")
+                return
             self.log_message(format, *args)
 
     class _DashboardServer(ThreadingHTTPServer):
@@ -1984,10 +2031,25 @@ def create_server(
             # reading a request), it gets the same one-line quiet treatment rather than a
             # traceback dump; every other exception still gets the full traceback via the base
             # implementation, so a genuine unexpected bug stays fully visible.
-            if isinstance(sys.exc_info()[1], TimeoutError):
+            #
+            # Bug fix: confirmed live, this is exactly where a BrokenPipeError from wfile.write
+            # (the client disconnected mid-response -- do_GET/_send_html/_json run inside the
+            # request thread, so a write failure there escapes straight to here, unlike the
+            # read-side TimeoutError log_error already handles) actually lands -- dumping a full
+            # traceback per occurrence for something as routine as a client going away.
+            error = sys.exc_info()[1]
+            if isinstance(error, TimeoutError):
                 timestamp = datetime.now(timezone.utc).strftime("%d/%b/%Y %H:%M:%S")
                 print(
                     f"[{timestamp}] connection timed out from {client_address} (server-level)",
+                    file=sys.stderr,
+                )
+                return
+            if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+                timestamp = datetime.now(timezone.utc).strftime("%d/%b/%Y %H:%M:%S")
+                print(
+                    f"[{timestamp}] client {client_address} disconnected before the response "
+                    "finished sending (server-level)",
                     file=sys.stderr,
                 )
                 return
