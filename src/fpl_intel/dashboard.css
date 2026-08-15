@@ -1032,7 +1032,7 @@ dd {
   background: var(--surface-inset);
   border: 1px solid var(--line);
 }
-#weekly-profile-options:empty,#weekly-summary:empty,#weekly-scenarios:empty,#weekly-chip:empty,#weekly-rules:empty {
+#weekly-summary:empty,#weekly-scenarios:empty,#weekly-chip:empty,#weekly-rules:empty {
   display: none;
 }
 .weekly-plan {
