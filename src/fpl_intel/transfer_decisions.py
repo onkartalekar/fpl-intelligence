@@ -106,8 +106,10 @@ def _lineup_view(squad, profile):
     }
 
 
-def _central_points(squad, horizon, profile="balanced"):
-    return sum(row["central_points"] for row in _event_lineup_schedule(squad, profile, horizon))
+def _central_points(squad, horizon, profile="balanced", cache=None):
+    return sum(
+        row["central_points"] for row in _event_lineup_schedule(squad, profile, horizon, cache=cache)
+    )
 
 
 def _public_squad(manager, projection_by_id):
@@ -197,7 +199,7 @@ def _move_record(out_player, in_player):
     }
 
 
-def _candidate_moves(squad, eligible, cash, quotas, club_limit, profile):
+def _candidate_moves(squad, eligible, cash, quotas, club_limit, profile, cache=None):
     candidates_by_position = {
         position: sorted(
             (row for row in eligible if row["position_short"] == position),
@@ -225,11 +227,11 @@ def _candidate_moves(squad, eligible, cash, quotas, club_limit, profile):
                 "transfers": [_move_record(outgoing, incoming)],
                 "out_ids": {outgoing["id"]},
             })
-    moves.sort(key=lambda row: _squad_objective(row["squad"], profile), reverse=True)
+    moves.sort(key=lambda row: _squad_objective(row["squad"], profile, cache=cache), reverse=True)
     return moves
 
 
-def _best_double(single_moves, eligible, quotas, club_limit, profile):
+def _best_double(single_moves, eligible, quotas, club_limit, profile, cache=None):
     best = None
     best_score = float("-inf")
     candidates_by_position = {
@@ -260,7 +262,7 @@ def _best_double(single_moves, eligible, quotas, club_limit, profile):
                 proposal[index] = {**incoming, "purchase_price": incoming["price"], "selling_price": incoming["price"]}
                 if not _structure_legal(proposal, quotas, club_limit):
                     continue
-                score = _squad_objective(proposal, profile)
+                score = _squad_objective(proposal, profile, cache=cache)
                 if score > best_score:
                     best_score = score
                     best = {
@@ -271,11 +273,11 @@ def _best_double(single_moves, eligible, quotas, club_limit, profile):
     return best
 
 
-def _scenario(action, candidate, baseline, profile, free_transfers, maximum_free_transfers):
+def _scenario(action, candidate, baseline, profile, free_transfers, maximum_free_transfers, cache=None):
     squad = candidate["squad"]
     transfer_count = len(candidate["transfers"])
     point_cost = max(0, transfer_count - free_transfers) * 4
-    gross_gain = _central_points(squad, 5, profile) - _central_points(baseline, 5, profile)
+    gross_gain = _central_points(squad, 5, profile, cache=cache) - _central_points(baseline, 5, profile, cache=cache)
     lineup = _lineup_view(squad, profile)
     free_next = min(maximum_free_transfers, max(0, free_transfers - transfer_count) + 1)
     return {
@@ -287,7 +289,7 @@ def _scenario(action, candidate, baseline, profile, free_transfers, maximum_free
         "net_gain_5gw": round(gross_gain - point_cost, 1),
         "bank_after": round(candidate["cash"], 1),
         "free_transfers_next_event": free_next,
-        "profile_score": round(_squad_objective(squad, profile), 2),
+        "profile_score": round(_squad_objective(squad, profile, cache=cache), 2),
         "squad": squad,
         **lineup,
     }
@@ -630,7 +632,7 @@ def _chip_inventory(bootstrap, manager, event):
     return inventory
 
 
-def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas, budget, club_limit):
+def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas, budget, club_limit, cache=None):
     squad = no_chip_scenario["squad"]
     lineup_view = _lineup_view(squad, profile)
     no_chip_event = lineup_view["projected_event_points_including_captain"]
@@ -644,11 +646,11 @@ def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas,
         candidates.append({"chip": "bboost", "label": "Bench Boost", "marginal_value": round(marginal, 1), "horizon": 1})
     if "wildcard" in available:
         wildcard_squad = _optimize_squad(
-            eligible, quotas, budget, club_limit, profile, horizon=5, runs=3, steps=1400
+            eligible, quotas, budget, club_limit, profile, horizon=5, runs=3, steps=1400, cache=cache
         )
         marginal = (
-            _central_points(wildcard_squad, 5, profile)
-            - _central_points(squad, 5, profile)
+            _central_points(wildcard_squad, 5, profile, cache=cache)
+            - _central_points(squad, 5, profile, cache=cache)
             + float(no_chip_scenario.get("point_cost") or 0)
         )
         candidates.append({
@@ -660,10 +662,10 @@ def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas,
         })
     if "freehit" in available:
         freehit_squad = _optimize_squad(
-            eligible, quotas, budget, club_limit, profile, horizon=1, runs=3, steps=1400
+            eligible, quotas, budget, club_limit, profile, horizon=1, runs=3, steps=1400, cache=cache
         )
         marginal = (
-            _central_points(freehit_squad, 1, profile)
+            _central_points(freehit_squad, 1, profile, cache=cache)
             - no_chip_event
             + float(no_chip_scenario.get("point_cost") or 0)
         )
@@ -710,6 +712,7 @@ def _exclusive_chip_scenario(
     total_sale_budget,
     free_transfers,
     maximum_free_transfers,
+    cache=None,
 ):
     """Return the sole actionable scenario for a transfer chip.
 
@@ -735,7 +738,7 @@ def _exclusive_chip_scenario(
         "net_gain_5gw": chip["marginal_value"],
         "bank_after": round(total_sale_budget - sum(row["price"] for row in chip_squad), 1),
         "free_transfers_next_event": min(maximum_free_transfers, free_transfers + 1),
-        "profile_score": round(_squad_objective(chip_squad, profile), 2),
+        "profile_score": round(_squad_objective(chip_squad, profile, cache=cache), 2),
         "squad": chip_squad,
         "squad_persists": persists,
         "reverts_after_event": not persists,
@@ -810,23 +813,30 @@ def build_transfer_decisions(
     total_sale_budget = sum(row["selling_price"] for row in squad) + bank
     profiles = []
     for profile in ("conservative", "balanced", "aggressive"):
+        # Issue #176: separate from build_multiweek_plan's own internal cache (that one memoizes
+        # _planner_player_score, a different function entirely) -- this one is for
+        # _profile_event_score, via _squad_objective/_event_lineup_schedule/_central_points, used
+        # by everything else in this profile's scenario/chip evaluation below. Scoped per profile
+        # (not shared across all three) since nothing here is reused across profiles anyway --
+        # _profile_event_score's cache key already includes profile.
+        event_score_cache = {}
         roll_candidate = {"squad": squad, "cash": bank, "transfers": []}
-        singles = _candidate_moves(squad, eligible, bank, quotas, club_limit, profile)
+        singles = _candidate_moves(squad, eligible, bank, quotas, club_limit, profile, cache=event_score_cache)
         if not singles:
             return {"status": "scenario_unavailable", "event": event, "reason": "No legal single-transfer scenario could be constructed."}
-        double = _best_double(singles, eligible, quotas, club_limit, profile)
+        double = _best_double(singles, eligible, quotas, club_limit, profile, cache=event_score_cache)
         if double is None:
             return {"status": "scenario_unavailable", "event": event, "reason": "No legal double-transfer scenario could be constructed."}
         scenarios = [
-            _scenario("roll", roll_candidate, squad, profile, free_transfers, maximum_free_transfers),
-            _scenario("single_transfer", singles[0], squad, profile, free_transfers, maximum_free_transfers),
-            _scenario("double_transfer", double, squad, profile, free_transfers, maximum_free_transfers),
+            _scenario("roll", roll_candidate, squad, profile, free_transfers, maximum_free_transfers, cache=event_score_cache),
+            _scenario("single_transfer", singles[0], squad, profile, free_transfers, maximum_free_transfers, cache=event_score_cache),
+            _scenario("double_transfer", double, squad, profile, free_transfers, maximum_free_transfers, cache=event_score_cache),
         ]
         # Issue #158: metrics/evaluation_horizons for the visitor's own *declared* squad
         # (`squad`, identical across all three profiles -- unlike `recommendation` below, which
         # may end up describing a different, post-transfer squad), not whatever this profile ends
         # up recommending. Powers a personalized "Compare risk profiles" panel.
-        profile_metrics = _profile_metrics_for_squad(squad, profile, event)
+        profile_metrics = _profile_metrics_for_squad(squad, profile, event, cache=event_score_cache)
         multiweek_plan = build_multiweek_plan(
             scenarios, eligible, quotas, club_limit, profile, event,
             free_transfers, maximum_free_transfers, horizon=horizon,
@@ -843,7 +853,8 @@ def build_transfer_decisions(
                 "churn, and future flexibility are included."
             )
         chip = _chip_recommendation(
-            profile, ordinary_recommendation, inventory, eligible, quotas, total_sale_budget, club_limit
+            profile, ordinary_recommendation, inventory, eligible, quotas, total_sale_budget, club_limit,
+            cache=event_score_cache,
         )
         recommendation = ordinary_recommendation
         if chip.get("action") == "play" and chip.get("chip") in {"wildcard", "freehit"}:
@@ -855,6 +866,7 @@ def build_transfer_decisions(
                 total_sale_budget,
                 free_transfers,
                 maximum_free_transfers,
+                cache=event_score_cache,
             )
             multiweek_plan = {
                 **multiweek_plan,
@@ -949,22 +961,25 @@ def build_draft_decisions(
     unlimited_free_transfers = len(squad)
     profiles = []
     for profile in ("conservative", "balanced", "aggressive"):
+        # Issue #176: see the matching comment in build_transfer_decisions -- separate from
+        # build_multiweek_plan's own cache, this one is for _profile_event_score.
+        event_score_cache = {}
         roll_candidate = {"squad": squad, "cash": bank, "transfers": []}
-        singles = _candidate_moves(squad, eligible, bank, quotas, club_limit, profile)
+        singles = _candidate_moves(squad, eligible, bank, quotas, club_limit, profile, cache=event_score_cache)
         if not singles:
             return {"status": "scenario_unavailable", "event": event, "reason": "No legal single-transfer scenario could be constructed."}
-        double = _best_double(singles, eligible, quotas, club_limit, profile)
+        double = _best_double(singles, eligible, quotas, club_limit, profile, cache=event_score_cache)
         if double is None:
             return {"status": "scenario_unavailable", "event": event, "reason": "No legal double-transfer scenario could be constructed."}
         scenarios = [
-            _scenario("roll", roll_candidate, squad, profile, unlimited_free_transfers, unlimited_free_transfers),
-            _scenario("single_transfer", singles[0], squad, profile, unlimited_free_transfers, unlimited_free_transfers),
-            _scenario("double_transfer", double, squad, profile, unlimited_free_transfers, unlimited_free_transfers),
+            _scenario("roll", roll_candidate, squad, profile, unlimited_free_transfers, unlimited_free_transfers, cache=event_score_cache),
+            _scenario("single_transfer", singles[0], squad, profile, unlimited_free_transfers, unlimited_free_transfers, cache=event_score_cache),
+            _scenario("double_transfer", double, squad, profile, unlimited_free_transfers, unlimited_free_transfers, cache=event_score_cache),
         ]
         # Issue #158: metrics/evaluation_horizons for the visitor's own *declared* draft squad
         # (`squad`, identical across all three profiles), not whatever this profile ends up
         # recommending. Powers a personalized "Compare risk profiles" panel.
-        profile_metrics = _profile_metrics_for_squad(squad, profile, event)
+        profile_metrics = _profile_metrics_for_squad(squad, profile, event, cache=event_score_cache)
         recommendation = dict(max(scenarios, key=lambda row: row["net_gain_5gw"]))
         if recommendation["action"] == "roll":
             recommendation["reason"] = (

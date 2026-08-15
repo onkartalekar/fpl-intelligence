@@ -575,7 +575,20 @@ def _best_xi(squad, key):
     return best[1], best[2]
 
 
-def _profile_event_score(player, profile, event_index, horizon):
+def _profile_event_score(player, profile, event_index, horizon, cache=None):
+    # Issue #176: pure for a given (player id, profile, event_index, horizon) -- reads only
+    # static per-player projection fields that don't change within one build_gw_recommendations/
+    # build_transfer_decisions/build_draft_decisions call. _optimize_squad's simulated-annealing
+    # search alone calls this (via _squad_objective -> _event_lineup_schedule) up to tens of
+    # thousands of times per profile with no caching anywhere -- profiled at ~33.5M calls for one
+    # real-scale build_transfer_decisions call, the single hottest function in that profile.
+    # cache=None (every call site that doesn't opt in) keeps today's uncached behavior exactly.
+    cache_key = None
+    if cache is not None:
+        cache_key = (player["id"], profile, event_index, horizon)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
     profile_points = (player.get("profile_fixture_xp") or {}).get(profile)
     if profile_points is None or event_index >= len(profile_points):
         profile_points = player.get("fixture_xp") or []
@@ -584,10 +597,12 @@ def _profile_event_score(player, profile, event_index, horizon):
         differential = min(0.3, max(0.0, 20.0 - player.get("ownership", 0.0)) * 0.015)
         minutes_penalty = max(0.0, 50.0 - player.get("expected_minutes", 0.0)) * 0.045
         points += (differential - minutes_penalty) / max(1, horizon)
+    if cache_key is not None:
+        cache[cache_key] = points
     return points
 
 
-def _event_lineup_schedule(squad, profile, horizon=5, include_value_bands=True, sort_bench=True):
+def _event_lineup_schedule(squad, profile, horizon=5, include_value_bands=True, sort_bench=True, cache=None):
     """Optimize XI, bench order, captain, and vice-captain independently by event.
 
     ``include_value_bands`` and ``sort_bench`` default to True so every existing
@@ -602,7 +617,7 @@ def _event_lineup_schedule(squad, profile, horizon=5, include_value_bands=True, 
     """
     schedule = []
     for event_index in range(horizon):
-        score = lambda player, index=event_index: _profile_event_score(player, profile, index, horizon)
+        score = lambda player, index=event_index: _profile_event_score(player, profile, index, horizon, cache=cache)
         lineup, formation = _best_xi(squad, score)
         lineup_ids = {player["id"] for player in lineup}
         bench_candidates = [player for player in squad if player["id"] not in lineup_ids]
@@ -647,7 +662,7 @@ def _event_lineup_schedule(squad, profile, horizon=5, include_value_bands=True, 
     return schedule
 
 
-def _team_uncertainty_interval(squad, profile, horizon=5, schedule=None):
+def _team_uncertainty_interval(squad, profile, horizon=5, schedule=None, cache=None):
     """Aggregate marginal player bands with declared covariance assumptions.
 
     Player downside/upside values are marginal ranges, so summing every extreme
@@ -655,7 +670,7 @@ def _team_uncertainty_interval(squad, profile, horizon=5, schedule=None):
     with modest same-event and cross-event correlations. This remains a modeled
     interval until enough immutable team forecasts exist for empirical calibration.
     """
-    schedule = schedule or _event_lineup_schedule(squad, profile, horizon)
+    schedule = schedule or _event_lineup_schedule(squad, profile, horizon, cache=cache)
     by_id = {player["id"]: player for player in squad}
     same_event_correlation = 0.12
     cross_event_correlation = 0.08
@@ -699,20 +714,20 @@ def _team_uncertainty_interval(squad, profile, horizon=5, schedule=None):
     }
 
 
-def _squad_objective(squad, profile="balanced", horizon=5):
+def _squad_objective(squad, profile="balanced", horizon=5, cache=None):
     # Called from _optimize_squad()'s simulated-annealing inner loop -- up to
     # tens of thousands of times per profile -- so skip the value-band totals
     # and the bench sort that _event_lineup_schedule would otherwise compute
     # and this function never reads (bench_player_ids is only ever summed
     # here, never displayed in order).
-    schedule = _event_lineup_schedule(squad, profile, horizon, include_value_bands=False, sort_bench=False)
+    schedule = _event_lineup_schedule(squad, profile, horizon, include_value_bands=False, sort_bench=False, cache=cache)
     bench_weight = {"conservative": 0.20, "balanced": 0.16, "aggressive": 0.08}[profile]
     value = 0.0
     by_id = {player["id"]: player for player in squad}
     for event in schedule:
         value += event["profile_points"]
         value += bench_weight * sum(
-            _profile_event_score(by_id[player_id], profile, event["event_index"], horizon)
+            _profile_event_score(by_id[player_id], profile, event["event_index"], horizon, cache=cache)
             for player_id in event["bench_player_ids"]
         )
     return value
@@ -752,7 +767,7 @@ def _cheap_legal_squad(eligible, quotas, budget, club_limit):
 
 def _optimize_squad(
     eligible, quotas, budget, club_limit, profile="balanced", initial_squad=None,
-    horizon=5, runs=10, steps=5000,
+    horizon=5, runs=10, steps=5000, cache=None,
 ):
     baseline = list(initial_squad) if initial_squad and _legal(initial_squad, quotas, budget, club_limit) else _cheap_legal_squad(eligible, quotas, budget, club_limit)
     candidates_by_position = {
@@ -760,12 +775,12 @@ def _optimize_squad(
         for position in quotas
     }
     best_squad = list(baseline)
-    best_score = _squad_objective(best_squad, profile, horizon)
+    best_score = _squad_objective(best_squad, profile, horizon, cache=cache)
     profile_seed = {"conservative": 1000, "balanced": 2000, "aggressive": 3000}[profile]
     for seed in range(runs):
         rng = random.Random(260700 + profile_seed + seed)
         current = list(baseline)
-        current_score = _squad_objective(current, profile, horizon)
+        current_score = _squad_objective(current, profile, horizon, cache=cache)
         for step in range(steps):
             selected_index = rng.randrange(len(current))
             old = current[selected_index]
@@ -776,7 +791,7 @@ def _optimize_squad(
             proposal[selected_index] = replacement
             if not _legal(proposal, quotas, budget, club_limit):
                 continue
-            score = _squad_objective(proposal, profile, horizon)
+            score = _squad_objective(proposal, profile, horizon, cache=cache)
             temperature = 1.5 * (1 - step / steps) + 0.03
             if score >= current_score or rng.random() < math.exp((score - current_score) / temperature):
                 current, current_score = proposal, score
@@ -818,7 +833,7 @@ def _selection_rationale(squad, eligible, alternatives_per_player=2):
     return rationale
 
 
-def _profile_metrics_for_squad(squad, profile, event=1):
+def _profile_metrics_for_squad(squad, profile, event=1, cache=None):
     """Per-profile uncertainty bands and squad-composition stats for a *fixed* squad.
 
     Issue #158: extracted from `_build_profile_recommendation` below so the same computation can
@@ -831,7 +846,7 @@ def _profile_metrics_for_squad(squad, profile, event=1):
     horizon_totals = {}
     evaluation_horizons = {}
     for horizon in (1, 3, 5):
-        schedule = _event_lineup_schedule(squad, profile, horizon)
+        schedule = _event_lineup_schedule(squad, profile, horizon, cache=cache)
         serialized_schedule = []
         for row in schedule:
             event_interval = _team_uncertainty_interval(squad, profile, horizon, [row])
@@ -875,18 +890,18 @@ def _profile_metrics_for_squad(squad, profile, event=1):
     }
 
 
-def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit, initial_squad=None, event=1):
-    squad = _optimize_squad(eligible, quotas, budget, club_limit, profile, initial_squad)
+def _build_profile_recommendation(profile, eligible, quotas, budget, club_limit, initial_squad=None, event=1, cache=None):
+    squad = _optimize_squad(eligible, quotas, budget, club_limit, profile, initial_squad, cache=cache)
     by_id = {player["id"]: player for player in squad}
     one_gameweek_score = lambda player: _profile_player_score(player, profile, 1)
-    first_schedule = _event_lineup_schedule(squad, profile, 1)[0]
+    first_schedule = _event_lineup_schedule(squad, profile, 1, cache=cache)[0]
     starting_xi = [by_id[player_id] for player_id in first_schedule["lineup_player_ids"]]
     formation = first_schedule["formation"]
     bench = [by_id[player_id] for player_id in first_schedule["bench_player_ids"]]
     captain = by_id[first_schedule["captain_id"]]
     vice_captain = by_id[first_schedule["vice_captain_id"]]
     captaincy = sorted(starting_xi, key=one_gameweek_score, reverse=True)
-    profile_metrics = _profile_metrics_for_squad(squad, profile, event)
+    profile_metrics = _profile_metrics_for_squad(squad, profile, event, cache=cache)
     gw1_points = profile_metrics["metrics"]["central_1gw"]
     definition = _PROFILE_DEFINITIONS[profile]
     return {
@@ -944,15 +959,21 @@ def build_gw_recommendations(
         player for player in projections
         if player["can_select"] and player["expected_minutes"] > 0 and player["xp_5"] > 0
     ]
+    # Issue #176: one cache for this whole call -- _optimize_squad's simulated-annealing search
+    # alone calls _squad_objective (and, through it, _profile_event_score) up to tens of
+    # thousands of times per profile; see _profile_event_score's own comment for what this
+    # eliminates and why it's safe (pure per-(player id, profile, event_index, horizon), doesn't
+    # depend on which squad a player is being evaluated within).
+    cache = {}
     balanced = _build_profile_recommendation(
-        "balanced", eligible, quotas, budget, club_limit, event=event
+        "balanced", eligible, quotas, budget, club_limit, event=event, cache=cache
     )
     balanced_players = balanced["squad"]["players"]
     conservative = _build_profile_recommendation(
-        "conservative", eligible, quotas, budget, club_limit, balanced_players, event
+        "conservative", eligible, quotas, budget, club_limit, balanced_players, event, cache=cache
     )
     aggressive = _build_profile_recommendation(
-        "aggressive", eligible, quotas, budget, club_limit, balanced_players, event
+        "aggressive", eligible, quotas, budget, club_limit, balanced_players, event, cache=cache
     )
     profile_recommendations = [conservative, balanced, aggressive]
     balanced_ids = {player["id"] for player in balanced["squad"]["players"]}
