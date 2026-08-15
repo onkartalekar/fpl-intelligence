@@ -766,16 +766,20 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-team-id"', html)
         self.assertIn('id="profile-timezone"', html)
         self.assertIn('id="profile-risk"', html)
-        self.assertIn('id="profile-free-transfers"', html)
-        self.assertIn('id="profile-free-transfers-event"', html)
         self.assertIn('id="profile-save"', html)
         self.assertIn('id="profile-message"', html)
         self.assertIn("fetch('/api/profile'", html)
+        # Per request: the "Confirmed free transfers"/"Free transfers gameweek" override was
+        # dropped from the form entirely -- UI-only, the backend fields stay nullable and untouched
+        # (transfer_decisions.py's derive_free_transfers fallback already handles them being unset).
+        self.assertNotIn('id="profile-free-transfers"', html)
+        self.assertNotIn('id="profile-free-transfers-event"', html)
+        self.assertNotIn('for="profile-free-transfers">Confirmed free transfers</label>', html)
+        self.assertNotIn('for="profile-free-transfers-event">Free transfers gameweek</label>', html)
         # Per request: only the Team ID field is actually required to save (setupProfileForm's
         # own validation only blocks submission on a missing/invalid team ID -- timezone always
-        # has a value because it's a <select>, confirmed free transfers is genuinely optional, and
-        # its gameweek is only required when that field is filled in). Removed the reassurance copy
-        # since it read as a claim about the fields themselves, not just this app's own auth.
+        # has a value because it's a <select>). Removed the reassurance copy since it read as a
+        # claim about the fields themselves, not just this app's own auth.
         self.assertNotIn("no password, no account required", html)
 
     def test_no_account_no_password_reassurance_copy_removed_everywhere(self):
