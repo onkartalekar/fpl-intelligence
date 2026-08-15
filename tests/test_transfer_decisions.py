@@ -121,14 +121,10 @@ class TransferDecisionTests(unittest.TestCase):
             self.assertEqual(roll["transfers"], [])
             self.assertEqual(roll["point_cost"], 0)
             self.assertEqual(roll["free_transfers_next_event"], 2)
-            # The recommendation is usually one of this profile's own scenarios, but a chip
-            # (`play_wildcard`/`play_freehit`) legitimately overrides it when one clears its
-            # profile-specific threshold -- see test_wildcard_replaces_.../test_free_hit_replaces_...
-            # below for that path in isolation.
-            self.assertTrue(
-                profile["recommendation"]["action"] in actions
-                or profile["recommendation"]["action"].startswith("play_")
-            )
+            # A chip (`play_wildcard`/`play_freehit`) can legitimately override this -- see
+            # test_wildcard_replaces_.../test_free_hit_replaces_... for that path in isolation --
+            # but not for this fixture: issue #184's retuned _THRESHOLDS no longer clear here.
+            self.assertIn(profile["recommendation"]["action"], actions)
             self.assertEqual(len(profile["recommendation"]["starting_xi"]), 11)
 
     def test_profiles_carry_uncertainty_metrics_for_the_managers_own_declared_squad(self):
@@ -277,6 +273,27 @@ class TransferDecisionTests(unittest.TestCase):
             self.assertIn("marginal_value", chip)
             if chip["action"] == "play":
                 self.assertGreater(chip["marginal_value"], 0)
+
+    def test_chip_thresholds_are_not_scale_biased_after_the_central_points_fix(self):
+        # Issue #184 regression. Issue #181's central_points fix made _central_points read each
+        # profile's own profile-adjusted scale instead of one shared plain scale -- correct, but
+        # it left _THRESHOLDS uncalibrated for the new scale. Before the #184 fix, this exact
+        # squad made aggressive's freehit clear its (old) threshold by +37.4 points (49.4 vs
+        # 12.0) purely because of the scale change, not because the squad was actually
+        # freehit-worthy -- and conservative's freehit swung the opposite way (-40.6 vs an old
+        # threshold of 18.0), so it never fired either, again for the wrong reason. Confirms
+        # neither profile's freehit fires purely from scale bias against this ordinary squad.
+        bootstrap, fixtures, manager = gw2_inputs()
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+        for profile in result["profiles"]:
+            chip = profile["chip_recommendation"]
+            if profile["id"] in ("conservative", "aggressive"):
+                self.assertFalse(
+                    chip["action"] == "play" and chip["chip"] == "freehit",
+                    f"{profile['id']} played freehit for an ordinary squad -- likely scale bias",
+                )
 
     def test_wildcard_replaces_the_ordinary_primary_action_and_persists(self):
         bootstrap, fixtures, manager = gw2_inputs()

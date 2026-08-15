@@ -140,8 +140,7 @@ folded into #184 silently.
 
 ### (c) Re-hand-tune `_THRESHOLDS`' wildcard/freehit constants against the new scale -- BUILD, primary recommendation
 
-**What:** Pick new constants for the 6 affected entries (`wildcard`/`freehit` x 3 profiles;
-`bboost`/`3xc` stay untouched, confirmed unaffected above), using the same kind of
+**What:** Pick new constants for the affected entries, using the same kind of
 representative-sample judgment call the original constants were almost certainly set by --
 this time using real observed marginal values across a spread of squad quality (near-ideal
 through deliberately weak, at both unit-test and realistic scale, the same technique used to
@@ -149,6 +148,29 @@ produce the findings above) so the new numbers at least restore correct *directi
 clears more easily than a strong one) and land in a sane range (roughly "clearly worth it" vs.
 "clearly not," judged by inspection of the new-scale numbers, the same way the old ones plainly
 were).
+
+**Correction found while implementing: only 4 entries actually need new values, not 6.**
+`recommendations.py` builds `profile_fixture_xp["balanced"]` from the *exact same array* as
+plain `fixture_xp` in every branch (role-transition, teammate-impact, and the default case) --
+confirmed directly in the source, and matches the ratio table above showing balanced's
+old-style and new-style `_central_points` values as identical (ratio 1.000) on every sample
+checked. Balanced's scale never moved, so `balanced`'s `wildcard`/`freehit` thresholds (18.0,
+15.0) are untouched. Only `conservative` and `aggressive`'s `wildcard`/`freehit` entries change.
+
+**Values chosen (from a realistic-scale downgrade-severity sweep, 0-12 of 15 squad slots
+swapped for the worst available same-position replacement):**
+
+| Profile | Chip | Old | New | Why |
+|---|---|---|---|---|
+| conservative | wildcard | 22.0 | 22.0 (unchanged) | Already discriminates sanely post-#181: 3.4 for a near-ideal squad, only clears around 9-12/15 downgrades (30.0). |
+| conservative | freehit | 18.0 | **-30.0** | Compressed scale runs deeply negative even for a bad squad (-39.8 near-ideal to -28.4 at 12 downgrades) and never approaches positive within any realistic degradation -- a positive threshold is unreachable by construction. -30.0 keeps freehit reachable only for near-catastrophic squads, consistent with a risk-averse profile rarely wanting to burn a one-week reshuffle. |
+| aggressive | wildcard | 14.0 | **20.0** | Old threshold already cleared for a near-ideal squad (15.1 vs 14.0) -- fired unconditionally. 20.0 requires real degradation (~4-6/15 downgrades, 21.5-24.1) before it fires. |
+| aggressive | freehit | 12.0 | **65.0** | Old threshold cleared for a near-ideal squad by a wide margin (57.2 vs 12.0) -- fired unconditionally, growing only modestly with real degradation (57.2 to 70.4 across the full sweep). 65.0 requires severe degradation (~9-12/15 downgrades) before it fires, keeping freehit a rare, high-conviction recommendation rather than a standing nag. |
+
+Re-ran the full downgrade sweep with these values: no chip fires for a near-ideal squad on
+either profile; wildcard/freehit only start firing at meaningfully degraded squads; wildcard
+correctly outranks freehit once a squad is bad enough that a permanent rebuild beats a one-week
+reshuffle. `bboost`/`3xc` and `balanced`'s `wildcard`/`freehit` are unchanged.
 
 **Honestly labeled, not oversold.** This is not backtest-validated and won't claim to be --
 it has exactly the same epistemic status the original `_THRESHOLDS` values already had (a
@@ -175,13 +197,18 @@ for the currently direction-blind freehit behavior.**
 
 ## Recommendation
 
-Build (c): re-tune `_THRESHOLDS`' wildcard/freehit constants (conservative, balanced,
-aggressive -- 6 of the 12 total entries) against the new profile-adjusted `_central_points`
-scale, using representative squads across a quality spread the way the findings above were
-produced. Leave `bboost`/`3xc` untouched (confirmed unaffected). Decline (a) as unreliable.
-Defer (b) as a legitimate but much larger future project, not part of this issue. Note (d) as a
-worthwhile structural idea for later, not built now.
+**Built.** (c): re-tuned `conservative.freehit` (18.0 -> -30.0), `aggressive.wildcard`
+(14.0 -> 20.0), and `aggressive.freehit` (12.0 -> 65.0); left `conservative.wildcard` (22.0,
+already sane), all of `balanced` (scale never moved), and `bboost`/`3xc` (separate, unaffected
+code path) unchanged. Decline (a) as unreliable (shown not to generalize). Defer (b) as a
+legitimate but much larger future project, not part of this issue. Note (d) as a worthwhile
+structural idea for later, not built now.
 
-This directly fixes the currently-broken behavior (freehit is direction-blind for conservative
-and aggressive today, regardless of squad quality) without pretending to a rigor level
-(backtest-validated) the codebase has no infrastructure to actually provide yet.
+This directly fixes the previously-broken behavior (freehit cleared or missed its threshold
+regardless of squad quality for conservative and aggressive) without pretending to a rigor
+level (backtest-validated) the codebase has no infrastructure to actually provide yet. Added
+`test_chip_thresholds_are_not_scale_biased_after_the_central_points_fix` in
+`tests/test_transfer_decisions.py` as a regression test, and tightened
+`test_builds_roll_single_and_double_scenarios_for_three_profiles`'s recommendation-action
+assertion back to its pre-#181 strict form now that this fixture's chip no longer spuriously
+overrides it.
