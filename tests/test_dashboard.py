@@ -428,7 +428,13 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Conservative", html)
         self.assertIn("Balanced", html)
         self.assertIn("Aggressive", html)
-        self.assertIn('id="weekly-profile-options"', html)
+        # Bug fix: this section used to build its own separate Conservative/Balanced/Aggressive
+        # tab strip -- a second, independent profile selector stacked directly below the rich
+        # renderProfileComparison() panel above it, both driving the same three profiles. Removed
+        # in favor of the one already-relocated selector; weekly-profile-comparison-mount is where
+        # it lands.
+        self.assertNotIn('id="weekly-profile-options"', html)
+        self.assertIn('id="weekly-profile-comparison-mount"', html)
         self.assertIn('id="weekly-scenarios"', html)
         self.assertIn('id="weekly-plan"', html)
         self.assertIn('id="weekly-branches"', html)
@@ -578,7 +584,10 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-panel" role="tabpanel"', html)
         self.assertIn('id="weekly-profile-panel" role="tabpanel"', html)
         self.assertIn('aria-controls="profile-panel"', html)
-        self.assertIn('aria-controls="weekly-profile-panel"', html)
+        # Bug fix: weekly-profile-panel's own local tab strip (the one that used to produce
+        # aria-controls="weekly-profile-panel") was removed as a duplicate profile selector --
+        # it's now labelled by the surviving, relocated tab strip's buttons instead.
+        self.assertIn("byId('weekly-profile-panel').setAttribute('aria-labelledby',`profile-tab-", html)
         self.assertIn("tabindex=\"${profile.id===selected.id?'0':'-1'}\"", html)
         self.assertIn("['ArrowLeft','ArrowRight','Home','End']", html)
         self.assertIn("next.focus()", html)
