@@ -1,0 +1,40 @@
+name: Tests
+
+# Issue #170: this is the first CI workflow in the repo that actually runs the offline unit suite
+# in tests/ -- the four other workflows here (deadline-reminder, release-notes,
+# scheduled-refresh, live-regression-check) are all trigger=schedule/workflow_dispatch only, and
+# none of them invoke unittest/pytest. Before this, tests/*.py only ran when a human happened to
+# run it locally, on whatever Python version their machine had -- which is exactly how a
+# version-dependent bug (socket.timeout vs. TimeoutError, only distinct on Python < 3.10) went
+# undetected until it broke locally on a 3.9 dev sandbox despite the repo's own scheduled
+# workflows and deploy target both being 3.11.
+#
+# Python 3.11 only, matching the version already pinned by every other workflow in this repo
+# (and presumably Railway's deploy target) -- the repo declares no other supported version
+# anywhere (no runtime.txt, no python_requires), so testing an undeclared version here would be
+# scope beyond "add CI."
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  run-tests:
+    name: Run test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run test suite
+        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
