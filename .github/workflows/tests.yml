@@ -65,6 +65,15 @@ jobs:
               tests.test_reminder_confirmation tests.test_start_dashboard tests.test_team_strength
               tests.test_transfers tests.test_trigger_scheduled_refresh
     steps:
+      - name: Print run configuration
+        # No workflow_dispatch inputs here (pull_request/push only), but the matrix "selection"
+        # this specific job got is worth printing up front too -- which group, and exactly which
+        # modules it resolved to run.
+        run: |
+          echo "event_name: ${{ github.event_name }}"
+          echo "matrix.group: ${{ matrix.group }}"
+          echo "matrix.modules: ${{ matrix.modules }}"
+
       - name: Checkout
         uses: actions/checkout@v4
 

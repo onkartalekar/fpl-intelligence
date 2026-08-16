@@ -46,6 +46,15 @@ jobs:
       FPL_INTEL_REMINDER_TEAMS_TOKEN: ${{ secrets.FPL_INTEL_REMINDER_TEAMS_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Print run configuration
+        # Prints exactly what this run resolved to before doing anything else -- the trigger and
+        # every workflow_dispatch input's actual value (unset on a `schedule` run, since
+        # `inputs.*` only exists for workflow_dispatch). No secrets, no recipient data here --
+        # just the boolean selection itself, safe for this repo's public run logs.
+        run: |
+          echo "event_name: ${{ github.event_name }}"
+          echo "dry_run: ${{ inputs.dry_run }}"
+
       - name: Checkout
         uses: actions/checkout@v4
 
