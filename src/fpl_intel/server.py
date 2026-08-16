@@ -12,6 +12,7 @@ own docstring for the pattern. No behavior changed by this split; see issue #210
 """
 
 from datetime import datetime, timezone
+import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -219,17 +220,43 @@ def create_server(
         # `_CONNECTION_TIMEOUT_SECONDS`'s comment above for why 20s.
         timeout = _CONNECTION_TIMEOUT_SECONDS
 
+        def _accepts_gzip(self):
+            """Issue #209: True if the request's Accept-Encoding lists gzip as one of its
+            (possibly several, possibly q-valued) tokens, e.g. "gzip, deflate" or
+            "gzip;q=1.0, identity;q=0.5". Only the token name before any ";q=..." matters here --
+            this server only ever chooses between gzip and sending the body as-is, so a plain
+            membership check is enough; it doesn't need to honor relative q-value weighting."""
+            accept_encoding = self.headers.get("Accept-Encoding", "")
+            tokens = (token.split(";", 1)[0].strip() for token in accept_encoding.split(","))
+            return "gzip" in tokens
+
+        def _compress_if_accepted(self, body):
+            """Issue #209: gzip `body` when the client's Accept-Encoding says it can decode gzip,
+            returning (possibly-compressed body, Content-Encoding value or None). Shared by
+            `_json` and `_send_html` -- the two, and only, places a response body is written --
+            so every response funnels through the same compress-or-not decision. Doesn't change
+            whether a response is cacheable (`Cache-Control: no-store` from issue #120 is
+            untouched); only how many bytes cross the wire for the same content."""
+            if not self._accepts_gzip():
+                return body, None
+            return gzip.compress(body), "gzip"
+
         def _json(self, status, payload, extra_headers=None):
             body = json.dumps(payload).encode("utf-8")
+            body, content_encoding = self._compress_if_accepted(body)
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            if content_encoding:
+                self.send_header("Content-Encoding", content_encoding)
+            self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             for name, value in (extra_headers or {}).items():
                 self.send_header(name, value)
             self.end_headers()
-            # HEAD gets every header a GET would (including the real Content-Length -- per HTTP
-            # semantics, describing what the body *would* have been), just never the body itself.
+            # HEAD gets every header a GET would (including the real, post-compression
+            # Content-Length -- per HTTP semantics, describing what the body *would* have been),
+            # just never the body itself.
             if not getattr(self, "_head_request", False):
                 self.wfile.write(body)
 
@@ -254,8 +281,12 @@ def create_server(
 
         def _send_html(self, html):
             body = html.encode("utf-8")
+            body, content_encoding = self._compress_if_accepted(body)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            if content_encoding:
+                self.send_header("Content-Encoding", content_encoding)
+            self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
