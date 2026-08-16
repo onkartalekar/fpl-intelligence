@@ -38,6 +38,14 @@ jobs:
       FPL_INTEL_SMTP_USER: ${{ secrets.FPL_INTEL_SMTP_USER }}
       FPL_INTEL_SMTP_PASSWORD: ${{ secrets.FPL_INTEL_SMTP_PASSWORD }}
     steps:
+      - name: Print run configuration
+        # Prints exactly what this run resolved to before doing anything else -- the trigger and
+        # every workflow_dispatch input's actual value (unset on a `schedule` run, since
+        # `inputs.*` only exists for workflow_dispatch).
+        run: |
+          echo "event_name: ${{ github.event_name }}"
+          echo "dry_run: ${{ inputs.dry_run }}"
+
       - name: Checkout
         uses: actions/checkout@v4
 

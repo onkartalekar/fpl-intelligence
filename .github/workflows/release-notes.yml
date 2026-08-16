@@ -55,11 +55,11 @@ permissions:
                     # constraints section for why that's a deliberate, confirmed exception here).
   pull-requests: write  # This repo's main branch ruleset requires every change go through a PR
                          # (confirmed live: a direct push here was rejected with "GH013 ... Changes
-                         # must be made through a pull request"), even though it requires zero
-                         # approvals -- so contents: write alone was never going to be enough. This
-                         # workflow now opens a PR for its own archival commit and immediately
-                         # squash-merges it itself (nothing in the ruleset blocks that -- zero
-                         # required reviews, zero required status checks), rather than a bare push.
+                         # must be made through a pull request"), even though the ruleset itself
+                         # requires zero approvals -- so contents: write alone was never going to
+                         # be enough. This workflow opens a PR for its own archival commit and
+                         # enables auto-merge on it (see "Commit the archived entry"'s own comment
+                         # for why that's `--auto`, not an immediate synchronous merge).
 
 jobs:
   publish-release-notes:
@@ -77,6 +77,22 @@ jobs:
       FPL_INTEL_RELEASE_NOTES_LLM_API_BASE: ${{ secrets.FPL_INTEL_RELEASE_NOTES_LLM_API_BASE }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
+      - name: Print run configuration
+        # Prints exactly what this run resolved to before doing anything else -- the trigger,
+        # and every workflow_dispatch input's actual value (unset/default on a `schedule` run,
+        # since `inputs.*` only exists for workflow_dispatch). Confirmed live: without this, a
+        # manual run's actual selections (e.g. backfill_publish left unchecked) were buried
+        # inside a later step's shell-flag-building trace, not visible without reading the full
+        # log -- this makes them the first thing anyone sees.
+        run: |
+          echo "event_name: ${{ github.event_name }}"
+          echo "schedule (cron that fired, schedule runs only): ${{ github.event.schedule }}"
+          echo "dry_run: ${{ inputs.dry_run }}"
+          echo "skip_hour_check: ${{ inputs.skip_hour_check }}"
+          echo "backfill_start: ${{ inputs.backfill_start }}"
+          echo "backfill_end: ${{ inputs.backfill_end }}"
+          echo "backfill_publish: ${{ inputs.backfill_publish }}"
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -140,13 +156,20 @@ jobs:
         # --porcelain` is empty on a --dry-run run or a genuine no-op day (nothing merged), so
         # this step is a safe no-op in both those cases, not a failure.
         #
-        # A branch + PR + immediate squash-merge, not a direct push to main: this repo's branch
-        # ruleset requires every change go through a PR (confirmed live -- a bare `git push` here
-        # was rejected with "GH013 ... Changes must be made through a pull request"). The ruleset
-        # itself requires zero approvals and has no required status checks, so the merge happens
-        # immediately in this same step -- no human wait, no separate follow-up action needed,
-        # matching the "just publishes, no review gate" design this workflow was always meant to
-        # have (see plans/issue-143-whats-new-tab.md's Structural constraints section).
+        # A branch + PR + auto-merge, not a direct push to main: this repo's branch ruleset
+        # requires every change go through a PR (confirmed live -- a bare `git push` here was
+        # rejected with "GH013 ... Changes must be made through a pull request"). The ruleset
+        # itself requires zero approvals, matching the "just publishes, no review gate" design
+        # this workflow was always meant to have (see plans/issue-143-whats-new-tab.md's
+        # Structural constraints section) -- but a *separate* classic branch-protection rule on
+        # `main` (distinct from that ruleset) requires the 4 "Run test suite (...)" checks to
+        # pass before any merge. Bug fix, confirmed live: an earlier version of this step called
+        # `gh pr merge --squash --delete-branch` with no `--auto`, which tried to merge
+        # synchronously seconds after the PR was created -- long before those checks (each
+        # several minutes) could possibly report -- and failed outright ("the base branch policy
+        # prohibits the merge"), leaving a dangling unmerged PR every time there was real content
+        # to archive. `--auto` enables auto-merge instead: GitHub merges it itself once the
+        # required checks pass, no synchronous wait needed here.
         #
         # gh pr create/merge specifically need FPL_INTEL_RELEASE_NOTES_PAT, not the default
         # github.token: confirmed live -- "GitHub Actions is not permitted to create or approve
@@ -181,7 +204,7 @@ jobs:
             gh pr create --title "Archive $DATE release notes" \
               --body "Automated archival commit from release-notes.yml -- issue #143." \
               --base main --head "$BRANCH"
-            gh pr merge "$BRANCH" --squash --delete-branch
+            gh pr merge "$BRANCH" --squash --delete-branch --auto
           else
             echo "Nothing new to archive."
           fi
