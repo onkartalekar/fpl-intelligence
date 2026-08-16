@@ -32,19 +32,19 @@ on:
         type: boolean
         default: true
       skip_hour_check:
-        description: "Bypass the DST-safe hour gate (useful when running this manually). Ignored in backfill mode, which always bypasses it."
+        description: "Run right now, regardless of time of day. The daily schedule only fires around 8am ET; leave this on for manual runs so it doesn't get skipped. (Backfill mode always runs immediately, this has no effect there.)"
         type: boolean
         default: true
       backfill_start:
-        description: "Backfill mode: write an entry for every ET day with a merged PR from this date (YYYY-MM-DD) through backfill_end. Leave blank for a normal single-day run."
+        description: "Regenerate past days instead of today: first date to start from (YYYY-MM-DD). Leave blank for a normal single-day run."
         type: string
         default: ""
       backfill_end:
-        description: "Backfill mode only: last ET day to backfill (YYYY-MM-DD). Blank defaults to yesterday (ET)."
+        description: "Only used with 'Backfill from date' above: last date to regenerate (YYYY-MM-DD). Leave blank to stop at yesterday."
         type: string
         default: ""
       backfill_publish:
-        description: "Backfill mode only: also POST each backfilled entry to the live dashboard's What's New tab. Unchecked only writes the git-tracked release-notes/<date>.md archive, without touching the live site."
+        description: "Only used with 'Backfill from date' above: also push each regenerated day live to the dashboard, not just the archived file. Leave off to only update the archive."
         type: boolean
         default: false
 
