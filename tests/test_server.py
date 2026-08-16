@@ -12,6 +12,7 @@ test_server_refresh.py, test_server_team_lookup.py.
 
 
 from contextlib import redirect_stderr, redirect_stdout
+import gzip
 import http.client
 import io
 import json
@@ -838,6 +839,108 @@ class HeadRequestTests(unittest.TestCase):
 
         self.assertNotIn("501", captured.getvalue())
         self.assertNotIn("Unsupported method", captured.getvalue())
+
+
+class ResponseCompressionTests(unittest.TestCase):
+    """Issue #209: `_json`/`_send_html` gzip the response body when the request's
+    Accept-Encoding says the client can decode gzip, and leave it uncompressed otherwise --
+    every response funnels through one of these two methods, so covering both covers every
+    route. Doesn't touch `Cache-Control: no-store` (issue #120) or the inlined-CSS/JS shape
+    (issue #51) -- transport-only."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_dashboard_html_is_gzipped_and_byte_identical_once_decompressed(self):
+        plain = urlopen(self.base_url + "/dashboard.html", timeout=3)
+        plain_body = plain.read()
+        self.assertNotIn("Content-Encoding", plain.headers)
+
+        request = Request(self.base_url + "/dashboard.html", headers={"Accept-Encoding": "gzip"})
+        compressed = urlopen(request, timeout=3)
+        compressed_body = compressed.read()
+
+        self.assertEqual(compressed.headers["Content-Encoding"], "gzip")
+        self.assertEqual(compressed.headers["Content-Length"], str(len(compressed_body)))
+        self.assertLess(len(compressed_body), len(plain_body))
+        self.assertEqual(gzip.decompress(compressed_body), plain_body)
+
+    def test_json_endpoint_is_gzipped_too(self):
+        plain_body = urlopen(self.base_url + "/api/status", timeout=3).read()
+
+        request = Request(self.base_url + "/api/status", headers={"Accept-Encoding": "gzip"})
+        compressed = urlopen(request, timeout=3)
+        compressed_body = compressed.read()
+
+        self.assertEqual(compressed.headers["Content-Encoding"], "gzip")
+        self.assertEqual(gzip.decompress(compressed_body), plain_body)
+
+    def test_a_client_that_omits_accept_encoding_gets_the_plain_body(self):
+        response = urlopen(self.base_url + "/api/status", timeout=3)
+
+        self.assertNotIn("Content-Encoding", response.headers)
+        self.assertEqual(json.loads(response.read())["status"], "ok")
+
+    def test_accept_encoding_with_other_tokens_and_q_values_still_matches_gzip(self):
+        # Real browsers send something like "gzip, deflate, br" -- gzip is rarely the only or
+        # first token, and q-values are optional and may appear on any token.
+        request = Request(
+            self.base_url + "/api/status",
+            headers={"Accept-Encoding": "deflate, gzip;q=0.8, br"},
+        )
+        response = urlopen(request, timeout=3)
+
+        self.assertEqual(response.headers["Content-Encoding"], "gzip")
+
+    def test_vary_accept_encoding_is_always_present(self):
+        with_gzip = urlopen(
+            Request(self.base_url + "/api/status", headers={"Accept-Encoding": "gzip"}), timeout=3
+        )
+        without_gzip = urlopen(self.base_url + "/api/status", timeout=3)
+
+        self.assertEqual(with_gzip.headers["Vary"], "Accept-Encoding")
+        self.assertEqual(without_gzip.headers["Vary"], "Accept-Encoding")
+
+    def test_head_request_with_gzip_reports_the_compressed_content_length(self):
+        get_response = urlopen(
+            Request(self.base_url + "/", headers={"Accept-Encoding": "gzip"}), timeout=3
+        )
+        get_body = get_response.read()
+
+        head_response = urlopen(
+            Request(self.base_url + "/", method="HEAD", headers={"Accept-Encoding": "gzip"}),
+            timeout=3,
+        )
+
+        self.assertEqual(head_response.read(), b"")
+        self.assertEqual(head_response.headers["Content-Encoding"], "gzip")
+        self.assertEqual(head_response.headers["Content-Length"], str(len(get_body)))
+
+    def test_cache_control_no_store_is_unaffected_by_compression(self):
+        # Issue #120's always-render-fresh fix is explicitly out of scope for #209 -- confirm
+        # compression didn't accidentally touch it.
+        response = urlopen(
+            Request(self.base_url + "/dashboard.html", headers={"Accept-Encoding": "gzip"}),
+            timeout=3,
+        )
+
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
 
 class AccessLogClientLabelTests(unittest.TestCase):
     """Bug fix: DashboardHandler.log_message's override used to print only the timestamp and
