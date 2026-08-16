@@ -101,7 +101,14 @@ jobs:
               FLAGS="$FLAGS --backfill-publish"
             fi
           else
-            if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
+            # Bug fix: the old condition was `!= workflow_dispatch OR dry_run == true`, which added
+            # --dry-run on every `schedule` trigger unconditionally (the workflow_dispatch `dry_run`
+            # input doesn't exist on schedule events, but the `!=` half of the OR was already true by
+            # itself) -- confirmed live: every daily cron run since this workflow's inception
+            # generated the entry, printed it, and never called publish_entry/write_archive_file,
+            # while still exiting 0. Only a manual workflow_dispatch run with the dry_run checkbox
+            # checked (the default) should dry-run; the daily schedule must always publish for real.
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
               FLAGS="$FLAGS --dry-run"
             fi
             if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_hour_check }}" = "true" ]; then
