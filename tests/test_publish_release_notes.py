@@ -310,6 +310,82 @@ class BuildLlmEntryTests(unittest.TestCase):
 
         self.assertIsNone(entry)
 
+    def test_fewer_changes_than_prs_returns_none(self):
+        """Confirmed live (2026-08-16): a response with fewer changes[] entries than PRs given
+        passed every per-entry check (each included entry was well-formed) and was silently
+        accepted, dropping real content with no error. Every entry here is individually valid --
+        only the count is wrong -- so this specifically exercises the count check, not the
+        per-entry validation."""
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+        })
+        prs = [{"title": "A"}, {"title": "B"}, {"title": "C"}]
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), prs, caller=lambda prompt: response)
+
+        self.assertIsNone(entry)
+
+    def test_more_changes_than_prs_returns_none(self):
+        """The reverse mismatch -- more changes[] entries than PRs given -- is rejected too, not
+        just the under-count case."""
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [
+                {"category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"category": "Fix", "audience": "user", "title": "T2", "description": "D2"},
+            ],
+        })
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=lambda prompt: response)
+
+        self.assertIsNone(entry)
+
+    def test_matching_change_and_pr_count_is_accepted(self):
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [
+                {"category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"category": "Chore", "audience": "developer", "title": "T2", "description": "D2"},
+            ],
+        })
+        prs = [{"title": "A"}, {"title": "B"}]
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), prs, caller=lambda prompt: response)
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(len(entry["changes"]), 2)
+
+    def test_falls_back_to_template_when_llm_drops_changes(self):
+        """End-to-end through generate_entry: a count-mismatched LLM response must produce the
+        same complete, one-entry-per-PR result the template fallback always guarantees -- not a
+        silently short entry."""
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+        })
+        prs = [
+            {"title": "Fix the stale banner"},
+            {"title": "Update README env vars"},
+        ]
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry, source = prn.generate_entry(date(2026, 8, 11), prs, llm_caller=lambda prompt: response)
+
+        self.assertEqual(source, "template")
+        self.assertEqual(len(entry["changes"]), 2)
+
     def test_caller_network_exception_returns_none_not_raise(self):
         def raising_caller(prompt):
             raise URLError("boom")

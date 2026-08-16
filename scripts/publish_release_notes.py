@@ -428,6 +428,16 @@ def build_llm_entry(date, prs, caller=None):
     changes = parsed.get("changes")
     if not isinstance(changes, list) or not changes:
         return None
+    # Confirmed live (2026-08-16): a well-formed, validly-categorized response silently dropped
+    # 6 of 16 PRs' worth of changes -- every entry it did include passed the per-entry checks
+    # below, so nothing caught it, and the entry was published (and emailed) 10 items short with
+    # no error anywhere. `_SYSTEM_PROMPT` already says "One changes[] entry per pull request
+    # given," but nothing enforced it. This is the enforcement: a response that doesn't cover
+    # every PR given is rejected outright, same as any other malformed response, and falls back
+    # to `build_template_entry` -- which is structurally guaranteed to have exactly one entry per
+    # PR, so the fallback can't reproduce this failure mode.
+    if len(changes) != len(prs):
+        return None
     for change in changes:
         if not isinstance(change, dict):
             return None
