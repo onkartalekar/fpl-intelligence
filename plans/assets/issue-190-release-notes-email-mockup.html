@@ -1,0 +1,138 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FPL Intelligence: What's New</title></head>
+<body style="margin:0;padding:0;background:#0d1b2a;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d1b2a"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
+
+<tr><td style="padding:16px 16px 0 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0"><tr>
+<td style="background:#203b59;color:#b9dcff;font-weight:bold;font-size:12px;padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;letter-spacing:.3px">WHAT'S NEW &middot; SAT, AUG 15</td>
+</tr></table>
+</td></tr>
+
+<tr><td style="padding:14px 16px 0 16px">
+<h1 style="margin:0;color:#f4f7fb;font-size:20px;line-height:1.35;font-family:Arial,Helvetica,sans-serif">Streamlined interface and enhanced functionality for better transfer decisions and logging</h1>
+</td></tr>
+
+<tr><td style="padding:8px 16px 0 16px">
+<p style="margin:0;color:#9fb0c3;font-size:14px;line-height:1.55;font-family:Arial,Helvetica,sans-serif">We've made exciting updates to improve user experience by removing redundant input fields and enhancing our data logging capabilities. Thanks to smarter caching and a new multi-transfer feature, managers can now strategize with more accurate insights and greater efficiency.</p>
+</td></tr>
+
+<tr><td style="padding:16px 16px 0 16px"><div style="border-top:1px solid #28405c"></div></td></tr>
+
+<!-- "For you" eyebrow: user-facing categories (Feature, Fix, Data). Split from "Under the hood"
+     below is organizational (who this is for), not a weight difference -- both sections use the
+     same badge/card treatment. -->
+<tr><td style="padding:20px 16px 0 16px">
+<p style="margin:0;color:#f4f7fb;font-size:13px;font-weight:bold;letter-spacing:.4px;font-family:Arial,Helvetica,sans-serif;text-transform:uppercase">What's new for you</p>
+</td></tr>
+
+<!-- Feature section -->
+<tr><td style="padding:12px 16px 0 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr>
+<td style="background:#164b3a;color:#94efcb;font-weight:bold;font-size:12px;padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;letter-spacing:.3px">FEATURE &middot; 6</td>
+</tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#13233a;border:1px solid #28405c;border-radius:8px">
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Memoize player scores for performance</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Implemented memoization for planner player scores, improving response times.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Add a local parallel test runner</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Created a local script to run tests in parallel, mirroring the CI setup.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Benchmark transfer decisions for performance evaluation</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Introduced a benchmark script to assess the performance of transfer decision-making.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Memoize additional scoring functions</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Memoized the _profile_event_score function for improved efficiency.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Support multiple free transfers</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Enhanced transfer search capability to support up to the official maximum free transfers.</p>
+</td></tr>
+<tr><td style="padding:14px 16px">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Recalibrate chip thresholds</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Adjusted thresholds for wildcards and free hits to align with new scoring metrics.</p>
+</td></tr>
+</table>
+</td></tr>
+
+<!-- Fix section -->
+<tr><td style="padding:20px 16px 0 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr>
+<td style="background:#3a2f12;color:#f0d98c;font-weight:bold;font-size:12px;padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;letter-spacing:.3px">FIX &middot; 7</td>
+</tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#13233a;border:1px solid #28405c;border-radius:8px">
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Remove redundant transfer input fields</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Eliminated the 'Confirmed free transfers' and 'Free transfers gameweek' fields from the Manager profile form.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Add HEAD method support and improve logging</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Enabled HEAD request handling and refined error logging, including client details.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Eliminate duplicate risk profile selectors</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Removed the redundant Conservative/Balanced/Aggressive selector from the Weekly decision section.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Change access logs to structured JSON</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Updated access logs to output structured JSON for better observability.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Catch socket timeout errors more effectively</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Broadened error handling to include socket timeout and ensure consistent logging.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Update documentation for consistency</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Reviewed and revised documentation to fix outdated references and streamline information.</p>
+</td></tr>
+<tr><td style="padding:14px 16px">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Mute benchmark reference label styling</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Changed the styling of the benchmark reference label to prevent misinterpretation.</p>
+</td></tr>
+</table>
+</td></tr>
+
+<!-- "Under the hood" -- developer-facing categories (Docs, Chore). Same card/badge treatment as
+     "What's new for you" above: this is an organizational split, not a "less important" one. -->
+<tr><td style="padding:26px 16px 0 16px"><div style="border-top:1px solid #28405c"></div></td></tr>
+<tr><td style="padding:20px 16px 0 16px">
+<p style="margin:0;color:#f4f7fb;font-size:13px;font-weight:bold;letter-spacing:.4px;font-family:Arial,Helvetica,sans-serif;text-transform:uppercase">Under the hood <span style="color:#9fb0c3;font-weight:normal;text-transform:none;letter-spacing:normal">(for the developer in you)</span></p>
+</td></tr>
+
+<!-- Chore section -->
+<tr><td style="padding:12px 16px 0 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr>
+<td style="background:#26303f;color:#b8c4d1;font-weight:bold;font-size:12px;padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;letter-spacing:.3px">CHORE &middot; 3</td>
+</tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#13233a;border:1px solid #28405c;border-radius:8px">
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Introduce CI for automated testing</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Added a continuous integration workflow to run tests on every pull request.</p>
+</td></tr>
+<tr><td style="padding:14px 16px;border-bottom:1px solid #28405c">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Optimize the CI workflow for faster test execution</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Split the test workflow into parallel jobs to significantly reduce runtime.</p>
+</td></tr>
+<tr><td style="padding:14px 16px">
+<p style="margin:0 0 3px;color:#f4f7fb;font-size:14px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">Untrack generated artifacts from Git</p>
+<p style="margin:0;color:#9fb0c3;font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif">Removed data/model-performance.json from version control as it's a generated file.</p>
+</td></tr>
+</table>
+</td></tr>
+
+<tr><td style="padding:20px 16px 24px;border-top:1px solid #28405c;margin-top:20px">
+<p style="font-size:11px;color:#9fb0c3;margin:16px 0 0;font-family:Arial,Helvetica,sans-serif;line-height:1.5">
+You're receiving this because you subscribed to FPL Intelligence's "What's New" updates.
+<a href="#" style="color:#9fb0c3;text-decoration:underline">See full history in the dashboard</a> &middot;
+<a href="#" style="color:#9fb0c3;text-decoration:underline">Unsubscribe</a></p>
+</td></tr>
+
+</table>
+</td></tr></table>
+</body></html>
