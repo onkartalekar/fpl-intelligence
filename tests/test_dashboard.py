@@ -65,7 +65,7 @@ class WhatsNewTabRenderTests(unittest.TestCase):
                     "headline": "Sharper filters for preseason movement tracking",
                     "summary": "Club movement just got easier to scan.",
                     "changes": [
-                        {"category": "Feature", "title": "Split filters", "description": "Three controls now."},
+                        {"category": "Feature", "audience": "user", "title": "Split filters", "description": "Three controls now."},
                     ],
                 },
             ],

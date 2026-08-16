@@ -61,7 +61,7 @@ jobs:
               tests.test_minutes tests.test_ml_minutes tests.test_model_performance
               tests.test_news_signals tests.test_pl_transfers tests.test_profiles tests.test_projection
               tests.test_publish_release_notes tests.test_rate_limit tests.test_refresh_safety
-              tests.test_release_notes tests.test_release_notes_subscribers tests.test_relevance
+              tests.test_release_notes tests.test_release_notes_email tests.test_release_notes_subscribers tests.test_relevance
               tests.test_reminder_confirmation tests.test_start_dashboard tests.test_team_strength
               tests.test_transfers tests.test_trigger_scheduled_refresh
     steps:

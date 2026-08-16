@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from fpl_intel.release_notes import (
+    AUDIENCES,
     CATEGORIES,
     ReleaseNotesValidationError,
     load_entries,
@@ -21,11 +22,13 @@ _VALID_PAYLOAD = {
     "changes": [
         {
             "category": "Feature",
+            "audience": "user",
             "title": "Club movement filters split into Direction, Movement type, and Date",
             "description": "Previously one combined control; each now narrows independently.",
         },
         {
             "category": "Fix",
+            "audience": "developer",
             "title": "Deadline banner no longer flashes before the feed is live",
             "description": "The banner now waits for a real deadline before rendering anything.",
         },
@@ -75,6 +78,31 @@ class ValidateEntryPayloadTests(unittest.TestCase):
 
     def test_categories_are_exactly_the_five_decided_in_the_plan_doc(self):
         self.assertEqual(CATEGORIES, ("Feature", "Fix", "Data", "Docs", "Chore"))
+
+    def test_rejects_unknown_audience(self):
+        payload = {**_VALID_PAYLOAD, "changes": [{**_VALID_PAYLOAD["changes"][0], "audience": "robot"}]}
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_entry_payload(payload)
+
+    def test_rejects_missing_audience(self):
+        change = {k: v for k, v in _VALID_PAYLOAD["changes"][0].items() if k != "audience"}
+        payload = {**_VALID_PAYLOAD, "changes": [change]}
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_entry_payload(payload)
+
+    def test_every_decided_audience_is_accepted(self):
+        for audience in AUDIENCES:
+            payload = {
+                **_VALID_PAYLOAD,
+                "changes": [{**_VALID_PAYLOAD["changes"][0], "audience": audience}],
+            }
+            validate_entry_payload(payload)  # must not raise
+
+    def test_audiences_are_exactly_user_and_developer(self):
+        """Issue #196: `audience` is a per-change signal independent of `category` -- see
+        `release_notes_email.py`'s docstring for why a category-level split misrouted real
+        changes."""
+        self.assertEqual(AUDIENCES, ("user", "developer"))
 
 
 class UpsertEntryTests(unittest.TestCase):

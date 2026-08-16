@@ -116,6 +116,21 @@ class CategorizePrTests(unittest.TestCase):
         self.assertEqual(prn.categorize_pr({"title": "Split movement filters into three controls"}), "Feature")
 
 
+class CategorizeAudienceTests(unittest.TestCase):
+    """Issue #196: the template fallback can't judge audience dynamically (no LLM), so it
+    derives it deterministically from `category` -- `Docs`/`Chore` are developer-only, everything
+    else defaults to user-facing."""
+
+    def test_docs_and_chore_are_developer(self):
+        self.assertEqual(prn.categorize_audience("Docs"), "developer")
+        self.assertEqual(prn.categorize_audience("Chore"), "developer")
+
+    def test_feature_fix_and_data_are_user(self):
+        self.assertEqual(prn.categorize_audience("Feature"), "user")
+        self.assertEqual(prn.categorize_audience("Fix"), "user")
+        self.assertEqual(prn.categorize_audience("Data"), "user")
+
+
 class BuildTemplateEntryTests(unittest.TestCase):
     def test_single_pr_entry(self):
         prs = [{"title": "Fix deadline banner flash", "body": "The banner now waits for a real deadline.\n\nMore detail."}]
@@ -125,7 +140,16 @@ class BuildTemplateEntryTests(unittest.TestCase):
         self.assertEqual(entry["date"], "2026-08-11")
         self.assertEqual(len(entry["changes"]), 1)
         self.assertEqual(entry["changes"][0]["category"], "Fix")
+        self.assertEqual(entry["changes"][0]["audience"], "user")
         self.assertIn("Fix deadline banner flash", entry["headline"])
+
+    def test_docs_category_pr_gets_developer_audience(self):
+        prs = [{"title": "Update README env vars", "body": "Docs fix."}]
+
+        entry = prn.build_template_entry(date(2026, 8, 11), prs)
+
+        self.assertEqual(entry["changes"][0]["category"], "Docs")
+        self.assertEqual(entry["changes"][0]["audience"], "developer")
 
     def test_multi_pr_entry_headline_mentions_count(self):
         prs = [{"title": "A"}, {"title": "B"}, {"title": "C"}]
@@ -211,7 +235,7 @@ class BuildLlmEntryFenceRegressionTests(unittest.TestCase):
     def test_fenced_response_still_parses(self):
         fenced = "```json\n" + json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "title": "T", "description": "D"}],
+            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         }) + "\n```"
 
         with patch.dict(
@@ -232,7 +256,10 @@ class BuildLlmEntryTests(unittest.TestCase):
         response = json.dumps({
             "headline": "Sharper filters",
             "summary": "Filters got sharper.",
-            "changes": [{"category": "Feature", "title": "Split filters", "description": "Three controls now."}],
+            "changes": [{
+                "category": "Feature", "audience": "user",
+                "title": "Split filters", "description": "Three controls now.",
+            }],
         })
 
         with patch.dict(
@@ -243,6 +270,7 @@ class BuildLlmEntryTests(unittest.TestCase):
 
         self.assertEqual(entry["headline"], "Sharper filters")
         self.assertEqual(entry["changes"][0]["category"], "Feature")
+        self.assertEqual(entry["changes"][0]["audience"], "user")
 
     def test_malformed_json_returns_none(self):
         with patch.dict(
@@ -256,7 +284,23 @@ class BuildLlmEntryTests(unittest.TestCase):
     def test_invalid_category_returns_none(self):
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Vibes", "title": "T", "description": "D"}],
+            "changes": [{"category": "Vibes", "audience": "user", "title": "T", "description": "D"}],
+        })
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=lambda prompt: response)
+
+        self.assertIsNone(entry)
+
+    def test_invalid_audience_returns_none(self):
+        """Issue #196: `audience` is validated with the same strictness as `category` -- an LLM
+        response with a well-formed category but an invalid/missing audience must still fall
+        back to the template, not silently drop or default the field."""
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"category": "Feature", "audience": "robot", "title": "T", "description": "D"}],
         })
         with patch.dict(
             "os.environ",
@@ -290,7 +334,7 @@ class GenerateEntryTests(unittest.TestCase):
     def test_uses_llm_when_it_succeeds(self):
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "title": "T", "description": "D"}],
+            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         })
         with patch.dict(
             "os.environ",

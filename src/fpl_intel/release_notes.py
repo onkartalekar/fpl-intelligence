@@ -34,6 +34,15 @@ class ReleaseNotesValidationError(Exception):
 # (see `scripts/publish_release_notes.py`'s `categorize_pr`) rather than leaving one blank.
 CATEGORIES = ("Feature", "Fix", "Data", "Docs", "Chore")
 
+# Issue #196: a second, independent per-change signal alongside `category` -- who the change is
+# actually for, not what kind of change it is. `category` alone couldn't answer this ("Fix" spans
+# both a UI change a manager would notice and an internal-only logging tweak they never would),
+# confirmed live on the 2026-08-15 entry. The LLM path (`build_llm_entry`) judges this per change
+# as part of its generated JSON; the template fallback (`categorize_pr`) can't judge it
+# dynamically and derives it deterministically from `category` instead -- see
+# `scripts/publish_release_notes.py`'s `_categorize_audience`.
+AUDIENCES = ("user", "developer")
+
 # 20 looked generous on paper but wasn't: this repo's own real PR history includes a single day
 # (2026-08-08) with 26 merged PRs, confirmed live when the initial historical backfill (issue
 # #143) 400'd trying to publish it. 50 gives real headroom above the busiest day seen so far.
@@ -73,13 +82,21 @@ def _validate_change(raw, index):
         raise ReleaseNotesValidationError(
             f"changes[{index}].category must be one of {', '.join(CATEGORIES)}"
         )
+    audience = raw.get("audience")
+    if audience not in AUDIENCES:
+        raise ReleaseNotesValidationError(
+            f"changes[{index}].audience must be one of {', '.join(AUDIENCES)}"
+        )
     title = raw.get("title")
     if not isinstance(title, str) or not title.strip() or len(title) > _MAX_TITLE_LENGTH:
         raise ReleaseNotesValidationError(f"changes[{index}].title is required")
     description = raw.get("description")
     if not isinstance(description, str) or not description.strip() or len(description) > _MAX_DESCRIPTION_LENGTH:
         raise ReleaseNotesValidationError(f"changes[{index}].description is required")
-    return {"category": category, "title": title.strip(), "description": description.strip()}
+    return {
+        "category": category, "audience": audience,
+        "title": title.strip(), "description": description.strip(),
+    }
 
 
 def validate_entry_payload(payload):

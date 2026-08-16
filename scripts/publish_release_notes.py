@@ -65,7 +65,7 @@ import zoneinfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.release_notes import CATEGORIES, render_entry_markdown, validate_entry_payload  # noqa: E402
+from fpl_intel.release_notes import AUDIENCES, CATEGORIES, render_entry_markdown, validate_entry_payload  # noqa: E402
 
 
 class ConfigError(RuntimeError):
@@ -99,10 +99,17 @@ _SYSTEM_PROMPT = (
     "markdown fences, matching exactly this shape: "
     '{"headline": "one sentence synthesizing the day\'s theme across every change", '
     '"summary": "2-3 sentences, one coherent narrative, not a list", '
-    '"changes": [{"category": "Feature|Fix|Data|Docs|Chore", "title": "one line, imperative or '
-    'noun phrase", "description": "one line, plain language, no jargon"}]}. '
+    '"changes": [{"category": "Feature|Fix|Data|Docs|Chore", "audience": "user|developer", '
+    '"title": "one line, imperative or noun phrase", "description": "one line, plain language, '
+    'no jargon"}]}. '
     "One changes[] entry per pull request given. category must be exactly one of the five listed "
-    "-- never invent a new one. Never mention pull request numbers, internal file paths, or "
+    "-- never invent a new one. audience is a second, independent judgment for each change: "
+    '"user" if a fantasy football manager using the dashboard would actually notice or care '
+    "about this (a UI change, a new capability, a fix to something they'd have seen break, a "
+    'change to the recommendations/data they see); "developer" if it is purely internal -- '
+    "tests, CI, logging, refactors, internal tooling, documentation, or anything else a "
+    "player-facing reader would never encounter. Judge audience per change, not by category -- "
+    "a Fix or a Chore can be either. Never mention pull request numbers, internal file paths, or "
     "implementation detail a player-facing reader wouldn't care about."
 )
 
@@ -221,6 +228,18 @@ def categorize_pr(pr):
     return "Feature"
 
 
+# Issue #196: the template fallback has no LLM to judge audience per change, so unlike
+# `build_llm_entry` it derives audience deterministically from `category` -- the same mapping
+# the release-notes email used exclusively before this issue. Not a fully-informed per-change
+# judgment (this is exactly the limitation issue #196 exists to fix on the LLM path), but a
+# reasonable default when no LLM is configured at all.
+_DEVELOPER_CATEGORIES = ("Docs", "Chore")
+
+
+def categorize_audience(category):
+    return "developer" if category in _DEVELOPER_CATEGORIES else "user"
+
+
 _MARKDOWN_BULLET_RE = re.compile(r"^[-*]\s+")
 _MARKDOWN_CHECKBOX_RE = re.compile(r"^\[[ xX]\]\s*")
 
@@ -273,14 +292,15 @@ def build_template_entry(date, prs):
     complete, accurate entry every time. Used whenever the LLM path (`build_llm_entry`) is
     unconfigured or fails -- see the module docstring's point 3 and the plan doc's Candidate B2a.
     """
-    changes = [
-        {
-            "category": categorize_pr(pr),
+    changes = []
+    for pr in prs:
+        category = categorize_pr(pr)
+        changes.append({
+            "category": category,
+            "audience": categorize_audience(category),
             "title": _truncate(pr.get("title") or "Untitled change", _MAX_TITLE_CHARS),
             "description": _pr_description(pr),
-        }
-        for pr in prs
-    ]
+        })
     headline = (
         prs[0].get("title") if len(prs) == 1
         else f"{len(prs)} changes shipped"
@@ -409,7 +429,9 @@ def build_llm_entry(date, prs, caller=None):
     if not isinstance(changes, list) or not changes:
         return None
     for change in changes:
-        if not isinstance(change, dict) or change.get("category") not in CATEGORIES:
+        if not isinstance(change, dict):
+            return None
+        if change.get("category") not in CATEGORIES or change.get("audience") not in AUDIENCES:
             return None
     entry = {"date": date.isoformat(), "headline": parsed.get("headline"), "summary": parsed.get("summary"), "changes": changes}
     try:

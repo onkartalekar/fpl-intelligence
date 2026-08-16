@@ -96,14 +96,15 @@ _CATEGORY_BADGE_COLORS = {
 # developer, so changes are grouped by who they're actually for. Both sections use the identical
 # badge/card treatment -- this is an organizational split, not a visual-importance one (an
 # earlier de-emphasized "Under the hood" pass read as "this section doesn't matter", which wasn't
-# the intent). `Fix` is a known imperfect fit here -- the real 2026-08-15 sample entry's Fix
-# changes mix genuinely user-visible fixes with purely internal ones, and a category-level split
-# can't tell those apart (flagged as open question (b) in issue #190, not resolved by this pass).
-_FOR_YOU_CATEGORIES = ("Feature", "Fix", "Data")
-_UNDER_THE_HOOD_CATEGORIES = ("Docs", "Chore")
-assert set(_FOR_YOU_CATEGORIES) | set(_UNDER_THE_HOOD_CATEGORIES) == set(_RELEASE_NOTES_CATEGORIES), (
-    "every release_notes.CATEGORIES value must be assigned to exactly one email section"
-)
+# the intent).
+#
+# Issue #196: originally this was a static `category` -> section lookup table (`Fix` always
+# "for you", `Chore` always "under the hood"), which misrouted real changes -- confirmed live on
+# the 2026-08-15 entry, whose `Fix` changes mixed genuinely user-visible ones with purely internal
+# ones, both routed into "for you" because the split keyed on category, not the individual
+# change. The split now keys on each change's own `audience` field (`release_notes.AUDIENCES`)
+# instead -- see `_compose_release_notes_html_body` below, which partitions changes by `audience`
+# before ever grouping by `category`.
 
 
 def _change_card_row_html(change, is_last):
@@ -142,14 +143,16 @@ def _category_section_html(category, changes, top_padding):
     )
 
 
-def _section_html(heading_html, categories, changes_by_category, divider_above):
+def _section_html(heading_html, changes_by_category, divider_above):
     """One "What's new for you"/"Under the hood" section: an optional divider, an uppercase
-    heading, then one `_category_section_html` block per non-empty category in `categories`
-    (`release_notes.CATEGORIES`' declared order). Returns "" if every category in this section
-    is empty that day, so an all-Feature entry never renders an empty "Under the hood" section."""
+    heading, then one `_category_section_html` block per non-empty category present in
+    `changes_by_category` (already filtered to this section's `audience` by the caller),
+    iterated in `release_notes.CATEGORIES`' declared order. Returns "" if `changes_by_category`
+    is empty, so e.g. an all-`user`-audience entry never renders an empty "Under the hood"
+    section."""
     blocks = []
     top_padding = 12
-    for category in categories:
+    for category in _RELEASE_NOTES_CATEGORIES:
         changes = changes_by_category.get(category)
         if not changes:
             continue
@@ -193,9 +196,15 @@ def _format_release_notes_badge_date(date_iso):
 
 def _compose_release_notes_html_body(entry, unsubscribe_url):
     """HTML counterpart to `compose_release_notes_email`'s plain-text body."""
-    changes_by_category = {}
+    for_you_by_category = {}
+    under_the_hood_by_category = {}
     for change in entry.get("changes", []):
-        changes_by_category.setdefault(change["category"], []).append(change)
+        # `.get(..., "user")` rather than a hard requirement: entries published before issue
+        # #196 (all of history so far, by explicit decision -- not worth backfilling) never
+        # carry `audience` at all. Defaulting a missing field to "user" is a trivial safety net
+        # against a KeyError, not an attempt to correctly reclassify old entries.
+        bucket = for_you_by_category if change.get("audience", "user") == "user" else under_the_hood_by_category
+        bucket.setdefault(change["category"], []).append(change)
 
     header_badge = email_template.badge_html(
         f"WHAT'S NEW · {_format_release_notes_badge_date(entry['date'])}",
@@ -216,14 +225,14 @@ def _compose_release_notes_html_body(entry, unsubscribe_url):
     )
 
     for_you_html = _section_html(
-        "What's new for you", _FOR_YOU_CATEGORIES, changes_by_category, divider_above=False,
+        "What's new for you", for_you_by_category, divider_above=False,
     )
     under_the_hood_heading = (
         'Under the hood <span style="color:%s;font-weight:normal;text-transform:none;'
         'letter-spacing:normal">(for the developer in you)</span>' % email_template.TEXT_MUTED
     )
     under_the_hood_html = _section_html(
-        under_the_hood_heading, _UNDER_THE_HOOD_CATEGORIES, changes_by_category, divider_above=True,
+        under_the_hood_heading, under_the_hood_by_category, divider_above=True,
     )
 
     inner_html = (
