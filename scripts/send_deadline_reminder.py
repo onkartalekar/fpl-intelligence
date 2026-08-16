@@ -464,23 +464,28 @@ def _compose_active_section(weekly):
 # does not support at all).
 # ---------------------------------------------------------------------------------------------
 
-# Literal hex badge colors, reused as-is from the plan's own research and the mockup review --
-# not re-derived here. `roll` (green): banking a transfer, or transferring at zero point cost.
-# `hit` (red): a transfer that costs points. `info` (blue): a hold, or an informational header.
-# Sourced from `email_template` (issue #190 extracted this repo's shared dark-navy email palette
-# out of this module so the release-notes email could reuse it without duplicating the CSS) --
-# kept under their original names here so this module's own call sites and
-# `tests/test_send_deadline_reminder.py` (which asserts against these names directly) are
-# unaffected.
-_BADGE_ROLL_BG, _BADGE_ROLL_FG = email_template.BADGE_ROLL_BG, email_template.BADGE_ROLL_FG
-_BADGE_HIT_BG, _BADGE_HIT_FG = email_template.BADGE_HIT_BG, email_template.BADGE_HIT_FG
-_BADGE_INFO_BG, _BADGE_INFO_FG = email_template.BADGE_INFO_BG, email_template.BADGE_INFO_FG
+# Literal hex badge text colors, reused as-is from the plan's own research and the mockup review
+# -- not re-derived here. `roll` (green): banking a transfer, or transferring at zero point cost.
+# `hit` (red): a transfer that costs points. Only the foreground/text shades are still needed as
+# module-level names -- full badges now go through `email_template.badge_html`'s `variant` names
+# directly (see `_badge_for_recommendation` below), but `_transfer_row_html`'s OUT/IN text and the
+# net-gain figure below color plain text with these, not a filled badge box. Sourced from
+# `email_template` (issue #190 extracted this repo's shared email palette out of this module so
+# the release-notes email could reuse it without duplicating the CSS) -- kept under their
+# original names here so this module's own call sites and `tests/test_send_deadline_reminder.py`
+# (which asserts against these names directly) are unaffected.
+_BADGE_ROLL_FG = email_template.BADGE_ROLL_FG
+_BADGE_HIT_FG = email_template.BADGE_HIT_FG
+_BADGE_AMBER_BG = email_template.BADGE_AMBER_BG
+_BADGE_AMBER_FG = email_template.BADGE_AMBER_FG
 
 _EMAIL_BG = email_template.EMAIL_BG
 _CARD_BG = email_template.CARD_BG
 _CARD_BORDER = email_template.CARD_BORDER
 _TEXT_PRIMARY = email_template.TEXT_PRIMARY
 _TEXT_MUTED = email_template.TEXT_MUTED
+_SURFACE_INSET_BG = email_template.SURFACE_INSET_BG
+_AMBER_NOTE_BORDER = email_template.AMBER_NOTE_BORDER
 
 # Pitch diagram layout. Row order top-to-bottom mirrors dashboard.js's weeklyPitch()/pitch()
 # grouping exactly (`['FWD','MID','DEF','GKP'].map(...)` inside a `flex-direction: column`
@@ -529,7 +534,8 @@ _esc = email_template.esc
 
 
 def _badge_for_recommendation(recommendation):
-    """Map an action + point_cost to (label, bg, fg) using the plan's literal hex badge palette.
+    """Map an action + point_cost to (label, variant), `variant` being one of
+    `email_template.badge_html`'s known names.
 
     `hold` -> info (blue). `roll`, and `single_transfer`/`double_transfer` with `point_cost == 0`
     (an already-free transfer, no hit) -> roll (green) -- this resolves the plan doc's explicitly
@@ -541,15 +547,15 @@ def _badge_for_recommendation(recommendation):
     action = recommendation.get("action")
     point_cost = recommendation.get("point_cost") or 0
     if action == "hold":
-        return "HOLD", _BADGE_INFO_BG, _BADGE_INFO_FG
+        return "HOLD", "info"
     if action == "roll":
-        return "ROLL", _BADGE_ROLL_BG, _BADGE_ROLL_FG
+        return "ROLL", "roll"
     if action in ("single_transfer", "double_transfer"):
         if point_cost > 0:
-            return f"TRANSFER · −{point_cost}", _BADGE_HIT_BG, _BADGE_HIT_FG
-        return "TRANSFER", _BADGE_ROLL_BG, _BADGE_ROLL_FG
+            return f"TRANSFER · −{point_cost}", "hit"
+        return "TRANSFER", "roll"
     label = (action or "N/A").replace("_", " ").upper()
-    return label, _BADGE_INFO_BG, _BADGE_INFO_FG
+    return label, "info"
 
 
 _badge_html = email_template.badge_html
@@ -635,8 +641,9 @@ def _pitch_section_html(starting_xi, captain_id):
     )
     return (
         '<tr><td style="padding:16px 16px 0 16px">'
-        f'<div style="font-size:12px;font-weight:bold;color:{_TEXT_MUTED};letter-spacing:.4px;'
-        'margin-bottom:10px;font-family:Arial,Helvetica,sans-serif">RECOMMENDED STARTING XI</div>'
+        f'<div class="text-muted" style="font-size:12px;font-weight:bold;color:{_TEXT_MUTED};'
+        'letter-spacing:.4px;margin-bottom:10px;font-family:Arial,Helvetica,sans-serif">'
+        'RECOMMENDED STARTING XI</div>'
         "<!--[if !mso]><!-->" + svg + "<!--<![endif]-->"
         "<!--[if mso]>" + placeholder + "<![endif]-->"
         "</td></tr>"
@@ -648,26 +655,38 @@ def _transfer_row_html(out_player, in_player):
     in_name = _esc(in_player.get("name"))
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="background:#1a2c42;border-radius:4px;margin-top:10px"><tr>'
-        f'<td style="padding:8px 10px;font-size:13px;color:{_BADGE_HIT_FG};'
+        f'class="surface-inset" style="background:{_SURFACE_INSET_BG};border-radius:4px;'
+        'margin-top:10px"><tr>'
+        f'<td class="badge-hit-fg" style="padding:8px 10px;font-size:13px;color:{_BADGE_HIT_FG};'
         f'font-family:Arial,Helvetica,sans-serif">OUT: {out_name}</td>'
-        f'<td style="padding:8px 10px;font-size:13px;color:{_TEXT_MUTED};text-align:center;'
-        'font-family:Arial,Helvetica,sans-serif">&rarr;</td>'
-        f'<td style="padding:8px 10px;font-size:13px;color:{_BADGE_ROLL_FG};text-align:right;'
-        f'font-family:Arial,Helvetica,sans-serif">IN: {in_name}</td>'
+        f'<td class="text-muted" style="padding:8px 10px;font-size:13px;color:{_TEXT_MUTED};'
+        'text-align:center;font-family:Arial,Helvetica,sans-serif">&rarr;</td>'
+        f'<td class="badge-roll-fg" style="padding:8px 10px;font-size:13px;color:{_BADGE_ROLL_FG};'
+        f'text-align:right;font-family:Arial,Helvetica,sans-serif">IN: {in_name}</td>'
         "</tr></table>"
     )
 
 
+# Which light-mode class a `_kv_row_html` value color maps to -- the row-color-override case
+# (the net-gain figure below) reuses a badge FG straight as plain text color, same as
+# `_transfer_row_html` above; anything else falls back to `text-primary`, `_kv_row_html`'s
+# own default when no override color is given.
+_FG_CLASS_BY_COLOR = {
+    _BADGE_ROLL_FG: "badge-roll-fg",
+    _BADGE_HIT_FG: "badge-hit-fg",
+}
+
+
 def _kv_row_html(label, value_html, color=None):
     value_color = color or _TEXT_PRIMARY
+    value_class = _FG_CLASS_BY_COLOR.get(color, "text-primary")
     return (
         "<tr>"
-        f'<td style="font-size:13px;color:{_TEXT_MUTED};padding:4px 0;'
+        f'<td class="text-muted card-border" style="font-size:13px;color:{_TEXT_MUTED};padding:4px 0;'
         f'border-top:1px solid {_CARD_BORDER};font-family:Arial,Helvetica,sans-serif">'
         + _esc(label) + "</td>"
-        f'<td align="right" style="font-size:13px;font-weight:bold;color:{value_color};'
-        f'padding:4px 0;border-top:1px solid {_CARD_BORDER};'
+        f'<td align="right" class="{value_class} card-border" style="font-size:13px;'
+        f'font-weight:bold;color:{value_color};padding:4px 0;border-top:1px solid {_CARD_BORDER};'
         'font-family:Arial,Helvetica,sans-serif">' + value_html + "</td>"
         "</tr>"
     )
@@ -685,16 +704,18 @@ def _profile_card_html(eyebrow, badge_html, rationale, transfer_html, kv_html):
     rationale_html = ""
     if rationale:
         rationale_html = (
-            f'<p style="margin:0;font-size:13px;color:{_TEXT_PRIMARY};'
+            f'<p class="text-primary" style="margin:0;font-size:13px;color:{_TEXT_PRIMARY};'
             f'font-family:Arial,Helvetica,sans-serif;line-height:1.4">{_esc(rationale)}</p>'
         )
     return (
         '<tr><td style="padding:0 16px 14px">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="background:{_CARD_BG};border:1px solid {_CARD_BORDER};border-radius:8px">'
+        f'class="card-bg card-border" style="background:{_CARD_BG};border:1px solid {_CARD_BORDER};'
+        'border-radius:8px">'
         '<tr><td style="padding:14px 16px">'
-        f'<div style="font-size:11px;font-weight:bold;letter-spacing:.5px;color:{_TEXT_MUTED};'
-        f'margin-bottom:8px;font-family:Arial,Helvetica,sans-serif">{_esc(eyebrow)}</div>'
+        f'<div class="text-muted" style="font-size:11px;font-weight:bold;letter-spacing:.5px;'
+        f'color:{_TEXT_MUTED};margin-bottom:8px;font-family:Arial,Helvetica,sans-serif">'
+        f'{_esc(eyebrow)}</div>'
         + badge_html + rationale_html + transfer_html + kv_html
         + "</td></tr></table></td></tr>"
     )
@@ -735,9 +756,9 @@ def _active_profile_card_html(profile, default_profile_id):
     """
     recommendation = profile.get("recommendation") or {}
     eyebrow = _profile_eyebrow(profile.get("id"), profile.get("label"), default_profile_id)
-    badge_label, badge_bg, badge_fg = _badge_for_recommendation(recommendation)
+    badge_label, badge_variant = _badge_for_recommendation(recommendation)
     badge_html = (
-        '<div style="margin-bottom:8px">' + _badge_html(badge_label, badge_bg, badge_fg) + "</div>"
+        '<div style="margin-bottom:8px">' + _badge_html(badge_label, badge_variant) + "</div>"
     )
     rationale = recommendation.get("reason") or ""
     transfers = recommendation.get("transfers") or []
@@ -776,8 +797,8 @@ def _active_profile_card_html(profile, default_profile_id):
 def _status_fallback_card_html(text):
     return (
         '<tr><td style="padding:16px">'
-        f'<div style="background:{_CARD_BG};border:1px solid {_CARD_BORDER};'
-        'border-radius:8px;padding:16px;font-size:13px;color:'
+        f'<div class="card-bg card-border text-primary" style="background:{_CARD_BG};'
+        f'border:1px solid {_CARD_BORDER};border-radius:8px;padding:16px;font-size:13px;color:'
         f'{_TEXT_PRIMARY};font-family:Arial,Helvetica,sans-serif">{_esc(text)}</div>'
         "</td></tr>"
     )
@@ -795,12 +816,13 @@ def _footer_html():
     """
     manage_url = f"{_dashboard_base_url()}/#profile"
     return (
-        f'<tr><td style="padding:20px 16px 24px;border-top:1px solid {_CARD_BORDER}">'
-        f'<p style="font-size:11px;color:{_TEXT_MUTED};margin:0;'
+        f'<tr><td class="card-border" style="padding:20px 16px 24px;'
+        f'border-top:1px solid {_CARD_BORDER}">'
+        f'<p class="text-muted" style="font-size:11px;color:{_TEXT_MUTED};margin:0;'
         'font-family:Arial,Helvetica,sans-serif;line-height:1.5">'
         "You're receiving this because you opted into deadline reminders for "
-        f'FPL Intelligence. <a href="{_esc(manage_url)}" style="color:{_TEXT_MUTED};'
-        'text-decoration:underline">Manage reminder settings</a></p>'
+        f'FPL Intelligence. <a href="{_esc(manage_url)}" class="text-muted" '
+        f'style="color:{_TEXT_MUTED};text-decoration:underline">Manage reminder settings</a></p>'
         "</td></tr>"
     )
 
@@ -810,8 +832,9 @@ def _assemble_email_html(event_id, lead_hours, stale, extra_top_html, body_html)
     if stale:
         stale_html = (
             '<tr><td style="padding:16px 16px 0 16px">'
-            '<div style="background:#3a2f12;border:1px solid #6b5420;border-radius:6px;'
-            'padding:10px 12px;font-size:12px;color:#f0d98c;'
+            '<div class="badge-amber amber-note-border" '
+            f'style="background:{_BADGE_AMBER_BG};border:1px solid {_AMBER_NOTE_BORDER};'
+            f'border-radius:6px;padding:10px 12px;font-size:12px;color:{_BADGE_AMBER_FG};'
             'font-family:Arial,Helvetica,sans-serif">'
             "NOTE: the live FPL data fetch failed this run; these recommendations are from the "
             "last cached refresh and may not reflect the latest prices, injuries, or news."
@@ -820,7 +843,7 @@ def _assemble_email_html(event_id, lead_hours, stale, extra_top_html, body_html)
     header_label = f"GAMEWEEK {event_id} · DEADLINE IN {lead_hours}H"
     inner_html = (
         '<tr><td style="padding:16px 16px 0 16px">'
-        + _badge_html(header_label, _BADGE_INFO_BG, _BADGE_INFO_FG)
+        + _badge_html(header_label, "info")
         + "</td></tr>"
         + stale_html
         + extra_top_html

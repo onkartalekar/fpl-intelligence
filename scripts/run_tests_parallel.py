@@ -67,6 +67,8 @@ GROUPS = {
         "tests.test_coefficients", "tests.test_dashboard", "tests.test_deadline_windows",
         # Issue #208: both lightweight, no HTTP server/combinatorial-search involved.
         "tests.test_decision_cache", "tests.test_generation",
+        # Issue #197: new, lightweight (no server/network/combinatorial-search).
+        "tests.test_email_template",
         "tests.test_fpl_data", "tests.test_live_regression_check", "tests.test_manager_data",
         "tests.test_minutes", "tests.test_ml_minutes", "tests.test_model_performance",
         "tests.test_news_signals", "tests.test_pl_transfers", "tests.test_profiles",
