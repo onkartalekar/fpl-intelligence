@@ -77,10 +77,60 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect docs-only changes
+        # A PR touching only non-code paths -- release-notes.yml's daily archival commit
+        # (release-notes/<date>.md, generated, never code), planning docs (plans/**, including
+        # their checked-in assets like plans/assets/*.html mockups), and the top-level
+        # architecture/spec docs -- can't be caught by this matrix, so waiting several minutes on
+        # it doesn't buy anything (confirmed live 2026-08-16: it's also why release-notes.yml's
+        # `gh pr merge --auto` had to sit and wait rather than complete near-instantly). Skip the
+        # actual test run for that case below -- but only the *steps*, never this job itself:
+        # branch protection's required-status-checks list this job's name by exact context
+        # ("Run test suite (...)" -- confirmed via `gh api .../branches/main/protection`), and a
+        # job that never runs at all (a job-level `if:` skipping the whole thing) leaves that
+        # named check permanently "expected, never reported," which blocks merging forever -- a
+        # well-known GitHub Actions gotcha, not a hypothetical. A job that runs but skips its
+        # inner steps still reports a real success/failure conclusion, so this satisfies the
+        # required check either way, on both this event type and every other kind of PR.
+        #
+        # Deliberately an explicit allowlist of exact doc paths, not a broad "*.md anywhere"
+        # rule: config/*.json is real runtime config tests assert against, demo-video/ contains
+        # record_demo.py (a real script, not just docs), and .github/ is this very CI config --
+        # none of those are safe to wave through unread, even though some sit next to genuinely
+        # inert files. Extend this list deliberately, file by file/directory, not by loosening
+        # the pattern.
+        id: scope
+        if: github.event_name == 'pull_request'
+        run: |
+          # Bug fix, confirmed live: actions/checkout@v4's default shallow checkout for a
+          # pull_request event leaves only the synthetic merge commit locally -- base.sha alone
+          # (fetched below) isn't enough, head.sha itself isn't a reachable object either, so a
+          # diff between them failed outright with "fatal: bad object <head sha>". Fetching both
+          # SHAs explicitly (each --depth=1, so this stays cheap) makes both diff endpoints real,
+          # present objects.
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          git fetch --depth=1 origin "${{ github.event.pull_request.head.sha }}"
+          changed_files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
+          echo "changed files:"
+          echo "$changed_files"
+          docs_only_pattern='^(release-notes/|plans/|ARCHITECTURE\.md$|IMPLEMENTATION_PLAN\.md$|MODEL\.md$|README\.md$|SPECIFICATION\.md$)'
+          if [ -n "$changed_files" ] && [ -z "$(echo "$changed_files" | grep -Ev "$docs_only_pattern")" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: steps.scope.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Run test suite
+        if: steps.scope.outputs.skip != 'true'
         run: PYTHONPATH=src python3 -m unittest ${{ matrix.modules }} -v
+
+      - name: Skipped -- docs-only change
+        if: steps.scope.outputs.skip == 'true'
+        run: |
+          echo "Skipping the test suite: every changed file in this PR is a non-code doc (release-notes/, plans/, or a top-level architecture/spec doc)."
