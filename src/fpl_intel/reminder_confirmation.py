@@ -31,6 +31,14 @@ plans/issue-110-contact-us-tab.md's "Decided" section and `server.py`'s `_defaul
 a failed notification email must never lose the visitor's submission, so `server.py` always
 writes the local durability-backstop log FIRST and only then attempts this module's
 `send_contact_email`, treating a `ReminderEmailError` from it as a server-side-only concern.
+
+The release-notes subscription/notification emails (issue #143, issue #190) used to live here
+too, on the same "reuse this module's SMTP plumbing" reasoning -- but #190 added a ~200-line
+HTML-templating engine specific to `release_notes.py`'s data model on top of that, which made this
+file mostly release-notes code by line count despite the name and docstring being about opt-in/
+Contact Us. That code now lives in `release_notes_email.py`, which imports `_read_smtp_config`/
+`ReminderEmailError`/`_SEND_TIMEOUT_SECONDS` from here rather than duplicating them -- the
+original reuse rationale still holds, it just no longer justifies sharing one file.
 """
 
 from email.message import EmailMessage
@@ -176,94 +184,3 @@ def send_contact_email(category, message, reply_to, smtp_config=None):
         ) from error
     return True
 
-
-def compose_release_notes_subscription_email(confirm_url):
-    """Return (subject, body) for the "What's New" email-subscription confirmation (issue #143)
-    -- content only. Same double-opt-in shape as `compose_confirmation_email` above: nothing is
-    enabled until this link is clicked.
-    """
-    subject = "Confirm your FPL Intelligence release notes subscription"
-    body = (
-        "Someone (hopefully you) asked to receive FPL Intelligence's \"What's New\" release "
-        "notes by email, one email each time a new entry publishes.\n\n"
-        "Confirm by opening this link:\n"
-        f"{confirm_url}\n\n"
-        "If you didn't request this, you can ignore this email -- nothing is sent to this "
-        "address until this link is clicked, and this link expires automatically if it isn't "
-        "used.\n\n"
-        "-- FPL Intelligence automated release-notes subscription (issue #143)"
-    )
-    return subject, body
-
-
-def send_release_notes_subscription_email(to_email, confirm_url, smtp_config=None):
-    """Send the release-notes subscription confirmation email. Same contract as
-    `send_confirmation_email`: returns True on success, raises `ReminderEmailError` on any
-    configuration or send failure."""
-    smtp_config = smtp_config or _read_smtp_config()
-    subject, body = compose_release_notes_subscription_email(confirm_url)
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = smtp_config["user"]
-    message["To"] = to_email
-    message.set_content(body)
-    try:
-        with smtplib.SMTP(
-            smtp_config["host"], smtp_config["port"], timeout=_SEND_TIMEOUT_SECONDS
-        ) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_config["user"], smtp_config["password"])
-            smtp.send_message(message)
-    except (smtplib.SMTPException, OSError, TimeoutError) as error:
-        raise ReminderEmailError(
-            "Could not send the subscription confirmation email. Try again shortly."
-        ) from error
-    return True
-
-
-def compose_release_notes_email(entry, unsubscribe_url):
-    """Return (subject, body) for one release-notes entry, sent to every confirmed subscriber
-    when the daily job publishes it (issue #143). Content only -- no send side effect. Every
-    change's category/title/description is included, plus an unsubscribe link every sent email
-    carries (issue #143's plan doc: every notification email in this codebase already carries a
-    way to stop receiving it)."""
-    subject = f"FPL Intelligence: {entry['headline']}"
-    lines = [entry["headline"], "", entry["summary"], ""]
-    for change in entry["changes"]:
-        lines.append(f"[{change['category']}] {change['title']}")
-        lines.append(f"  {change['description']}")
-        lines.append("")
-    lines.append(f"See the full history in the dashboard's What's New tab.")
-    lines.append("")
-    lines.append(f"Unsubscribe: {unsubscribe_url}")
-    lines.append("")
-    lines.append("-- FPL Intelligence automated release notes (issue #143)")
-    return subject, "\n".join(lines)
-
-
-def send_release_notes_email(to_email, entry, unsubscribe_url, smtp_config=None):
-    """Send one release-notes entry to one confirmed subscriber. Same contract as
-    `send_confirmation_email`: returns True on success, raises `ReminderEmailError` on any
-    configuration or send failure -- callers (`server.py`'s `_handle_release_notes`) treat a
-    per-recipient failure as non-fatal to the overall publish, since the entry itself is already
-    durably stored by the time sends begin (same "durability first, notification best-effort"
-    posture as Contact Us's own durability backstop)."""
-    smtp_config = smtp_config or _read_smtp_config()
-    subject, body = compose_release_notes_email(entry, unsubscribe_url)
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = smtp_config["user"]
-    message["To"] = to_email
-    message.set_content(body)
-    try:
-        with smtplib.SMTP(
-            smtp_config["host"], smtp_config["port"], timeout=_SEND_TIMEOUT_SECONDS
-        ) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_config["user"], smtp_config["password"])
-            smtp.send_message(message)
-    except (smtplib.SMTPException, OSError, TimeoutError) as error:
-        raise ReminderEmailError(
-            "Could not send the release notes email."
-        ) from error
-    return True

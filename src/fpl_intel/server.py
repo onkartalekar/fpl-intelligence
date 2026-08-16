@@ -19,6 +19,7 @@ import zoneinfo
 
 from . import profiles
 from . import release_notes
+from . import release_notes_email
 from . import release_notes_subscribers
 from . import reminder_confirmation
 from .dashboard import render_dashboard
@@ -750,11 +751,11 @@ def _validate_release_notes_subscribe_payload(payload):
 
 
 def _default_release_notes_subscribe_email_action():
-    """Thin wrapper over `reminder_confirmation`, same pattern as `_default_reminder_email_action`
+    """Thin wrapper over `release_notes_email`, same pattern as `_default_reminder_email_action`
     -- lets `create_server` inject a fake for tests without ever touching real SMTP."""
 
     def action(email, confirm_url):
-        reminder_confirmation.send_release_notes_subscription_email(email, confirm_url)
+        release_notes_email.send_release_notes_subscription_email(email, confirm_url)
 
     return action
 
@@ -764,7 +765,7 @@ def _default_release_notes_notify_email_action():
     send-on-publish step in `_handle_release_notes`."""
 
     def action(email, entry, unsubscribe_url):
-        reminder_confirmation.send_release_notes_email(email, entry, unsubscribe_url)
+        release_notes_email.send_release_notes_email(email, entry, unsubscribe_url)
 
     return action
 
