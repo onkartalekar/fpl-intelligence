@@ -164,6 +164,33 @@ class ComposeReleaseNotesEmailTests(unittest.TestCase):
         self.assertIn("Pre-#196 change", html_body)
         self.assertNotIn("Under the hood", html_body)
 
+    def test_html_body_declares_both_color_schemes_and_carries_the_light_style_block(self):
+        """Issue #197: this email used to declare `content="dark"` only."""
+        _, _, html_body = compose_release_notes_email(_SAMPLE_ENTRY, "https://example.com/unsub")
+        self.assertIn('content="light dark"', html_body)
+        self.assertIn("@media (prefers-color-scheme:light)", html_body)
+
+    def test_every_category_badge_variant_renders_its_own_class(self):
+        """Issue #197: `Docs` used to be a literal one-off hex pair defined only in this module,
+        with no light-mode counterpart at all -- it's now `email_template.badge_html`'s `docs`
+        variant, the same as every other category."""
+        entry = {
+            "date": "2026-08-11",
+            "headline": "Headline",
+            "summary": "Summary",
+            "changes": [
+                {"category": "Feature", "audience": "user", "title": "A feature", "description": "d"},
+                {"category": "Fix", "audience": "user", "title": "A fix", "description": "d"},
+                {"category": "Data", "audience": "user", "title": "A data change", "description": "d"},
+                {"category": "Docs", "audience": "developer", "title": "A docs change", "description": "d"},
+                {"category": "Chore", "audience": "developer", "title": "A chore", "description": "d"},
+            ],
+        }
+        _, _, html_body = compose_release_notes_email(entry, "https://example.com/unsub")
+        for variant in ("roll", "amber", "info", "docs", "slate"):
+            with self.subTest(variant=variant):
+                self.assertIn(f'class="badge-{variant}"', html_body)
+
     def test_html_body_escapes_change_titles_and_descriptions(self):
         entry = {
             "date": "2026-08-11",

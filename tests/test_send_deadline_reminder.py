@@ -373,19 +373,19 @@ class HtmlEmailTests(unittest.TestCase):
                 )
 
     def test_badge_mapping_hold_is_info_blue(self):
-        label, bg, fg = sdr._badge_for_recommendation({"action": "hold", "point_cost": 0})
+        label, variant = sdr._badge_for_recommendation({"action": "hold", "point_cost": 0})
         self.assertEqual(label, "HOLD")
-        self.assertEqual((bg, fg), (sdr._BADGE_INFO_BG, sdr._BADGE_INFO_FG))
+        self.assertEqual(variant, "info")
 
     def test_badge_mapping_roll_is_green(self):
-        label, bg, fg = sdr._badge_for_recommendation({"action": "roll", "point_cost": 0})
+        label, variant = sdr._badge_for_recommendation({"action": "roll", "point_cost": 0})
         self.assertEqual(label, "ROLL")
-        self.assertEqual((bg, fg), (sdr._BADGE_ROLL_BG, sdr._BADGE_ROLL_FG))
+        self.assertEqual(variant, "roll")
 
     def test_badge_mapping_transfer_with_a_hit_is_red(self):
-        label, bg, fg = sdr._badge_for_recommendation({"action": "single_transfer", "point_cost": 4})
+        label, variant = sdr._badge_for_recommendation({"action": "single_transfer", "point_cost": 4})
         self.assertIn("4", label)
-        self.assertEqual((bg, fg), (sdr._BADGE_HIT_BG, sdr._BADGE_HIT_FG))
+        self.assertEqual(variant, "hit")
 
     def test_badge_mapping_zero_cost_transfer_is_green(self):
         """Resolves the plan doc's explicitly open item: a single/double transfer that costs no
@@ -393,8 +393,8 @@ class HtmlEmailTests(unittest.TestCase):
         per the plan's own stated lean."""
         for action in ("single_transfer", "double_transfer"):
             with self.subTest(action=action):
-                label, bg, fg = sdr._badge_for_recommendation({"action": action, "point_cost": 0})
-                self.assertEqual((bg, fg), (sdr._BADGE_ROLL_BG, sdr._BADGE_ROLL_FG))
+                label, variant = sdr._badge_for_recommendation({"action": action, "point_cost": 0})
+                self.assertEqual(variant, "roll")
                 self.assertNotIn("-", label)
 
     def test_mso_conditional_comment_structure_is_present_when_a_starting_xi_exists(self):
@@ -406,6 +406,41 @@ class HtmlEmailTests(unittest.TestCase):
                 self.assertIn("<!--[if mso]>", html_body)
                 self.assertIn("<![endif]-->", html_body)
                 self.assertIn("starting-XI diagram not shown in this client", html_body)
+
+    def test_html_body_declares_both_color_schemes_and_carries_the_light_style_block(self):
+        """Issue #197: this email used to declare `content="dark"` only. Both `_gw1_bodies` and
+        `_active_bodies` route through `email_template.shell()`, so both must carry the same
+        light-mode declaration and override block."""
+        for bodies_factory in (self._gw1_bodies, self._active_bodies):
+            with self.subTest(factory=bodies_factory.__name__):
+                _, _, html_body = bodies_factory()
+                self.assertIn('content="light dark"', html_body)
+                self.assertIn("@media (prefers-color-scheme:light)", html_body)
+
+    def test_transfer_row_uses_the_surface_inset_class_not_a_bare_hardcoded_color(self):
+        html = sdr._transfer_row_html({"name": "Player Out"}, {"name": "Player In"})
+
+        self.assertIn('class="surface-inset"', html)
+        self.assertIn(f'background:{sdr._SURFACE_INSET_BG}', html)
+        self.assertIn('class="badge-hit-fg"', html)
+        self.assertIn('class="badge-roll-fg"', html)
+
+    def test_stale_note_uses_the_amber_badge_and_border_classes(self):
+        html = sdr._assemble_email_html(5, 3, stale=True, extra_top_html="", body_html="")
+
+        self.assertIn('class="badge-amber amber-note-border"', html)
+        self.assertIn(f'background:{sdr._BADGE_AMBER_BG}', html)
+        self.assertIn(f'border:1px solid {sdr._AMBER_NOTE_BORDER}', html)
+
+    def test_kv_row_value_color_class_matches_the_passed_color(self):
+        default_row = sdr._kv_row_html("Label", "Value")
+        self.assertIn('class="text-primary card-border"', default_row)
+
+        roll_row = sdr._kv_row_html("Label", "+3.0", color=sdr._BADGE_ROLL_FG)
+        self.assertIn('class="badge-roll-fg card-border"', roll_row)
+
+        hit_row = sdr._kv_row_html("Label", "-3.0", color=sdr._BADGE_HIT_FG)
+        self.assertIn('class="badge-hit-fg card-border"', hit_row)
 
     def test_all_three_profile_cards_appear_in_the_html_body(self):
         """HTML counterpart to #82's plain-text all-three-profiles tests, for both states."""
