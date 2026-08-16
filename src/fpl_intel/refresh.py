@@ -467,10 +467,29 @@ def refresh_project(root, **kwargs):
         return _refresh_project_unlocked(root, **kwargs)
 
 
+def default_build_weekly_decisions(
+    team_id, bootstrap, fixtures, manager_state, generated_at, horizon, transfers, draft_squad_ids,
+):
+    """The always-recompute weekly-decisions builder -- `compute_manager_view`'s behavior before
+    issue #208 added the `build_weekly_decisions` seam below. `team_id` is accepted but unused
+    here (it exists only so this and `decision_cache.py`'s caching builder share one call
+    signature -- see `compute_manager_view`'s docstring)."""
+    weekly_decisions = build_transfer_decisions(
+        bootstrap, fixtures, manager_state, generated_at=generated_at, horizon=horizon,
+        recent_transfers=transfers,
+    )
+    if weekly_decisions.get("status") == "waiting_for_gw2" and draft_squad_ids:
+        weekly_decisions = build_draft_decisions(
+            bootstrap, fixtures, draft_squad_ids, generated_at=generated_at, horizon=horizon,
+            recent_transfers=transfers,
+        )
+    return weekly_decisions
+
+
 def compute_manager_view(
     bootstrap, fixtures, transfers, generated_at, team_id, horizon=5,
     confirmed_free_transfers=None, confirmed_free_transfers_event=None,
-    draft_squad_ids=None,
+    draft_squad_ids=None, build_weekly_decisions=None,
 ):
     """Compute one team's manager summary and weekly decision, decoupled from the shared refresh.
 
@@ -507,22 +526,31 @@ def compute_manager_view(
     personalized feedback on the manager's own declared squad rather than staying inactive. Once
     the season reaches Gameweek 2, `build_transfer_decisions`'s own gate stops applying and this
     fallback is never reached, so the real GW2+ path takes back over automatically.
+
+    `build_weekly_decisions` is issue #208's seam for request-level caching: a callable taking
+    `(team_id, bootstrap, fixtures, manager_state, generated_at, horizon, transfers,
+    draft_squad_ids)` and returning the same shape `default_build_weekly_decisions` does.
+    Defaults to always recomputing (this function's original, still-current behavior for every
+    caller that doesn't pass one) -- `decision_cache.make_cached_weekly_decisions_builder` is the
+    only caller that does, wired in by `server_handlers/team_lookup.py`'s
+    `default_team_view_action`. Deliberately *not* a `cache=` dict parameter like
+    `transfer_decisions.py`'s own internal per-call memoization (`_candidate_moves`'s
+    `event_score_cache` and friends) -- that one scores candidates within a single
+    `build_transfer_decisions` call and is unrelated; this seam is about skipping the call
+    entirely across separate requests, so it needed a different shape to avoid the two being
+    confused.
     """
+    build_weekly_decisions = build_weekly_decisions or default_build_weekly_decisions
     try:
         manager_raw = collect_public_manager(team_id)
         manager_state = summarize_manager(manager_raw, bootstrap)
         if confirmed_free_transfers is not None:
             manager_state["confirmed_free_transfers"] = confirmed_free_transfers
             manager_state["confirmed_free_transfers_event"] = confirmed_free_transfers_event
-        weekly_decisions = build_transfer_decisions(
-            bootstrap, fixtures, manager_state, generated_at=generated_at, horizon=horizon,
-            recent_transfers=transfers,
+        weekly_decisions = build_weekly_decisions(
+            team_id, bootstrap, fixtures, manager_state, generated_at, horizon, transfers,
+            draft_squad_ids,
         )
-        if weekly_decisions.get("status") == "waiting_for_gw2" and draft_squad_ids:
-            weekly_decisions = build_draft_decisions(
-                bootstrap, fixtures, draft_squad_ids, generated_at=generated_at, horizon=horizon,
-                recent_transfers=transfers,
-            )
     except Exception:
         manager_state = {
             "connection_status": "lookup_failed",

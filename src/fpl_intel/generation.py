@@ -27,6 +27,18 @@ def _safe_generation_dir(root):
     return candidate
 
 
+def current_generation_id(root):
+    """The authoritative generation's id, or None if none has been published yet (matches
+    `resolve_artifact`'s own fallback: either before the first refresh ever runs, or a plain
+    local checkout that predates this generation scheme). Issue #208: this is the invalidation
+    signal for the request-level decision cache -- the same directory `resolve_artifact` already
+    treats as authoritative, so a cache entry goes stale in exactly the cases a freshly resolved
+    artifact would have changed, never sooner and never later.
+    """
+    generation = _safe_generation_dir(root)
+    return generation.name if generation is not None else None
+
+
 def resolve_artifact(root, filename):
     """Resolve an artifact from the authoritative generation, then legacy paths."""
     if not filename or Path(filename).name != filename:
