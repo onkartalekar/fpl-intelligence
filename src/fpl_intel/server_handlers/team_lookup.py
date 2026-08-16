@@ -18,6 +18,7 @@ import json
 import secrets
 
 from .. import profiles
+from ..decision_cache import WeeklyDecisionCache, make_cached_weekly_decisions_builder
 from ..fpl_data import save_json
 from ..generation import resolve_artifact
 from ..model_performance import archive_team_forecast, build_team_model_performance
@@ -51,7 +52,17 @@ _DEFAULT_VISITOR_PROFILE = {
 
 
 def default_team_view_action(root):
-    """Build the default per-request team-lookup action from the shared refresh's cached artifacts."""
+    """Build the default per-request team-lookup action from the shared refresh's cached artifacts.
+
+    Issue #208: `cache`/`build_weekly_decisions` below are created once per call to this factory
+    -- i.e. once per `create_server`, so once per server process (or per test instance) -- and
+    then reused by every request `action` handles. That single `WeeklyDecisionCache` is what lets
+    a second lookup of the same team, against the same shared-data generation and an unchanged
+    manager/profile, skip `build_transfer_decisions`/`build_draft_decisions` entirely instead of
+    recomputing from scratch. See `decision_cache.py`'s module docstring for the full design.
+    """
+    cache = WeeklyDecisionCache()
+    build_weekly_decisions = make_cached_weekly_decisions_builder(root, cache)
 
     def action(team_id):
         bootstrap = json.loads(
@@ -87,6 +98,7 @@ def default_team_view_action(root):
             confirmed_free_transfers=saved["confirmed_free_transfers"] if saved else None,
             confirmed_free_transfers_event=saved["confirmed_free_transfers_event"] if saved else None,
             draft_squad_ids=saved["draft_squad"] if saved else None,
+            build_weekly_decisions=build_weekly_decisions,
         )
 
     return action

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fpl_intel.generation import publish_generation, resolve_artifact
 from fpl_intel.refresh import (
@@ -1132,6 +1132,51 @@ class ComputeManagerViewTests(unittest.TestCase):
             )
 
         self.assertEqual(result["weekly_decisions"]["free_transfer_source"], "estimated_public_history")
+
+    def test_build_weekly_decisions_seam_is_used_when_supplied(self):
+        """Issue #208: `decision_cache.make_cached_weekly_decisions_builder` is the real caller
+        of this seam -- this confirms `compute_manager_view` actually calls whatever's passed in,
+        with the arguments the cache needs, instead of always calling
+        `build_transfer_decisions`/`build_draft_decisions` directly."""
+        raw_manager = {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 1, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {"active_chip": None, "entry_history": {"event": 1, "bank": 0, "value": 1000}, "picks": []},
+        }
+        bootstrap, fixtures = sample_bootstrap(), sample_fixtures()
+        calls = []
+
+        def fake_builder(team_id, bootstrap_arg, fixtures_arg, manager_state, generated_at, horizon, transfers, draft_squad_ids):
+            calls.append((team_id, generated_at, horizon))
+            return {"status": "from_seam"}
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=raw_manager):
+            result = compute_manager_view(
+                bootstrap, fixtures, transfers=[], generated_at="2026-08-29T12:00:00-04:00", team_id=364759,
+                build_weekly_decisions=fake_builder,
+            )
+
+        self.assertEqual(result["weekly_decisions"], {"status": "from_seam"})
+        self.assertEqual(calls, [(364759, "2026-08-29T12:00:00-04:00", 5)])
+
+    def test_the_seam_is_never_reached_on_a_lookup_failure(self):
+        """A custom `build_weekly_decisions` must not be called at all when `collect_public_manager`
+        raises -- the existing clean-failure result takes over first, same as the default path."""
+        build_weekly_decisions = Mock()
+
+        with patch("fpl_intel.refresh.collect_public_manager", side_effect=OSError("unreachable")):
+            result = compute_manager_view(
+                sample_bootstrap(), sample_fixtures(), transfers=[],
+                generated_at="2026-08-29T12:00:00-04:00", team_id=42,
+                build_weekly_decisions=build_weekly_decisions,
+            )
+
+        build_weekly_decisions.assert_not_called()
+        self.assertEqual(result["weekly_decisions"]["status"], "team_not_found")
 
 
 if __name__ == "__main__":

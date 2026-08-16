@@ -21,6 +21,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from fpl_intel.generation import publish_generation
 from fpl_intel.profiles import (
     confirm_reminder, load_profile, save_profile, set_lookup_opt_out, set_reminder_pending,
 )
@@ -798,3 +799,129 @@ class CookieResolvedTeamTests(unittest.TestCase):
 
         self.assertEqual(self.profile_read_calls, [42])
         self.assertIn('"risk_profile": "aggressive"', html)
+
+
+class RequestLevelDecisionCacheTests(unittest.TestCase):
+    """Issue #208: end-to-end coverage of the real (non-test-double) `default_team_view_action`
+    caching path -- unlike every other class in this file, these deliberately do NOT pass a
+    `team_view_action` override into `create_server`, so the real `WeeklyDecisionCache` wiring
+    from `server_handlers/team_lookup.py` is exercised.
+
+    Exercises the returned `action(team_id)` closure directly rather than over HTTP for the
+    same-endpoint-twice cases: `_serve_dashboard`'s own `?team_id=` path shares one
+    `lookup_limiter` cooldown (`TEAM_LOOKUP_COOLDOWN_SECONDS`) with no token exemption (see
+    `server.py`'s `_serve_dashboard`), so two back-to-back real HTTP lookups of the same team
+    would 429 on the second one regardless of caching -- calling the closure directly is both
+    faster and exactly what production does, since `_serve_dashboard` and `/api/manager-view`
+    both call this identical closure object.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z", "profile": {"team_id": None}}),
+            encoding="utf-8",
+        )
+        (self.root / "data" / "fpl-bootstrap-latest.json").write_text(
+            json.dumps(sample_bootstrap()), encoding="utf-8"
+        )
+        (self.root / "data" / "fpl-fixtures-latest.json").write_text(
+            json.dumps(sample_fixtures()), encoding="utf-8"
+        )
+        (self.root / "data" / "official-transfers-latest.json").write_text(
+            json.dumps({"transfers": []}), encoding="utf-8"
+        )
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _raw_manager(self, bank=0):
+        return {
+            "entry": {
+                "id": 364759, "name": "BrunoMans", "player_first_name": "Test",
+                "player_last_name": "Manager", "current_event": 3, "started_event": 1,
+            },
+            "history": {"current": [], "past": [], "chips": []},
+            "transfers": [],
+            "picks": {
+                "active_chip": None,
+                "entry_history": {"event": 3, "bank": bank, "value": 1000},
+                "picks": [],
+            },
+        }
+
+    def test_a_second_lookup_of_the_same_team_reuses_the_cached_result(self):
+        action = _default_team_view_action(self.root)
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager()) as mock_collect, \
+                patch("fpl_intel.refresh.build_transfer_decisions", return_value={"status": "active", "event": 3}) as mock_build:
+            first = action(364759)
+            second = action(364759)
+
+        # collect_public_manager still runs on every call -- a manager's own live squad/profile
+        # changes must always be reflected -- only the expensive computation itself is skipped.
+        self.assertEqual(mock_collect.call_count, 2)
+        self.assertEqual(mock_build.call_count, 1)
+        self.assertEqual(first["weekly_decisions"], second["weekly_decisions"])
+
+    def test_both_call_sites_share_one_cache(self):
+        """`_serve_dashboard`'s ?team_id= resolution and /api/manager-view both call the same
+        `lookup_action`/`action` closure `create_server` builds once -- verified here over real
+        HTTP, using /api/manager-view's operator-token rate-limit exemption (server.py's
+        `_rate_limit_exempt`) to avoid the two calls tripping the shared `lookup_limiter`
+        cooldown, which is a separate, unrelated concern from the cache under test."""
+        server = create_server(self.root, host="127.0.0.1", port=0, token="test-token")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager()), \
+                    patch("fpl_intel.refresh.build_transfer_decisions", return_value={"status": "active", "event": 3}) as mock_build:
+                urlopen(base_url + "/?team_id=364759", timeout=3).read()
+                manager_view_request = Request(
+                    base_url + "/api/manager-view?team_id=364759", headers={"X-Refresh-Token": "test-token"},
+                )
+                urlopen(manager_view_request, timeout=3).read()
+
+            self.assertEqual(mock_build.call_count, 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_a_changed_squad_forces_recomputation(self):
+        action = _default_team_view_action(self.root)
+
+        with patch("fpl_intel.refresh.build_transfer_decisions", return_value={"status": "active", "event": 3}) as mock_build:
+            with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager(bank=0)):
+                action(364759)
+            with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager(bank=50)):
+                action(364759)
+
+        self.assertEqual(mock_build.call_count, 2)
+
+    def test_a_real_refresh_invalidates_the_cache(self):
+        action = _default_team_view_action(self.root)
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager()), \
+                patch("fpl_intel.refresh.build_transfer_decisions", return_value={"status": "active", "event": 3}) as mock_build:
+            action(364759)
+            publish_generation(
+                self.root, "2026-07-19T12:00:00Z",
+                {"dashboard-state.json": {"generated_at": "2026-07-19T12:00:00Z"}},
+            )
+            action(364759)
+
+        self.assertEqual(mock_build.call_count, 2)
+
+    def test_a_different_team_id_never_collides_with_an_unrelated_cached_entry(self):
+        action = _default_team_view_action(self.root)
+
+        with patch("fpl_intel.refresh.collect_public_manager", return_value=self._raw_manager()), \
+                patch("fpl_intel.refresh.build_transfer_decisions", return_value={"status": "active", "event": 3}) as mock_build:
+            action(364759)
+            action(100001)
+
+        self.assertEqual(mock_build.call_count, 2)
