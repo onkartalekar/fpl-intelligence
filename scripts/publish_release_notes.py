@@ -18,10 +18,18 @@ What it does, each run:
    `release_notes.CATEGORIES` (`Feature`/`Fix`/`Data`/`Docs`/`Chore`). Tries an LLM first
    (`FPL_INTEL_RELEASE_NOTES_LLM_*` env vars, provider-agnostic like `news_signals.py`'s existing
    pattern -- a **separate** credential from that module's `FPL_INTEL_LLM_*`, confirmed with the
-   user 2026-08-11: Phase 5 has never been activated, so there's nothing to share). If the LLM is
-   unconfigured or the call fails, falls back to a plain deterministic template built directly
-   from each PR's title/body (`build_template_entry`) -- a real shipped day never silently gets
-   zero entry just because generation failed (issue #143 plan doc, Candidate B2a).
+   user 2026-08-11: Phase 5 has never been activated, so there's nothing to share). A response
+   that doesn't hold up (bad JSON, a category/audience the model invented, or one of its
+   `changes[]` entries not matching a real PR by `pr_index` -- see `_validate_llm_changes`) gets
+   one corrective retry that tells the model exactly what was wrong before this step gives up on
+   the LLM entirely. If the LLM is unconfigured, or both attempts fail, this falls back to a
+   plain deterministic template built directly from each PR's title/body (`build_template_entry`)
+   -- a real shipped day never silently gets zero entry just because generation failed (issue
+   #143 plan doc, Candidate B2a). Either way the result is the same shape (`release_notes.
+   validate_entry_payload`'s cleaned form), so everything downstream -- the dashboard tab and
+   `release_notes_email.compose_release_notes_email`'s enriched HTML email -- renders an
+   LLM-sourced and a template-sourced entry identically; there is no separate "plain" path for a
+   fallback day.
 4. `POST`s the entry to the live dashboard (`/api/release-notes`, gated by the same
    `FPL_INTEL_REFRESH_TOKEN` `/api/refresh` already requires) -- this is what the live "What's
    New" tab actually renders from. Required; a failure here fails the whole run.
@@ -99,11 +107,14 @@ _SYSTEM_PROMPT = (
     "markdown fences, matching exactly this shape: "
     '{"headline": "one sentence synthesizing the day\'s theme across every change", '
     '"summary": "2-3 sentences, one coherent narrative, not a list", '
-    '"changes": [{"category": "Feature|Fix|Data|Docs|Chore", "audience": "user|developer", '
-    '"title": "one line, imperative or noun phrase", "description": "one line, plain language, '
-    'no jargon"}]}. '
-    "One changes[] entry per pull request given. category must be exactly one of the five listed "
-    "-- never invent a new one. audience is a second, independent judgment for each change: "
+    '"changes": [{"pr_index": <integer>, "category": "Feature|Fix|Data|Docs|Chore", '
+    '"audience": "user|developer", "title": "one line, imperative or noun phrase", '
+    '"description": "one line, plain language, no jargon"}]}. '
+    "One changes[] entry per pull request given, no more, no fewer. pr_index is the 1-based "
+    'number from this prompt\'s own "Pull request N:" listing that this change corresponds to -- '
+    "every value from 1 through the number of pull requests given must appear exactly once, with "
+    "no repeats and nothing out of range. category must be exactly one of the five listed -- "
+    "never invent a new one. audience is a second, independent judgment for each change: "
     '"user" if a fantasy football manager using the dashboard would actually notice or care '
     "about this (a UI change, a new capability, a fix to something they'd have seen break, a "
     'change to the recommendations/data they see); "developer" if it is purely internal -- '
@@ -389,66 +400,147 @@ def _build_prompt(prs):
     return "\n\n---\n\n".join(lines)
 
 
+# One initial call plus one corrective retry -- not unbounded. A model told exactly what was
+# wrong with its first answer either fixes it on the second try or it won't fix it at all; every
+# extra attempt is another _LLM_TIMEOUT_SECONDS of latency this job burns before falling back to
+# the template regardless, so there's no value in going past two.
+_LLM_MAX_ATTEMPTS = 2
+
+
+def _call_llm(provider, prompt_body, api_key, timeout, max_tokens, caller=None):
+    """One raw call to the configured provider (or `caller`, for tests). Returns the raw response
+    text (may be falsy) or raises -- callers decide how to handle both."""
+    if caller is not None:
+        return caller(prompt_body)
+    if provider == "claude":
+        return _call_claude(prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR), timeout, max_tokens)
+    return _call_openai_compatible(
+        prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR), os.environ.get(LLM_API_BASE_ENV_VAR),
+        timeout, max_tokens,
+    )
+
+
+def _validate_llm_changes(changes, prs):
+    """Validate one LLM response's `changes[]` against `prs`, matching each change to its source
+    PR by `pr_index` rather than trusting the list length alone. Returns `(cleaned_changes, None)`
+    on success, or `(None, problem)` on failure, where `problem` is a plain-English description of
+    exactly what was wrong -- fed straight into the next attempt's corrective retry prompt (see
+    `build_llm_entry`), not just used as a pass/fail signal.
+
+    Confirmed live (2026-08-16): a response with fewer `changes[]` entries than PRs given passed
+    every per-entry check and was silently accepted, publishing an entry 6 PRs short with no error
+    anywhere (a bare length check first caught this, in an earlier version of this function). But
+    length alone is a weaker check than it looks: it can't distinguish "one PR covered twice,
+    another skipped entirely" from a genuinely correct response, since both have the right count.
+    Requiring a unique `pr_index` covering every PR exactly once catches that case too, and -- via
+    the `problem` string this returns -- gives a corrective retry something specific to act on
+    (e.g. "PR 4 is missing, PR 7 is duplicated") instead of just "try again."
+    """
+    if not isinstance(changes, list) or not changes:
+        return None, "changes must be a non-empty JSON array with one entry per pull request."
+    if len(changes) != len(prs):
+        return None, (
+            f"changes must have exactly {len(prs)} entries (one per pull request given), but had "
+            f"{len(changes)}."
+        )
+    if not all(isinstance(change, dict) for change in changes):
+        return None, "every entry in changes must be a JSON object."
+    indices = [change.get("pr_index") for change in changes]
+    if not all(isinstance(index, int) and not isinstance(index, bool) for index in indices):
+        return None, "every change must include an integer pr_index."
+    expected = set(range(1, len(prs) + 1))
+    actual = set(indices)
+    if len(set(indices)) != len(indices) or actual != expected:
+        problems = []
+        missing = sorted(expected - actual)
+        if missing:
+            problems.append(f"missing pr_index {missing}")
+        duplicated = sorted({index for index in indices if indices.count(index) > 1})
+        if duplicated:
+            problems.append(f"duplicated pr_index {duplicated}")
+        out_of_range = sorted(actual - expected)
+        if out_of_range:
+            problems.append(f"out-of-range pr_index {out_of_range}")
+        return None, f"pr_index values must be exactly 1..{len(prs)}, each appearing once: " + "; ".join(problems)
+    for change in changes:
+        if change.get("category") not in CATEGORIES:
+            return None, f"changes[pr_index={change.get('pr_index')}].category must be one of {', '.join(CATEGORIES)}."
+        if change.get("audience") not in AUDIENCES:
+            return None, f"changes[pr_index={change.get('pr_index')}].audience must be one of {', '.join(AUDIENCES)}."
+    return changes, None
+
+
 def build_llm_entry(date, prs, caller=None):
-    """Attempt LLM-generated copy for `date`'s entry. Returns `None` on any failure (unconfigured,
-    network error, malformed response, invalid category) -- callers must fall back to
-    `build_template_entry`, never raise into the caller (module docstring, point 3 / plan doc
-    Candidate B2a). `caller`, when given, replaces the real HTTPS call (tests only).
+    """Attempt LLM-generated copy for `date`'s entry. Returns `None` on total failure (unconfigured,
+    or every attempt fails) -- callers must fall back to `build_template_entry`, never raise into
+    the caller (module docstring, point 3 / plan doc Candidate B2a). `caller`, when given, replaces
+    the real HTTPS call (tests only).
+
+    Makes up to `_LLM_MAX_ATTEMPTS` calls, not just one: the first invalid response (a network
+    error, malformed JSON, wrong pr_index coverage, an invalid category/audience, ...) triggers one
+    corrective retry that tells the model exactly what was wrong with its first answer, before
+    giving up and falling back to the template. A model that misses the schema once is often able
+    to follow it when told precisely which part it got wrong -- a plain "try again" with no
+    feedback would just waste the retry repeating the same mistake, so every retry prompt below
+    is built from the specific problem the previous attempt hit.
     """
     provider = os.environ.get(LLM_PROVIDER_ENV_VAR)
     api_key = os.environ.get(LLM_API_KEY_ENV_VAR)
     if not provider or not api_key:
         return None
+    if caller is None and provider not in ("claude", "openai_compatible"):
+        return None
+
     prompt_body = _build_prompt(prs)
     max_tokens = _max_response_tokens(len(prs))
-    try:
-        if caller is not None:
-            raw_text = caller(prompt_body)
-        elif provider == "claude":
-            raw_text = _call_claude(
-                prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR), _LLM_TIMEOUT_SECONDS, max_tokens,
+    attempt_prompt = prompt_body
+    for _attempt in range(_LLM_MAX_ATTEMPTS):
+        try:
+            raw_text = _call_llm(provider, attempt_prompt, api_key, _LLM_TIMEOUT_SECONDS, max_tokens, caller=caller)
+        except (URLError, HTTPError, TimeoutError, OSError, ValueError):
+            attempt_prompt = prompt_body  # a network error isn't a shape problem -- nothing to correct
+            continue
+        if not raw_text:
+            attempt_prompt = prompt_body
+            continue
+        try:
+            parsed = json.loads(_strip_markdown_fence(raw_text))
+        except (json.JSONDecodeError, TypeError):
+            attempt_prompt = (
+                f"{prompt_body}\n\n---\n\nYour previous reply was rejected: it was not valid JSON. "
+                "Reply again with ONLY the JSON object described above, no markdown fences, no other text."
             )
-        elif provider == "openai_compatible":
-            raw_text = _call_openai_compatible(
-                prompt_body, api_key, os.environ.get(LLM_MODEL_ENV_VAR),
-                os.environ.get(LLM_API_BASE_ENV_VAR), _LLM_TIMEOUT_SECONDS, max_tokens,
+            continue
+        if not isinstance(parsed, dict):
+            attempt_prompt = (
+                f"{prompt_body}\n\n---\n\nYour previous reply was rejected: the top-level response must "
+                f"be a single JSON object, not a {type(parsed).__name__}. Reply again with ONLY the JSON "
+                "object described above."
             )
-        else:
-            return None
-    except (URLError, HTTPError, TimeoutError, OSError, ValueError):
-        return None
-    if not raw_text:
-        return None
-    try:
-        parsed = json.loads(_strip_markdown_fence(raw_text))
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    changes = parsed.get("changes")
-    if not isinstance(changes, list) or not changes:
-        return None
-    # Confirmed live (2026-08-16): a well-formed, validly-categorized response silently dropped
-    # 6 of 16 PRs' worth of changes -- every entry it did include passed the per-entry checks
-    # below, so nothing caught it, and the entry was published (and emailed) 10 items short with
-    # no error anywhere. `_SYSTEM_PROMPT` already says "One changes[] entry per pull request
-    # given," but nothing enforced it. This is the enforcement: a response that doesn't cover
-    # every PR given is rejected outright, same as any other malformed response, and falls back
-    # to `build_template_entry` -- which is structurally guaranteed to have exactly one entry per
-    # PR, so the fallback can't reproduce this failure mode.
-    if len(changes) != len(prs):
-        return None
-    for change in changes:
-        if not isinstance(change, dict):
-            return None
-        if change.get("category") not in CATEGORIES or change.get("audience") not in AUDIENCES:
-            return None
-    entry = {"date": date.isoformat(), "headline": parsed.get("headline"), "summary": parsed.get("summary"), "changes": changes}
-    try:
-        validate_entry_payload(entry)
-    except Exception:
-        return None
-    return entry
+            continue
+        changes, problem = _validate_llm_changes(parsed.get("changes"), prs)
+        if problem:
+            attempt_prompt = (
+                f"{prompt_body}\n\n---\n\nYour previous reply was rejected: {problem} Reply again with a "
+                "corrected JSON object following the exact same schema."
+            )
+            continue
+        entry = {
+            "date": date.isoformat(), "headline": parsed.get("headline"), "summary": parsed.get("summary"),
+            "changes": changes,
+        }
+        try:
+            # The cleaned/validated payload, not the raw one: strips pr_index (only ever needed
+            # for this function's own matching, never part of the stored/emailed shape) and
+            # normalizes whitespace, exactly like a template-fallback entry already is.
+            return validate_entry_payload(entry)
+        except Exception as error:
+            attempt_prompt = (
+                f"{prompt_body}\n\n---\n\nYour previous reply was rejected: {error} Reply again with a "
+                "corrected JSON object following the exact same schema."
+            )
+            continue
+    return None
 
 
 def generate_entry(date, prs, llm_caller=None):

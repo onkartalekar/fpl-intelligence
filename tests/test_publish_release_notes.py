@@ -235,7 +235,7 @@ class BuildLlmEntryFenceRegressionTests(unittest.TestCase):
     def test_fenced_response_still_parses(self):
         fenced = "```json\n" + json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         }) + "\n```"
 
         with patch.dict(
@@ -257,7 +257,7 @@ class BuildLlmEntryTests(unittest.TestCase):
             "headline": "Sharper filters",
             "summary": "Filters got sharper.",
             "changes": [{
-                "category": "Feature", "audience": "user",
+                "pr_index": 1, "category": "Feature", "audience": "user",
                 "title": "Split filters", "description": "Three controls now.",
             }],
         })
@@ -271,20 +271,32 @@ class BuildLlmEntryTests(unittest.TestCase):
         self.assertEqual(entry["headline"], "Sharper filters")
         self.assertEqual(entry["changes"][0]["category"], "Feature")
         self.assertEqual(entry["changes"][0]["audience"], "user")
+        # pr_index is only ever used to match a change back to its source PR during validation --
+        # it's never part of the stored/emailed shape, same as a template-fallback entry.
+        self.assertNotIn("pr_index", entry["changes"][0])
 
-    def test_malformed_json_returns_none(self):
+    def test_malformed_json_exhausts_retries_and_returns_none(self):
+        calls = []
+
+        def caller(prompt):
+            calls.append(prompt)
+            return "not json"
+
         with patch.dict(
             "os.environ",
             {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
         ):
-            entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=lambda prompt: "not json")
+            entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=caller)
 
         self.assertIsNone(entry)
+        # One initial call plus one corrective retry, not an unbounded loop or a single shot.
+        self.assertEqual(len(calls), prn._LLM_MAX_ATTEMPTS)
+        self.assertIn("was not valid JSON", calls[1])
 
-    def test_invalid_category_returns_none(self):
+    def test_invalid_category_exhausts_retries_and_returns_none(self):
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Vibes", "audience": "user", "title": "T", "description": "D"}],
+            "changes": [{"pr_index": 1, "category": "Vibes", "audience": "user", "title": "T", "description": "D"}],
         })
         with patch.dict(
             "os.environ",
@@ -294,13 +306,13 @@ class BuildLlmEntryTests(unittest.TestCase):
 
         self.assertIsNone(entry)
 
-    def test_invalid_audience_returns_none(self):
+    def test_invalid_audience_exhausts_retries_and_returns_none(self):
         """Issue #196: `audience` is validated with the same strictness as `category` -- an LLM
         response with a well-formed category but an invalid/missing audience must still fall
         back to the template, not silently drop or default the field."""
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "audience": "robot", "title": "T", "description": "D"}],
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "robot", "title": "T", "description": "D"}],
         })
         with patch.dict(
             "os.environ",
@@ -310,7 +322,7 @@ class BuildLlmEntryTests(unittest.TestCase):
 
         self.assertIsNone(entry)
 
-    def test_fewer_changes_than_prs_returns_none(self):
+    def test_fewer_changes_than_prs_exhausts_retries_and_returns_none(self):
         """Confirmed live (2026-08-16): a response with fewer changes[] entries than PRs given
         passed every per-entry check (each included entry was well-formed) and was silently
         accepted, dropping real content with no error. Every entry here is individually valid --
@@ -318,7 +330,7 @@ class BuildLlmEntryTests(unittest.TestCase):
         per-entry validation."""
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         })
         prs = [{"title": "A"}, {"title": "B"}, {"title": "C"}]
         with patch.dict(
@@ -329,14 +341,14 @@ class BuildLlmEntryTests(unittest.TestCase):
 
         self.assertIsNone(entry)
 
-    def test_more_changes_than_prs_returns_none(self):
+    def test_more_changes_than_prs_exhausts_retries_and_returns_none(self):
         """The reverse mismatch -- more changes[] entries than PRs given -- is rejected too, not
         just the under-count case."""
         response = json.dumps({
             "headline": "H", "summary": "S",
             "changes": [
-                {"category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
-                {"category": "Fix", "audience": "user", "title": "T2", "description": "D2"},
+                {"pr_index": 1, "category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"pr_index": 2, "category": "Fix", "audience": "user", "title": "T2", "description": "D2"},
             ],
         })
         with patch.dict(
@@ -351,8 +363,8 @@ class BuildLlmEntryTests(unittest.TestCase):
         response = json.dumps({
             "headline": "H", "summary": "S",
             "changes": [
-                {"category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
-                {"category": "Chore", "audience": "developer", "title": "T2", "description": "D2"},
+                {"pr_index": 1, "category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"pr_index": 2, "category": "Chore", "audience": "developer", "title": "T2", "description": "D2"},
             ],
         })
         prs = [{"title": "A"}, {"title": "B"}]
@@ -365,13 +377,68 @@ class BuildLlmEntryTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(len(entry["changes"]), 2)
 
-    def test_falls_back_to_template_when_llm_drops_changes(self):
-        """End-to-end through generate_entry: a count-mismatched LLM response must produce the
-        same complete, one-entry-per-PR result the template fallback always guarantees -- not a
-        silently short entry."""
+    def test_right_count_but_duplicated_and_missing_pr_index_is_rejected(self):
+        """Same count as PRs given, but one PR is covered twice and another not at all -- a
+        length-only check would have accepted this (issue confirmed live 2026-08-16 was the
+        opposite direction, a short count, but a same-length swap like this slips past a length
+        check just as easily). pr_index coverage catches it."""
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+            "changes": [
+                {"pr_index": 1, "category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"pr_index": 1, "category": "Fix", "audience": "user", "title": "T2", "description": "D2"},
+            ],
+        })
+        prs = [{"title": "A"}, {"title": "B"}]
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), prs, caller=lambda prompt: response)
+
+        self.assertIsNone(entry)
+
+    def test_corrective_retry_recovers_from_an_initial_pr_index_mismatch(self):
+        """The core of the retry behavior: a first response missing pr_index coverage is rejected,
+        but the corrective retry prompt (which names the exact problem) reaches the caller, and a
+        compliant second response is accepted -- the run doesn't have to fall all the way back to
+        the template just because the first attempt was wrong."""
+        bad_response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "user", "title": "T1", "description": "D1"}],
+        })
+        good_response = json.dumps({
+            "headline": "Fixed", "summary": "S",
+            "changes": [
+                {"pr_index": 1, "category": "Feature", "audience": "user", "title": "T1", "description": "D1"},
+                {"pr_index": 2, "category": "Fix", "audience": "user", "title": "T2", "description": "D2"},
+            ],
+        })
+        prompts_seen = []
+
+        def caller(prompt):
+            prompts_seen.append(prompt)
+            return bad_response if len(prompts_seen) == 1 else good_response
+
+        prs = [{"title": "A"}, {"title": "B"}]
+        with patch.dict(
+            "os.environ",
+            {prn.LLM_PROVIDER_ENV_VAR: "claude", prn.LLM_API_KEY_ENV_VAR: "key"}, clear=True,
+        ):
+            entry = prn.build_llm_entry(date(2026, 8, 11), prs, caller=caller)
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["headline"], "Fixed")
+        self.assertEqual(len(prompts_seen), 2)
+        self.assertIn("exactly 2 entries", prompts_seen[1])
+
+    def test_falls_back_to_template_when_llm_drops_changes(self):
+        """End-to-end through generate_entry: a count-mismatched LLM response (repeated on retry)
+        must produce the same complete, one-entry-per-PR result the template fallback always
+        guarantees -- not a silently short entry."""
+        response = json.dumps({
+            "headline": "H", "summary": "S",
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         })
         prs = [
             {"title": "Fix the stale banner"},
@@ -386,8 +453,11 @@ class BuildLlmEntryTests(unittest.TestCase):
         self.assertEqual(source, "template")
         self.assertEqual(len(entry["changes"]), 2)
 
-    def test_caller_network_exception_returns_none_not_raise(self):
+    def test_caller_network_exception_retries_then_returns_none_not_raise(self):
+        calls = []
+
         def raising_caller(prompt):
+            calls.append(prompt)
             raise URLError("boom")
 
         with patch.dict(
@@ -397,6 +467,10 @@ class BuildLlmEntryTests(unittest.TestCase):
             entry = prn.build_llm_entry(date(2026, 8, 11), [{"title": "A"}], caller=raising_caller)
 
         self.assertIsNone(entry)
+        self.assertEqual(len(calls), prn._LLM_MAX_ATTEMPTS)
+        # A network error isn't a shape problem the model can fix -- the retry resends the
+        # original prompt unchanged rather than a corrective one.
+        self.assertEqual(calls[0], calls[1])
 
 
 class GenerateEntryTests(unittest.TestCase):
@@ -410,7 +484,7 @@ class GenerateEntryTests(unittest.TestCase):
     def test_uses_llm_when_it_succeeds(self):
         response = json.dumps({
             "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
+            "changes": [{"pr_index": 1, "category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         })
         with patch.dict(
             "os.environ",
