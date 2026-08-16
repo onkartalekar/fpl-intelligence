@@ -1175,6 +1175,7 @@ class ReleaseNotesApiTests(unittest.TestCase):
         "changes": [
             {
                 "category": "Feature",
+                "audience": "user",
                 "title": "Club movement filters split into Direction, Movement type, and Date",
                 "description": "Previously one combined control; each now narrows independently.",
             },
@@ -1542,7 +1543,7 @@ class ReleaseNotesNotifySubscribersTests(unittest.TestCase):
     def _post_entry(self, base_url, date="2026-08-11"):
         payload = {
             "date": date, "headline": "H", "summary": "S",
-            "changes": [{"category": "Feature", "title": "T", "description": "D"}],
+            "changes": [{"category": "Feature", "audience": "user", "title": "T", "description": "D"}],
         }
         return urlopen(
             Request(

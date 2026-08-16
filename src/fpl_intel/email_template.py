@@ -54,10 +54,21 @@ def shell(title, inner_html):
     600px dark-navy table skeleton every email built from this module shares: doctype/head/body,
     an outer full-width centering table, and an inner `max-width:600px` table that actually holds
     the content. `title` is escaped into the `<title>` (not shown to the reader; some clients
-    surface it in a preview pane)."""
+    surface it in a preview pane).
+
+    The `color-scheme`/`supported-color-schemes` meta tags declare this email as dark-only.
+    Without them, confirmed live: some mobile mail apps (Gmail's app in particular) apply their
+    own automatic dark-mode reprocessing to a message when the OS is in dark mode, and -- with no
+    signal that this email already handles its own theming -- can relight an intentionally-dark
+    email to something lighter, while desktop clients (which generally trust inline styles as
+    authored) rendered the same email correctly dark. These tags are the standard hint that tells
+    color-scheme-aware clients (iOS Mail, Outlook.com/desktop, and others honoring the hint) to
+    leave a declared-dark email alone rather than guessing."""
     return (
         '<!doctype html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="color-scheme" content="dark">'
+        '<meta name="supported-color-schemes" content="dark">'
         f"<title>{esc(title)}</title></head>"
         f'<body style="margin:0;padding:0;background:{EMAIL_BG};'
         'font-family:Arial,Helvetica,sans-serif">'

@@ -65,19 +65,32 @@ _SAMPLE_ENTRY = {
     "headline": "Sharper filters for preseason movement tracking",
     "summary": "Club movement just got easier to scan.",
     "changes": [
-        {"category": "Feature", "title": "Split filters", "description": "Three controls now."},
+        {"category": "Feature", "audience": "user", "title": "Split filters", "description": "Three controls now."},
     ],
 }
 
-# A mixed entry -- one change in each of #190's two email sections -- for tests that need both
-# "What's new for you" (Feature/Fix/Data) and "Under the hood" (Docs/Chore) populated at once.
+# A mixed entry for the #196 audience-based split -- deliberately chosen so category alone would
+# route these wrong: a `Fix` marked `developer` (must land in "Under the hood" despite `Fix`
+# being #190's original "for you" category) and a `Chore` marked `user` (must land in "What's
+# new for you" despite `Chore` being #190's original "under the hood" category). Proves the
+# split now keys on `audience`, not `category`.
 _MIXED_ENTRY = {
     "date": "2026-08-15",
     "headline": "Streamlined interface and enhanced functionality",
     "summary": "Smarter caching, and a new multi-transfer feature.",
     "changes": [
-        {"category": "Feature", "title": "Support multiple free transfers", "description": "Search now allows more transfers."},
-        {"category": "Chore", "title": "Introduce CI for automated testing", "description": "Runs tests on every pull request."},
+        {
+            "category": "Feature", "audience": "user",
+            "title": "Support multiple free transfers", "description": "Search now allows more transfers.",
+        },
+        {
+            "category": "Fix", "audience": "developer",
+            "title": "Catch socket timeout errors more effectively", "description": "Internal robustness only.",
+        },
+        {
+            "category": "Chore", "audience": "user",
+            "title": "Speed up dashboard page loads", "description": "Managers will notice faster loads.",
+        },
     ],
 }
 
@@ -102,27 +115,53 @@ class ComposeReleaseNotesEmailTests(unittest.TestCase):
         )
         self.assertTrue(html_body.startswith("<!doctype html>"))
         self.assertIn("Support multiple free transfers", html_body)
-        self.assertIn("Introduce CI for automated testing", html_body)
+        self.assertIn("Catch socket timeout errors more effectively", html_body)
+        self.assertIn("Speed up dashboard page loads", html_body)
         self.assertIn('href="https://example.com/unsub?token=xyz"', html_body)
 
-    def test_html_body_splits_changes_into_the_for_you_and_under_the_hood_sections(self):
-        """Issue #190's decided design: Feature/Fix/Data render under "What's new for you",
-        Docs/Chore render under "Under the hood" -- both with the same badge/card weight, per
-        the review feedback that an earlier de-emphasized pass wrongly read as "unimportant"."""
+    def test_html_body_splits_by_audience_not_category(self):
+        """Issue #196: the split keys on each change's own `audience`, not `category`. Proven
+        with `_MIXED_ENTRY`'s deliberately-crossed fixture -- a `Fix`/`developer` change lands in
+        "Under the hood" (despite `Fix` being #190's original "for you" category), and a
+        `Chore`/`user` change lands in "What's new for you" (despite `Chore` being #190's
+        original "under the hood" category)."""
         _, _, html_body = compose_release_notes_email(_MIXED_ENTRY, "https://example.com/unsub")
         for_you_index = html_body.index("What's new for you")
         under_the_hood_index = html_body.index("Under the hood")
-        feature_index = html_body.index("Support multiple free transfers")
-        chore_index = html_body.index("Introduce CI for automated testing")
-        self.assertLess(for_you_index, feature_index)
-        self.assertLess(feature_index, under_the_hood_index)
-        self.assertLess(under_the_hood_index, chore_index)
+        feature_user_index = html_body.index("Support multiple free transfers")
+        fix_developer_index = html_body.index("Catch socket timeout errors more effectively")
+        chore_user_index = html_body.index("Speed up dashboard page loads")
+
+        # Feature/user and Chore/user both land in "for you" -- category doesn't matter here.
+        self.assertLess(for_you_index, feature_user_index)
+        self.assertLess(for_you_index, chore_user_index)
+        self.assertLess(feature_user_index, under_the_hood_index)
+        self.assertLess(chore_user_index, under_the_hood_index)
+        # Fix/developer lands in "under the hood" despite being a Fix.
+        self.assertLess(under_the_hood_index, fix_developer_index)
 
     def test_html_body_omits_a_section_with_no_matching_changes(self):
-        """An all-Feature entry (no Docs/Chore changes) must not render an empty "Under the
+        """An entry with only `user`-audience changes must not render an empty "Under the
         hood" section."""
         _, _, html_body = compose_release_notes_email(_SAMPLE_ENTRY, "https://example.com/unsub")
         self.assertIn("What's new for you", html_body)
+        self.assertNotIn("Under the hood", html_body)
+
+    def test_html_body_defaults_missing_audience_to_user(self):
+        """Entries published before issue #196 (all of history, by explicit decision -- not
+        worth backfilling) never carry `audience` at all. A missing field must default to `user`
+        rather than raising or silently dropping the change."""
+        entry = {
+            "date": "2026-08-11",
+            "headline": "Headline",
+            "summary": "Summary",
+            "changes": [
+                {"category": "Feature", "title": "Pre-#196 change", "description": "No audience field."},
+            ],
+        }
+        _, _, html_body = compose_release_notes_email(entry, "https://example.com/unsub")
+        self.assertIn("What's new for you", html_body)
+        self.assertIn("Pre-#196 change", html_body)
         self.assertNotIn("Under the hood", html_body)
 
     def test_html_body_escapes_change_titles_and_descriptions(self):
@@ -131,7 +170,7 @@ class ComposeReleaseNotesEmailTests(unittest.TestCase):
             "headline": "Headline",
             "summary": "Summary",
             "changes": [
-                {"category": "Feature", "title": "<script>alert(1)</script>", "description": "safe & sound"},
+                {"category": "Feature", "audience": "user", "title": "<script>alert(1)</script>", "description": "safe & sound"},
             ],
         }
         _, _, html_body = compose_release_notes_email(entry, "https://example.com/unsub")
