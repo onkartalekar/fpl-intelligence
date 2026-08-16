@@ -44,7 +44,18 @@ GROUPS = {
         "tests.test_transfer_decisions",
     ],
     "server-and-recommendations": [
+        # Issue #210: test_server.py itself now covers only DashboardHandler's own cross-cutting
+        # plumbing -- the other eight modules below were split out of it, one per
+        # server_handlers/*.py feature module it used to test inline.
         "tests.test_server",
+        "tests.test_server_contact",
+        "tests.test_server_draft_squad",
+        "tests.test_server_lookup_opt_out",
+        "tests.test_server_profile",
+        "tests.test_server_refresh",
+        "tests.test_server_release_notes",
+        "tests.test_server_reminder",
+        "tests.test_server_team_lookup",
         "tests.test_recommendations",
     ],
     "refresh-and-reminders": [

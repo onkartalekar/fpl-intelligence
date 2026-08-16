@@ -50,7 +50,16 @@ jobs:
           - group: transfer-decisions
             modules: tests.test_transfer_decisions
           - group: server-and-recommendations
-            modules: tests.test_server tests.test_recommendations
+            # Issue #210: test_server.py now covers only DashboardHandler's own cross-cutting
+            # plumbing -- the eight test_server_*.py modules were split out of it, one per
+            # server_handlers/*.py feature module it used to test inline. Kept in this same
+            # group (not split further) since none of them individually approaches the wall-time
+            # this matrix is sized around -- see the file-level comment above.
+            modules: >-
+              tests.test_server tests.test_server_contact tests.test_server_draft_squad
+              tests.test_server_lookup_opt_out tests.test_server_profile tests.test_server_refresh
+              tests.test_server_release_notes tests.test_server_reminder tests.test_server_team_lookup
+              tests.test_recommendations
           - group: refresh-and-reminders
             modules: tests.test_refresh tests.test_send_deadline_reminder
           - group: everything-else
