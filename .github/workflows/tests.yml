@@ -102,7 +102,14 @@ jobs:
         id: scope
         if: github.event_name == 'pull_request'
         run: |
+          # Bug fix, confirmed live: actions/checkout@v4's default shallow checkout for a
+          # pull_request event leaves only the synthetic merge commit locally -- base.sha alone
+          # (fetched below) isn't enough, head.sha itself isn't a reachable object either, so a
+          # diff between them failed outright with "fatal: bad object <head sha>". Fetching both
+          # SHAs explicitly (each --depth=1, so this stays cheap) makes both diff endpoints real,
+          # present objects.
           git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          git fetch --depth=1 origin "${{ github.event.pull_request.head.sha }}"
           changed_files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
           echo "changed files:"
           echo "$changed_files"
