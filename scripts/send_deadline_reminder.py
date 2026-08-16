@@ -56,7 +56,6 @@ exception, by design, since its entire purpose is showing a human what would be 
 import argparse
 from datetime import datetime, timezone
 from email.message import EmailMessage
-import html
 import json
 import os
 from pathlib import Path
@@ -68,6 +67,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from fpl_intel import email_template
 from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
 from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
 
@@ -467,15 +467,20 @@ def _compose_active_section(weekly):
 # Literal hex badge colors, reused as-is from the plan's own research and the mockup review --
 # not re-derived here. `roll` (green): banking a transfer, or transferring at zero point cost.
 # `hit` (red): a transfer that costs points. `info` (blue): a hold, or an informational header.
-_BADGE_ROLL_BG, _BADGE_ROLL_FG = "#164b3a", "#94efcb"
-_BADGE_HIT_BG, _BADGE_HIT_FG = "#573040", "#ffc1cb"
-_BADGE_INFO_BG, _BADGE_INFO_FG = "#203b59", "#b9dcff"
+# Sourced from `email_template` (issue #190 extracted this repo's shared dark-navy email palette
+# out of this module so the release-notes email could reuse it without duplicating the CSS) --
+# kept under their original names here so this module's own call sites and
+# `tests/test_send_deadline_reminder.py` (which asserts against these names directly) are
+# unaffected.
+_BADGE_ROLL_BG, _BADGE_ROLL_FG = email_template.BADGE_ROLL_BG, email_template.BADGE_ROLL_FG
+_BADGE_HIT_BG, _BADGE_HIT_FG = email_template.BADGE_HIT_BG, email_template.BADGE_HIT_FG
+_BADGE_INFO_BG, _BADGE_INFO_FG = email_template.BADGE_INFO_BG, email_template.BADGE_INFO_FG
 
-_EMAIL_BG = "#0d1b2a"
-_CARD_BG = "#13233a"
-_CARD_BORDER = "#28405c"
-_TEXT_PRIMARY = "#f4f7fb"
-_TEXT_MUTED = "#9fb0c3"
+_EMAIL_BG = email_template.EMAIL_BG
+_CARD_BG = email_template.CARD_BG
+_CARD_BORDER = email_template.CARD_BORDER
+_TEXT_PRIMARY = email_template.TEXT_PRIMARY
+_TEXT_MUTED = email_template.TEXT_MUTED
 
 # Pitch diagram layout. Row order top-to-bottom mirrors dashboard.js's weeklyPitch()/pitch()
 # grouping exactly (`['FWD','MID','DEF','GKP'].map(...)` inside a `flex-direction: column`
@@ -520,8 +525,7 @@ def _require_refresh_token():
     return raw.strip()
 
 
-def _esc(value):
-    return html.escape(str(value if value is not None else ""), quote=True)
+_esc = email_template.esc
 
 
 def _badge_for_recommendation(recommendation):
@@ -548,13 +552,7 @@ def _badge_for_recommendation(recommendation):
     return label, _BADGE_INFO_BG, _BADGE_INFO_FG
 
 
-def _badge_html(label, bg, fg):
-    return (
-        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0"><tr>'
-        f'<td style="background:{bg};color:{fg};font-weight:bold;font-size:12px;'
-        'padding:4px 10px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;'
-        f'letter-spacing:.3px">{_esc(label)}</td></tr></table>'
-    )
+_badge_html = email_template.badge_html
 
 
 def _profile_eyebrow(profile_id, label, default_profile_id):
@@ -820,16 +818,7 @@ def _assemble_email_html(event_id, lead_hours, stale, extra_top_html, body_html)
             "</div></td></tr>"
         )
     header_label = f"GAMEWEEK {event_id} · DEADLINE IN {lead_hours}H"
-    return (
-        '<!doctype html><html><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        "<title>FPL Intelligence deadline reminder</title></head>"
-        f'<body style="margin:0;padding:0;background:{_EMAIL_BG};'
-        'font-family:Arial,Helvetica,sans-serif">'
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="background:{_EMAIL_BG}"><tr><td align="center">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="max-width:600px">'
+    inner_html = (
         '<tr><td style="padding:16px 16px 0 16px">'
         + _badge_html(header_label, _BADGE_INFO_BG, _BADGE_INFO_FG)
         + "</td></tr>"
@@ -837,8 +826,8 @@ def _assemble_email_html(event_id, lead_hours, stale, extra_top_html, body_html)
         + extra_top_html
         + body_html
         + _footer_html()
-        + "</table></td></tr></table></body></html>"
     )
+    return email_template.shell("FPL Intelligence deadline reminder", inner_html)
 
 
 def _compose_gw1_html_body(event_id, lead_hours, decision_center, stale):
