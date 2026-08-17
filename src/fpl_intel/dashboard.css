@@ -645,12 +645,20 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .whats-new-date {
   flex-shrink: 0;
   min-width: 84px;
-  padding-top: 1px;
-  font-size: 11px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--muted);
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--tag-neutral-bg);
+  color: var(--tag-neutral-fg);
   white-space: nowrap;
+  /* Matches .whats-new-tag's own comment: compensates for the pill's smaller font-size/
+     line-height sitting visually higher than the 14px headline next to it under
+     align-items:flex-start. */
+  margin-top: 2px;
 }
 .whats-new-headline {
   font-weight: 600;
