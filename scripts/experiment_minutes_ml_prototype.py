@@ -21,8 +21,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from fpl_intel import backtest as bt
-from fpl_intel.recommendations import _expected_minutes
+from fpl_intel.modeling import backtest as bt
+from fpl_intel.modeling.recommendations import _expected_minutes
 
 
 SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26"]

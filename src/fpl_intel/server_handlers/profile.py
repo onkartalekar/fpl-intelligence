@@ -7,7 +7,7 @@ import sys
 import traceback
 import zoneinfo
 
-from .. import profiles
+from ..storage import profiles
 from .common import ALLOWED_RISK_PROFILES, profiles_db_path, team_cookie_header
 
 _ALLOWED_PROFILE_KEYS = {

@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.minutes import (
+from fpl_intel.modeling.minutes import (
     MIN_APPEARANCES,
     expected_minutes_from_history,
     is_rotation_risk,

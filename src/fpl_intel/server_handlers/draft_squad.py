@@ -5,9 +5,9 @@ import json
 import sys
 import traceback
 
-from .. import profiles
 from ..generation import resolve_artifact
-from ..transfer_decisions import validate_draft_squad
+from ..modeling.transfer_decisions import validate_draft_squad
+from ..storage import profiles
 from .common import profiles_db_path, team_cookie_header
 
 _DRAFT_SQUAD_SIZE = 15

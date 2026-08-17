@@ -73,7 +73,7 @@ import zoneinfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.release_notes import AUDIENCES, CATEGORIES, render_entry_markdown, validate_entry_payload  # noqa: E402
+from fpl_intel.storage.release_notes import AUDIENCES, CATEGORIES, render_entry_markdown, validate_entry_payload  # noqa: E402
 
 
 class ConfigError(RuntimeError):

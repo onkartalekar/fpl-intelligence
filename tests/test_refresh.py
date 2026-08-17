@@ -76,7 +76,7 @@ class GenerationPublicationTests(unittest.TestCase):
             # compatibility-write failure this test injects targets the legacy root-level
             # dashboard-state.json copy instead -- still the last compatibility write before
             # the pointer switch, same failure shape the test is protecting against.
-            from fpl_intel import fpl_data
+            from fpl_intel.sources import fpl_data
             original_write = fpl_data.atomic_write_text
 
             resolved_root = root.resolve()
@@ -86,7 +86,7 @@ class GenerationPublicationTests(unittest.TestCase):
                     raise OSError("simulated publication failure")
                 return original_write(path, content)
 
-            with patch("fpl_intel.fpl_data.atomic_write_text", side_effect=fail_root_dashboard_state):
+            with patch("fpl_intel.sources.fpl_data.atomic_write_text", side_effect=fail_root_dashboard_state):
                 with self.assertRaises(OSError):
                     publish_generation(
                         root,
@@ -774,7 +774,7 @@ class RefreshProjectTests(unittest.TestCase):
             self.assertNotIn("team_performance", state["model_performance"])
             self.assertNotIn("player_performance", state["model_performance"])
 
-            from fpl_intel.model_performance import build_team_model_performance
+            from fpl_intel.modeling.model_performance import build_team_model_performance
             team_performance = build_team_model_performance(persisted, team_id=364759)["team_performance"]
             self.assertEqual(len(team_performance["comparisons"]), 1)
             comparison = team_performance["comparisons"][0]
@@ -847,7 +847,7 @@ class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
         }
 
     def _seed_root(self, directory, team_ids):
-        from fpl_intel.profiles import save_profile
+        from fpl_intel.storage.profiles import save_profile
 
         root = Path(directory)
         (root / "data").mkdir()

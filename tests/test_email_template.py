@@ -4,7 +4,7 @@
 import re
 import unittest
 
-from fpl_intel import email_template
+from fpl_intel.notifications import email_template
 
 
 class BadgeHtmlTests(unittest.TestCase):

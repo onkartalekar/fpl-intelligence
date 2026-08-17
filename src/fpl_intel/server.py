@@ -23,11 +23,11 @@ import threading
 import traceback
 from urllib.parse import urlsplit
 
-from . import profiles
-from . import release_notes
 from .dashboard import APP_ICON_PNG, render_dashboard
 from .generation import resolve_artifact
 from .rate_limit import CooldownLimiter
+from .storage import profiles
+from .storage import release_notes
 from .server_handlers import common
 from .server_handlers import contact as contact_handlers
 from .server_handlers import draft_squad as draft_squad_handlers

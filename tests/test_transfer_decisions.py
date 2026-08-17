@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from fpl_intel.recommendations import build_gw_recommendations
-from fpl_intel.transfer_decisions import (
+from fpl_intel.modeling.recommendations import build_gw_recommendations
+from fpl_intel.modeling.transfer_decisions import (
     _planner_player_score,
     build_draft_decisions,
     build_transfer_decisions,
@@ -300,7 +300,7 @@ class TransferDecisionTests(unittest.TestCase):
         bootstrap["chips"] = [next(row for row in bootstrap["chips"] if row["name"] == "wildcard")]
         thresholds = {profile: {"wildcard": -999.0} for profile in ("conservative", "balanced", "aggressive")}
 
-        with patch("fpl_intel.transfer_decisions._THRESHOLDS", thresholds):
+        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds):
             result = build_transfer_decisions(
                 bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
             )
@@ -320,7 +320,7 @@ class TransferDecisionTests(unittest.TestCase):
         bootstrap["chips"] = [next(row for row in bootstrap["chips"] if row["name"] == "freehit")]
         thresholds = {profile: {"freehit": -999.0} for profile in ("conservative", "balanced", "aggressive")}
 
-        with patch("fpl_intel.transfer_decisions._THRESHOLDS", thresholds):
+        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds):
             result = build_transfer_decisions(
                 bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
             )

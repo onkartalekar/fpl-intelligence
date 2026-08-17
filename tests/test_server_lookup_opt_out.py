@@ -19,13 +19,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fpl_intel.profiles import (
+from fpl_intel.storage.profiles import (
     confirm_reminder, load_profile, save_profile, set_lookup_opt_out, set_reminder_pending,
 )
-from fpl_intel.recommendations import build_gw_recommendations
+from fpl_intel.modeling.recommendations import build_gw_recommendations
 from fpl_intel.refresh import RefreshAlreadyRunning, project_refresh_lock
 from fpl_intel.rate_limit import CooldownLimiter
-from fpl_intel.reminder_confirmation import (
+from fpl_intel.notifications.reminder_confirmation import (
     ReminderEmailError,
     SMTP_HOST_ENV_VAR, SMTP_PASSWORD_ENV_VAR, SMTP_PORT_ENV_VAR, SMTP_USER_ENV_VAR,
 )

@@ -14,9 +14,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.backtest import build_backtest_report, load_season
-from fpl_intel.coefficients import load_coefficients
-from fpl_intel.fpl_data import save_json
+from fpl_intel.modeling.backtest import build_backtest_report, load_season
+from fpl_intel.modeling.coefficients import load_coefficients
+from fpl_intel.sources.fpl_data import save_json
 
 
 MODEL_VERSION = str(load_coefficients()["model_version"])

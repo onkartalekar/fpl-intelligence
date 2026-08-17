@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from fpl_intel.profiles import (
+from fpl_intel.storage.profiles import (
     confirm_reminder, load_pin_hash, load_profile, save_draft_squad, save_profile,
     set_lookup_opt_out, set_reminder_decision, set_reminder_pending,
 )

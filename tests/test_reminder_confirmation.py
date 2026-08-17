@@ -16,7 +16,7 @@ import smtplib
 import unittest
 from unittest.mock import MagicMock, patch
 
-from fpl_intel.reminder_confirmation import (
+from fpl_intel.notifications.reminder_confirmation import (
     ReminderEmailError,
     SMTP_HOST_ENV_VAR, SMTP_PASSWORD_ENV_VAR, SMTP_PORT_ENV_VAR, SMTP_USER_ENV_VAR,
     compose_contact_email,
@@ -68,7 +68,7 @@ class SendContactEmailTests(unittest.TestCase):
     def test_sends_to_the_configured_smtp_user_and_sets_reply_to_header(self):
         fake_smtp = self._fake_smtp()
         with patch(
-            "fpl_intel.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp,
+            "fpl_intel.notifications.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp,
         ) as smtp_ctor:
             send_contact_email(
                 "bug", "Something broke", "visitor@example.com", smtp_config=_SMTP_CONFIG,
@@ -87,7 +87,7 @@ class SendContactEmailTests(unittest.TestCase):
 
     def test_no_reply_to_header_when_none_was_given(self):
         fake_smtp = self._fake_smtp()
-        with patch("fpl_intel.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp):
+        with patch("fpl_intel.notifications.reminder_confirmation.smtplib.SMTP", return_value=fake_smtp):
             send_contact_email("other", "General note", None, smtp_config=_SMTP_CONFIG)
 
         sent_message = fake_smtp.send_message.call_args[0][0]
@@ -95,7 +95,7 @@ class SendContactEmailTests(unittest.TestCase):
 
     def test_smtp_failure_is_turned_into_reminder_email_error_without_leaking_details(self):
         with patch(
-            "fpl_intel.reminder_confirmation.smtplib.SMTP",
+            "fpl_intel.notifications.reminder_confirmation.smtplib.SMTP",
             side_effect=smtplib.SMTPException("boom, credentials xyz"),
         ):
             with self.assertRaises(ReminderEmailError) as context:

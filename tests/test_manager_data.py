@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.manager_data import collect_public_manager, summarize_manager
+from fpl_intel.sources.manager_data import collect_public_manager, summarize_manager
 
 
 class ManagerDataTests(unittest.TestCase):

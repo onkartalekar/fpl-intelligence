@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from fpl_intel.coefficients import _DEFAULTS, load_coefficients
+from fpl_intel.modeling.coefficients import _DEFAULTS, load_coefficients
 
 
 class LoadCoefficientsTests(unittest.TestCase):

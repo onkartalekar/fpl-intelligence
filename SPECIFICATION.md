@@ -56,7 +56,7 @@ A confirmed transfer triggers projection review for:
 The system will not use betting odds.
 
 **Spec amendment (2026-07-25) — LLM news extraction, built but not
-active.** `src/fpl_intel/news_signals.py` implements an optional
+active.** `src/fpl_intel/sources/news_signals.py` implements an optional
 extractor over tier-2/3 sources above (official club/PL news, manager
 press conferences): an LLM API call (raw HTTPS, no vendor SDK dependency)
 reads a first-party news item and returns structured availability signals

@@ -8,8 +8,8 @@ import smtplib
 import unittest
 from unittest.mock import MagicMock, patch
 
-from fpl_intel.reminder_confirmation import ReminderEmailError
-from fpl_intel.release_notes_email import (
+from fpl_intel.notifications.reminder_confirmation import ReminderEmailError
+from fpl_intel.notifications.release_notes_email import (
     compose_release_notes_email,
     compose_release_notes_subscription_email,
     send_release_notes_email,
@@ -42,7 +42,7 @@ class SendReleaseNotesSubscriptionEmailTests(unittest.TestCase):
 
     def test_sends_to_the_submitted_address(self):
         fake_smtp = self._fake_smtp()
-        with patch("fpl_intel.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
+        with patch("fpl_intel.notifications.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
             send_release_notes_subscription_email(
                 "visitor@example.com", "https://example.com/confirm", smtp_config=_SMTP_CONFIG,
             )
@@ -51,7 +51,7 @@ class SendReleaseNotesSubscriptionEmailTests(unittest.TestCase):
 
     def test_smtp_failure_is_turned_into_reminder_email_error(self):
         with patch(
-            "fpl_intel.release_notes_email.smtplib.SMTP",
+            "fpl_intel.notifications.release_notes_email.smtplib.SMTP",
             side_effect=smtplib.SMTPException("boom"),
         ):
             with self.assertRaises(ReminderEmailError):
@@ -215,7 +215,7 @@ class SendReleaseNotesEmailTests(unittest.TestCase):
 
     def test_sends_to_the_subscriber(self):
         fake_smtp = self._fake_smtp()
-        with patch("fpl_intel.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
+        with patch("fpl_intel.notifications.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
             send_release_notes_email(
                 "subscriber@example.com", _SAMPLE_ENTRY, "https://example.com/unsub",
                 smtp_config=_SMTP_CONFIG,
@@ -228,7 +228,7 @@ class SendReleaseNotesEmailTests(unittest.TestCase):
         `send_deadline_reminder.py.send_email()` -- `text/plain` first (the fallback), then
         `text/html`."""
         fake_smtp = self._fake_smtp()
-        with patch("fpl_intel.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
+        with patch("fpl_intel.notifications.release_notes_email.smtplib.SMTP", return_value=fake_smtp):
             send_release_notes_email(
                 "subscriber@example.com", _SAMPLE_ENTRY, "https://example.com/unsub",
                 smtp_config=_SMTP_CONFIG,
@@ -242,7 +242,7 @@ class SendReleaseNotesEmailTests(unittest.TestCase):
 
     def test_smtp_failure_is_turned_into_reminder_email_error(self):
         with patch(
-            "fpl_intel.release_notes_email.smtplib.SMTP",
+            "fpl_intel.notifications.release_notes_email.smtplib.SMTP",
             side_effect=smtplib.SMTPException("boom"),
         ):
             with self.assertRaises(ReminderEmailError):

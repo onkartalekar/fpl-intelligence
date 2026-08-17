@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from fpl_intel.backtest import (
+from fpl_intel.modeling.backtest import (
     build_backtest_report,
     build_origin_inputs,
     load_season,

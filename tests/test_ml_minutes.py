@@ -1,7 +1,7 @@
 import unittest
 
-from fpl_intel import ml_minutes
-from fpl_intel.ml_minutes import (
+from fpl_intel.modeling import ml_minutes
+from fpl_intel.modeling.ml_minutes import (
     FEATURE_NAMES,
     WEIGHTS,
     extract_features,

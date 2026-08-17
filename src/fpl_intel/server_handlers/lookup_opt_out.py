@@ -7,7 +7,7 @@ import secrets
 import sys
 import traceback
 
-from .. import profiles
+from ..storage import profiles
 from .common import hash_pin, profiles_db_path
 
 # Deliberately stricter than the ordinary profile-write cooldown (common.

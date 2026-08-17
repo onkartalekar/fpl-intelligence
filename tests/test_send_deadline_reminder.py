@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from fpl_intel.recommendations import build_gw_recommendations
+from fpl_intel.modeling.recommendations import build_gw_recommendations
 from fpl_intel.refresh import compute_manager_view
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 from tests.test_transfer_decisions import gw2_inputs
@@ -85,7 +85,7 @@ class SendWindowArithmeticTests(unittest.TestCase):
 
 
 class LoadBootstrapAndFixturesWrapperTests(unittest.TestCase):
-    """Issue #101: load_bootstrap_and_fixtures moved to fpl_intel.deadline_windows, with this
+    """Issue #101: load_bootstrap_and_fixtures moved to fpl_intel.sources.deadline_windows, with this
     script keeping a thin local wrapper (so patch.object(sdr, "load_bootstrap_and_fixtures", ...)
     used throughout this file keeps working) that translates the shared module's generic
     DeadlineDataError into this script's own ConfigError, unchanged from before the extraction."""
@@ -96,7 +96,7 @@ class LoadBootstrapAndFixturesWrapperTests(unittest.TestCase):
             (root / "data").mkdir()
 
             with patch(
-                "fpl_intel.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down"),
+                "fpl_intel.sources.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down"),
             ):
                 with self.assertRaises(sdr.ConfigError):
                     sdr.load_bootstrap_and_fixtures(root)

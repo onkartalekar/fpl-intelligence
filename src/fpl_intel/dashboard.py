@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .transfers import OFFICIAL_CLUB_DOMAINS
+from .sources.transfers import OFFICIAL_CLUB_DOMAINS
 
 
 _TRUSTED_LINK_DOMAINS = sorted(

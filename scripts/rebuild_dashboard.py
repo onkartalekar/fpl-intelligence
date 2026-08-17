@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from fpl_intel.dashboard import render_dashboard
-from fpl_intel.fpl_data import atomic_write_text
+from fpl_intel.sources.fpl_data import atomic_write_text
 from fpl_intel.generation import resolve_artifact
 
 

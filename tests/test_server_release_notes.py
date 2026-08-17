@@ -20,13 +20,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fpl_intel.profiles import (
+from fpl_intel.storage.profiles import (
     confirm_reminder, load_profile, save_profile, set_lookup_opt_out, set_reminder_pending,
 )
-from fpl_intel.recommendations import build_gw_recommendations
+from fpl_intel.modeling.recommendations import build_gw_recommendations
 from fpl_intel.refresh import RefreshAlreadyRunning, project_refresh_lock
 from fpl_intel.rate_limit import CooldownLimiter
-from fpl_intel.reminder_confirmation import (
+from fpl_intel.notifications.reminder_confirmation import (
     ReminderEmailError,
     SMTP_HOST_ENV_VAR, SMTP_PASSWORD_ENV_VAR, SMTP_PORT_ENV_VAR, SMTP_USER_ENV_VAR,
 )
@@ -182,7 +182,7 @@ class ReleaseNotesSubscribeEndpointTests(unittest.TestCase):
             self.assertEqual(sent_email, "reader@example.com")
             self.assertIn("/api/release-notes-confirm-subscription?email=reader%40example.com&token=", confirm_url)
 
-            from fpl_intel.release_notes_subscribers import load
+            from fpl_intel.storage.release_notes_subscribers import load
             saved = load(self.db_path, "reader@example.com")
             self.assertEqual(saved["status"], "pending")
             self.assertIsNotNone(saved["confirm_token_hash"])
@@ -212,7 +212,7 @@ class ReleaseNotesSubscribeEndpointTests(unittest.TestCase):
                 urlopen(self._post(base_url, {"email": "reader@example.com"}), timeout=3)
             self.assertEqual(error.exception.code, 502)
 
-            from fpl_intel.release_notes_subscribers import load
+            from fpl_intel.storage.release_notes_subscribers import load
             self.assertIsNone(load(self.db_path, "reader@example.com"))
         finally:
             server.shutdown()
@@ -255,7 +255,7 @@ class ReleaseNotesConfirmSubscriptionEndpointTests(unittest.TestCase):
         return sha256(raw_token.encode("utf-8")).hexdigest()
 
     def test_valid_token_confirms_the_subscription(self):
-        from fpl_intel.release_notes_subscribers import load, set_pending
+        from fpl_intel.storage.release_notes_subscribers import load, set_pending
         set_pending(
             self.db_path, "reader@example.com", self._hash("real-token"),
             "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
@@ -281,7 +281,7 @@ class ReleaseNotesConfirmSubscriptionEndpointTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_wrong_token_is_rejected(self):
-        from fpl_intel.release_notes_subscribers import load, set_pending
+        from fpl_intel.storage.release_notes_subscribers import load, set_pending
         set_pending(
             self.db_path, "reader@example.com", self._hash("real-token"),
             "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
@@ -304,7 +304,7 @@ class ReleaseNotesConfirmSubscriptionEndpointTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_expired_token_is_rejected(self):
-        from fpl_intel.release_notes_subscribers import load, set_pending
+        from fpl_intel.storage.release_notes_subscribers import load, set_pending
         set_pending(
             self.db_path, "reader@example.com", self._hash("real-token"),
             "2020-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z",
@@ -346,7 +346,7 @@ class ReleaseNotesUnsubscribeEndpointTests(unittest.TestCase):
         return server, thread
 
     def test_valid_token_removes_the_subscriber(self):
-        from fpl_intel.release_notes_subscribers import confirm, load, set_pending
+        from fpl_intel.storage.release_notes_subscribers import confirm, load, set_pending
         set_pending(self.db_path, "reader@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
         confirm(self.db_path, "reader@example.com", "unsub-token-xyz", "2026-08-11T00:00:00Z")
 
@@ -368,7 +368,7 @@ class ReleaseNotesUnsubscribeEndpointTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_wrong_token_leaves_the_subscriber_in_place(self):
-        from fpl_intel.release_notes_subscribers import confirm, load, set_pending
+        from fpl_intel.storage.release_notes_subscribers import confirm, load, set_pending
         set_pending(self.db_path, "reader@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
         confirm(self.db_path, "reader@example.com", "unsub-token-xyz", "2026-08-11T00:00:00Z")
 
@@ -428,7 +428,7 @@ class ReleaseNotesNotifySubscribersTests(unittest.TestCase):
         )
 
     def test_confirmed_subscribers_are_notified_on_publish(self):
-        from fpl_intel.release_notes_subscribers import confirm, set_pending
+        from fpl_intel.storage.release_notes_subscribers import confirm, set_pending
         set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
         confirm(self.subscribers_db_path, "a@example.com", "unsub-a", "2026-08-11T00:00:00Z")
 
@@ -455,7 +455,7 @@ class ReleaseNotesNotifySubscribersTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_pending_not_yet_confirmed_subscribers_are_not_notified(self):
-        from fpl_intel.release_notes_subscribers import set_pending
+        from fpl_intel.storage.release_notes_subscribers import set_pending
         set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
 
         server = create_server(
@@ -476,7 +476,7 @@ class ReleaseNotesNotifySubscribersTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_one_subscribers_send_failure_does_not_block_the_others_or_the_publish_response(self):
-        from fpl_intel.release_notes_subscribers import confirm, set_pending
+        from fpl_intel.storage.release_notes_subscribers import confirm, set_pending
         set_pending(self.subscribers_db_path, "a@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")
         confirm(self.subscribers_db_path, "a@example.com", "unsub-a", "2026-08-11T00:00:00Z")
         set_pending(self.subscribers_db_path, "b@example.com", "hash", "2099-01-01T00:00:00+00:00", "2026-08-11T00:00:00Z")

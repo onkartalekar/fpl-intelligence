@@ -14,10 +14,10 @@ import sys
 import traceback
 from urllib.parse import parse_qs, quote
 
-from .. import release_notes
-from .. import release_notes_email
-from .. import release_notes_subscribers
-from .. import reminder_confirmation
+from ..notifications import release_notes_email
+from ..notifications import reminder_confirmation
+from ..storage import release_notes
+from ..storage import release_notes_subscribers
 from .common import REMINDER_EMAIL_MAX_LENGTH, hash_pin, render_reminder_confirm_page
 
 _RELEASE_NOTES_CONFIRMATION_TTL_HOURS = 24
