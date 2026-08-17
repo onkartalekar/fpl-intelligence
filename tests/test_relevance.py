@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.relevance import enrich_transfers, summarize_clubs
+from fpl_intel.sources.relevance import enrich_transfers, summarize_clubs
 
 
 class TransferRelevanceTests(unittest.TestCase):

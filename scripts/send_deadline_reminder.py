@@ -67,9 +67,9 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel import email_template
-from fpl_intel.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
-from fpl_intel.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
+from fpl_intel.notifications import email_template
+from fpl_intel.sources.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
+from fpl_intel.sources.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
 
 
 DEFAULT_LEAD_HOURS = 3
@@ -262,7 +262,7 @@ def load_bootstrap_and_fixtures(root):
     Returns `(bootstrap, fixtures, stale)`. `stale` is True if either fetch fell back to disk, so
     the composed email can carry an explicit staleness line.
 
-    Issue #101: thin wrapper around the shared `fpl_intel.deadline_windows` implementation,
+    Issue #101: thin wrapper around the shared `fpl_intel.sources.deadline_windows` implementation,
     translating its generic `DeadlineDataError` into this script's own `ConfigError` -- kept as a
     local module-level function (rather than a bare re-export) so `patch.object(sdr,
     "load_bootstrap_and_fixtures", ...)` in tests keeps working unchanged.

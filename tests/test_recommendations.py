@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from fpl_intel.recommendations import (
+from fpl_intel.modeling.recommendations import (
     _event_lineup_schedule,
     _squad_objective,
     _team_uncertainty_interval,

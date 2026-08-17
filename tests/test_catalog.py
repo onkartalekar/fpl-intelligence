@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.catalog import build_fixture_catalog, build_player_catalog
+from fpl_intel.sources.catalog import build_fixture_catalog, build_player_catalog
 
 
 class PlayerCatalogTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.transfers import OFFICIAL_CLUB_DOMAINS, canonical_club, normalize_transfer
+from fpl_intel.sources.transfers import OFFICIAL_CLUB_DOMAINS, canonical_club, normalize_transfer
 
 
 class CanonicalClubTests(unittest.TestCase):

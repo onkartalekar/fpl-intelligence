@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.pl_transfers import parse_team_playlist
+from fpl_intel.sources.pl_transfers import parse_team_playlist
 
 
 class PremierLeagueTransferPlaylistTests(unittest.TestCase):

@@ -43,10 +43,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import fpl_intel.coefficients as coefficients_module
-import fpl_intel.projection as projection_module
-import fpl_intel.recommendations as recommendations_module
-import fpl_intel.backtest as backtest_module
+import fpl_intel.modeling.coefficients as coefficients_module
+import fpl_intel.modeling.projection as projection_module
+import fpl_intel.modeling.recommendations as recommendations_module
+import fpl_intel.modeling.backtest as backtest_module
 
 
 ACTIVE_CONFIG_PATH = ROOT / "config" / "model-coefficients.json"

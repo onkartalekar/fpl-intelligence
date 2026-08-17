@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.model_performance import (
+from fpl_intel.modeling.model_performance import (
     archive_forecast,
     archive_shadow_forecast,
     archive_team_forecast,

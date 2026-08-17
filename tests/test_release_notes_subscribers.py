@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from fpl_intel.release_notes_subscribers import confirm, list_confirmed, load, set_pending, unsubscribe
+from fpl_intel.storage.release_notes_subscribers import confirm, list_confirmed, load, set_pending, unsubscribe
 
 
 _NOW = "2026-08-11T12:00:00+00:00"

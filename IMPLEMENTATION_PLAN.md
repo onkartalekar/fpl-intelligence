@@ -35,7 +35,7 @@ backtest over prior seasons is the only way to compare model versions now.
    team goals) from the public vaastav/Fantasy-Premier-League GitHub CSVs
    (free, MIT-licensed) into `data/history/<season>/`. Record source URL and
    retrieval timestamp in a manifest, consistent with the provenance rule.
-2. `src/fpl_intel/backtest.py` — replay any projection function over
+2. `src/fpl_intel/modeling/backtest.py` — replay any projection function over
    historical gameweeks: for each origin GW, build the inputs the model
    would have seen (season-to-date aggregates only — no lookahead), project
    1/3/5-GW horizons, score against actuals with the same MAE / signed bias
@@ -53,7 +53,7 @@ reproducible.
 **Estimate:** 1–2 sessions. Stdlib only (csv, json).
 
 **Status: complete (2026-07-25).** Implemented in
-[src/fpl_intel/backtest.py](src/fpl_intel/backtest.py),
+[src/fpl_intel/modeling/backtest.py](src/fpl_intel/modeling/backtest.py),
 [scripts/fetch_history.py](scripts/fetch_history.py),
 [scripts/run_backtest.py](scripts/run_backtest.py),
 [tests/test_backtest.py](tests/test_backtest.py). History for 2022-23
@@ -63,7 +63,7 @@ through 2025-26 fetched into `data/history/`; baseline saved to
 scored separately as a validation check.
 
 Note: a second session was independently building the same harness in this
-same directory concurrently (`src/fpl_intel/backtest.py` had different,
+same directory concurrently (`src/fpl_intel/modeling/backtest.py` had different,
 also-reasonable content at one point — not a git repo, so no branch
 isolation caught this). This version is what's on disk now; if the other
 session's changes are still needed, reconcile manually.
@@ -94,7 +94,7 @@ Two findings, both stronger than anticipated when this plan was written:
 **Root cause found and fixed (2026-07-25, v0.3.1):** concrete examples
 pulled from 2024-25 (Cole Palmer/Haaland/Díaz projected ~1 point over 5
 gameweeks after a 90-minute GW1 start) traced to
-[`_expected_minutes`](src/fpl_intel/recommendations.py:46): the historical
+[`_expected_minutes`](src/fpl_intel/modeling/recommendations.py:46): the historical
 term divided cumulative minutes/starts by a hardcoded `38` regardless of
 how many gameweeks had actually elapsed, crushing the estimate for anyone
 with a short current-season track record. Fixed by dividing by games
@@ -142,7 +142,7 @@ against per fixture — the input every later component needs.
 
 **Work:**
 
-1. `src/fpl_intel/team_strength.py`:
+1. `src/fpl_intel/modeling/team_strength.py`:
    - Dixon-Coles-style Poisson model: per-team attack rating, defense
      rating, plus a global home-advantage term.
    - Fit by iterative proportional scaling (closed-form updates — no scipy
@@ -171,11 +171,11 @@ baseline (lower MAE on 1-GW horizon at minimum). Model version → 0.4.
 
 **Status: built, backtested, and NOT adopted (2026-07-25) — a genuine
 negative result.** Implemented in
-[src/fpl_intel/team_strength.py](src/fpl_intel/team_strength.py): a
+[src/fpl_intel/modeling/team_strength.py](src/fpl_intel/modeling/team_strength.py): a
 Dixon-Coles-style multiplicative attack/defense/home-advantage model fit
 by iterative proportional scaling (biproportional fitting, closed-form
 per-step updates, no external dependency), with exponential recency decay.
-Wired into [project_players](src/fpl_intel/recommendations.py) via
+Wired into [project_players](src/fpl_intel/modeling/recommendations.py) via
 `component_points_for_event`'s new optional `expected_goals_for`/
 `expected_goals_against`/`league_avg_goals` parameters, which take
 priority over the FDR tables when supplied.
@@ -237,7 +237,7 @@ aggregate and therefore a spec-compliance gap.
 **Work:**
 
 1. Restructure the per-player, per-fixture projection in
-   `recommendations.py` (or a new `src/fpl_intel/projection.py` that it
+   `recommendations.py` (or a new `src/fpl_intel/modeling/projection.py` that it
    delegates to) into additive components:
    - **Appearance:** from expected minutes (1 pt < 60 min, 2 pts ≥ 60).
    - **Attacking:** `expected_goals_per_90` and `expected_assists_per_90`
@@ -270,8 +270,8 @@ version → 0.5. Update SPECIFICATION.md Projection section status.
 
 **Status: complete (2026-07-25), with Phase 1 skipped per explicit
 decision** — implemented in
-[src/fpl_intel/projection.py](src/fpl_intel/projection.py), wired into
-[project_players](src/fpl_intel/recommendations.py). Since Phase 1's
+[src/fpl_intel/modeling/projection.py](src/fpl_intel/modeling/projection.py), wired into
+[project_players](src/fpl_intel/modeling/recommendations.py). Since Phase 1's
 Poisson opponent model doesn't exist, attacking/clean-sheet/goals-conceded
 scaling reuses the existing FDR signal via hand-picked lookup tables
 (later fitted in Phase 3, see below) instead of the plan's original
@@ -309,7 +309,7 @@ leftovers) is a guess. Fitting them is cheap and strictly better.
 
 **Work:**
 
-1. `src/fpl_intel/coefficients.py` + `config/model-coefficients.json`:
+1. `src/fpl_intel/modeling/coefficients.py` + `config/model-coefficients.json`:
    all tunable constants move into a versioned, dated config with the fit
    dataset recorded; code loads it with the current hand-picked values as
    defaults, so behavior is identical until a fitted file is adopted.
@@ -337,7 +337,7 @@ in the target band. Model version → 0.6.
 **Estimate:** 2 sessions.
 
 **Status: complete (2026-07-25).** Implemented in
-[src/fpl_intel/coefficients.py](src/fpl_intel/coefficients.py) (loader,
+[src/fpl_intel/modeling/coefficients.py](src/fpl_intel/modeling/coefficients.py) (loader,
 falls back to pre-Phase-3 defaults if the config is absent) and
 [scripts/fit_coefficients.py](scripts/fit_coefficients.py). Adoption
 happened live in-session: each candidate was compared against the current
@@ -592,7 +592,7 @@ or congestion awareness.
    only for planner-relevant players (owned squad + candidate pools,
    ~200–300 players), cached to `data/element-history/` with timestamps to
    keep refresh time acceptable.
-2. `src/fpl_intel/minutes.py`:
+2. `src/fpl_intel/modeling/minutes.py`:
    - Start probability from exponentially decayed start share
      (half-life fit in Phase 3), blended with season-long share by sample
      size.
@@ -615,14 +615,14 @@ minutes-uncertain players (rotation-risk cohort MAE). Model version → 0.7.
 
 **Status: built, backtested, and NOT adopted (2026-07-25) — a second
 genuine negative result.** Implemented in
-[src/fpl_intel/minutes.py](src/fpl_intel/minutes.py): exponentially
+[src/fpl_intel/modeling/minutes.py](src/fpl_intel/modeling/minutes.py): exponentially
 decayed start-share and per-appearance minutes (started vs. sub), combined
 into `expected = start_share * avg_minutes_started + sub_share *
 avg_minutes_sub`; `is_rotation_risk` flags players whose recent share
 diverges from their season-long share; `minutes_scenarios_from_history`
 widens the conservative/aggressive spread for flagged players instead of
 using a fixed multiplier only for role-transition players. Wired into
-[project_players](src/fpl_intel/recommendations.py) via a new
+[project_players](src/fpl_intel/modeling/recommendations.py) via a new
 `recent_history` field on bootstrap elements, used when present and
 sufficient, falling back to `_expected_minutes` otherwise.
 [tests/test_minutes.py](tests/test_minutes.py) covers nailed-on starters,
@@ -692,7 +692,7 @@ formula itself stays fully transparent.
 
 1. Collector for official club news / PL injury pages (first-party only,
    consistent with the transfer collector's source rules).
-2. `src/fpl_intel/news_signals.py` — calls the Claude API
+2. `src/fpl_intel/sources/news_signals.py` — calls the Claude API
    (claude-haiku for cost; structured JSON output) to extract per item:
    `{player, availability_signal, expected_return, role_hint, confidence,
    source_url, exact_quote}`.
@@ -717,7 +717,7 @@ provenance.
 
 **Status: scaffolding built and tested, deliberately NOT gate-open
 (2026-07-25).** Implemented in
-[src/fpl_intel/news_signals.py](src/fpl_intel/news_signals.py):
+[src/fpl_intel/sources/news_signals.py](src/fpl_intel/sources/news_signals.py):
 `extract_availability_signals` (raw HTTPS call to the Claude Messages API
 — no `anthropic` SDK dependency, matching this project's stdlib-only
 convention elsewhere — with an injectable `caller` for testing),
@@ -783,7 +783,7 @@ coefficients.json`'s `source` field for the full list). That rewrite was
 not documented here at the time; this entry covers a bug found in it via
 `/code-review` and fixed the same day, not the rewrite as a whole.
 
-**Bug:** `_expected_minutes()` (`src/fpl_intel/recommendations.py`) lost
+**Bug:** `_expected_minutes()` (`src/fpl_intel/modeling/recommendations.py`) lost
 its floor derived from FPL's own `ep_next` estimate when the minutes
 formula was rebased from elapsed-Gameweeks to the player's-club
 fixtures-played. Any player with zero recorded minutes and zero starts
@@ -1037,7 +1037,7 @@ Full investigation, including the live mockup that found a variables-only toggle
 
 ## Considered and declined — serving CSS/JS as separate HTTP-served files (issue #51, 2026-08-08)
 
-While addressing the CSS/JS-embedded-in-Python friction from #51 (surfaced during the #48/#50 theme work), serving CSS and JS as separate files alongside `dashboard.html` via new `server.py` routes was considered and declined in favor of keeping them as real source files (`src/fpl_intel/dashboard.css`, `src/fpl_intel/dashboard.js`) inlined into `dashboard.html` at generation time -- the same mechanism `__DASHBOARD_DATA__` already used. The HTTP-serving approach was live-verified as mechanically workable (extracted CSS/JS loaded and ran correctly via `<link>`/`<script src>` over a real HTTP server, zero console errors) but was declined because `server.py`'s `do_GET` would need new routes and manual MIME-type handling it doesn't have today, it introduces a generation-version-skew risk class that doesn't exist today (a stale cached asset served against a newer `dashboard.html`), and it breaks the README's documented standalone-file usage (copying or opening just `dashboard.html` elsewhere, with styling and interactivity intact) unless sibling files travel with it. The chosen approach delivers the same author-facing tooling benefits (real syntax highlighting, real diffs, a real linter for CSS) with none of those costs, since the served artifact doesn't change at all -- verified via a direct A/B render comparison against the pre-change code, semantically byte-identical output for the same input state. Full investigation in `plans/issue-51-extract-css-js.md`.
+While addressing the CSS/JS-embedded-in-Python friction from #51 (surfaced during the #48/#50 theme work), serving CSS and JS as separate files alongside `dashboard.html` via new `server.py` routes was considered and declined in favor of keeping them as real source files (`src/fpl_intel/css/dashboard.css`, `src/fpl_intel/js/dashboard.js` -- moved into type subfolders later, still inlined the same way) inlined into `dashboard.html` at generation time -- the same mechanism `__DASHBOARD_DATA__` already used. The HTTP-serving approach was live-verified as mechanically workable (extracted CSS/JS loaded and ran correctly via `<link>`/`<script src>` over a real HTTP server, zero console errors) but was declined because `server.py`'s `do_GET` would need new routes and manual MIME-type handling it doesn't have today, it introduces a generation-version-skew risk class that doesn't exist today (a stale cached asset served against a newer `dashboard.html`), and it breaks the README's documented standalone-file usage (copying or opening just `dashboard.html` elsewhere, with styling and interactivity intact) unless sibling files travel with it. The chosen approach delivers the same author-facing tooling benefits (real syntax highlighting, real diffs, a real linter for CSS) with none of those costs, since the served artifact doesn't change at all -- verified via a direct A/B render comparison against the pre-change code, semantically byte-identical output for the same input state. Full investigation in `plans/issue-51-extract-css-js.md`.
 
 ---
 
@@ -1171,7 +1171,7 @@ outlier-robust non-linear model, not this exact formulation.
 
 **Also from issue #65:** a companion ML minutes/start-probability ridge
 model (candidate #1) *did* clear the project's backtest bar in every
-held-out season and now runs in shadow mode (`src/fpl_intel/ml_minutes.py`,
+held-out season and now runs in shadow mode (`src/fpl_intel/modeling/ml_minutes.py`,
 `config/ml-minutes-weights.json`) -- computed and logged every refresh
 under its own `model_version`, never feeding `project_players()` or any
 recommendation. See `plans/issue-65-ml-shadow-model.md` for the full

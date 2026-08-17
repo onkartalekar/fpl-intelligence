@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from fpl_intel.team_strength import (
+from fpl_intel.modeling.team_strength import (
     MIN_ROUNDS,
     clean_sheet_probability,
     completed_rounds,

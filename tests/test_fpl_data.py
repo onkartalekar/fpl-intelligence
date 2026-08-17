@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fpl_intel.fpl_data import (
+from fpl_intel.sources.fpl_data import (
     EVENT_LIVE_URL,
     FIXTURES_URL,
     fetch_event_live,
@@ -98,7 +98,7 @@ class PersistenceTests(unittest.TestCase):
             destination = Path(directory) / "state.json"
             destination.write_text('{"old": true}', encoding="utf-8")
 
-            with patch("fpl_intel.fpl_data.os.replace", side_effect=OSError("replace failed")):
+            with patch("fpl_intel.sources.fpl_data.os.replace", side_effect=OSError("replace failed")):
                 with self.assertRaises(OSError):
                     save_json(destination, {"new": True})
 

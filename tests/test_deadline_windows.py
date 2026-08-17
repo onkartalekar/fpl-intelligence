@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fpl_intel.deadline_windows import (
+from fpl_intel.sources.deadline_windows import (
     DeadlineDataError, hours_until, in_send_window, load_bootstrap_and_fixtures,
     next_unfinished_event,
 )
@@ -69,8 +69,8 @@ class NextUnfinishedEventTests(unittest.TestCase):
 
 class LoadBootstrapAndFixturesTests(unittest.TestCase):
     def test_live_fetch_success_is_not_marked_stale(self):
-        with patch("fpl_intel.deadline_windows.fetch_bootstrap", return_value={"events": []}), \
-             patch("fpl_intel.deadline_windows.fetch_fixtures", return_value=[]):
+        with patch("fpl_intel.sources.deadline_windows.fetch_bootstrap", return_value={"events": []}), \
+             patch("fpl_intel.sources.deadline_windows.fetch_fixtures", return_value=[]):
             bootstrap, fixtures, stale = load_bootstrap_and_fixtures(Path("/tmp/unused"))
 
         self.assertEqual(bootstrap, {"events": []})
@@ -82,8 +82,8 @@ class LoadBootstrapAndFixturesTests(unittest.TestCase):
             (root / "data").mkdir()
             (root / "data" / "fpl-bootstrap-latest.json").write_text('{"events": [{"id": 1}]}')
 
-            with patch("fpl_intel.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down")), \
-                 patch("fpl_intel.deadline_windows.fetch_fixtures", return_value=[]):
+            with patch("fpl_intel.sources.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down")), \
+                 patch("fpl_intel.sources.deadline_windows.fetch_fixtures", return_value=[]):
                 bootstrap, _fixtures, stale = load_bootstrap_and_fixtures(root)
 
         self.assertEqual(bootstrap, {"events": [{"id": 1}]})
@@ -94,7 +94,7 @@ class LoadBootstrapAndFixturesTests(unittest.TestCase):
             root = Path(directory)
             (root / "data").mkdir()
 
-            with patch("fpl_intel.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down")):
+            with patch("fpl_intel.sources.deadline_windows.fetch_bootstrap", side_effect=RuntimeError("down")):
                 with self.assertRaises(DeadlineDataError):
                     load_bootstrap_and_fixtures(root)
 

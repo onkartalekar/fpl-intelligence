@@ -9,7 +9,7 @@ minutes and calls live FPL/transfer-source APIs, see `server.py`'s `_default_ref
 so the two stay independently schedulable/disableable.
 
 Deadline-window resolution (how many hours until the next gameweek's deadline, and whether "now"
-falls in one of the configured lead-time windows) reuses `fpl_intel.deadline_windows` -- the exact
+falls in one of the configured lead-time windows) reuses `fpl_intel.sources.deadline_windows` -- the exact
 same live-bootstrap-fetch + stateless-window-check arithmetic `send_deadline_reminder.py` already
 uses for issue #55, extracted to `fpl_intel/deadline_windows.py` when this script needed it too,
 rather than re-deriving or copy-pasting it.
@@ -40,7 +40,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.deadline_windows import (
+from fpl_intel.sources.deadline_windows import (
     DeadlineDataError, in_send_window, load_bootstrap_and_fixtures, next_unfinished_event,
 )
 

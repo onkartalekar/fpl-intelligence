@@ -15,7 +15,9 @@ import json
 from pathlib import Path
 
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "model-coefficients.json"
+# Issue: package reorg moved this file one level deeper (src/fpl_intel/ -> src/fpl_intel/
+# modeling/), so this needs parents[3] to still reach the repo root, not parents[2].
+_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "model-coefficients.json"
 
 _DEFAULTS = {
     "model_version": "0.7",

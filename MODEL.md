@@ -14,7 +14,7 @@ official FPL field or a constant fitted from historical results by
 `scripts/fit_coefficients.py`, and every projection can be decomposed back into named
 components in the dashboard's player inspector. The one deliberate, narrow exception
 (issue #65): a ridge-regression ML minutes/start-probability model runs in **shadow
-mode** every refresh (`src/fpl_intel/ml_minutes.py`) -- computed and logged under its
+mode** every refresh (`src/fpl_intel/modeling/ml_minutes.py`) -- computed and logged under its
 own `model_version`, scored the same way as the champion, but never feeding
 `project_players()` or any dashboard-visible recommendation. See
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)'s issue #65 entry and
@@ -29,7 +29,7 @@ a projection's miss regardless of direction, used to score backtests.
 
 ## Component scoring
 
-The core idea (`src/fpl_intel/projection.py`) is additive: instead of one
+The core idea (`src/fpl_intel/modeling/projection.py`) is additive: instead of one
 blended points-per-90 rate, each player's expected points for a fixture is
 the sum of seven independent components, each mapped from an official FPL
 per-90 field using the real FPL scoring rules:
@@ -88,7 +88,7 @@ official FPL FDR (1–5), fitted directly from three seasons of historical
 results (not hand-picked) by `scripts/fit_coefficients.py`.
 
 **Built, backtested, not adopted: fitted team-strength model**
-(`src/fpl_intel/team_strength.py`). A Dixon-Coles-style Poisson
+(`src/fpl_intel/modeling/team_strength.py`). A Dixon-Coles-style Poisson
 attack/defense rating per team, fit from the current season's own
 completed fixtures via iterative proportional scaling, with exponential
 recency weighting and a scale-identifiability normalization
@@ -114,7 +114,7 @@ fixed 38-game season) so early-season and short-track-record players
 aren't crushed toward zero.
 
 **Built, backtested, not adopted: recency-weighted minutes model**
-(`src/fpl_intel/minutes.py`). Exponentially decay-weights each player's
+(`src/fpl_intel/modeling/minutes.py`). Exponentially decay-weights each player's
 own recent per-gameweek start/sub history (half-life in matches) instead
 of using season-long totals, explicitly targeting rotation risk — a
 player benched for the last month but with a healthy season total. It
@@ -134,7 +134,7 @@ basis and risks" limitations list.
 
 ### Shadow only, not disabled: ML minutes challenger (issue #65)
 
-A third expected-minutes implementation, `src/fpl_intel/ml_minutes.py`, exists alongside the two
+A third expected-minutes implementation, `src/fpl_intel/modeling/ml_minutes.py`, exists alongside the two
 above but occupies a different status from either: not the live estimate, and not a disabled,
 inert branch like Phase 1/Phase 4 -- a **running, scored challenger**. A ridge-regression model
 (fitted weights checked into `config/ml-minutes-weights.json`, refit offline by
@@ -202,7 +202,7 @@ horizons.
 
 ## Phase 5 (scaffolding, not wired in): LLM news-signal extraction
 
-`src/fpl_intel/news_signals.py` uses an LLM API (raw HTTPS, no vendor SDK
+`src/fpl_intel/sources/news_signals.py` uses an LLM API (raw HTTPS, no vendor SDK
 dependency) as a **feature extractor only** — never as the projection
 itself — to pull structured availability signals (injured / doubtful /
 returning / rotation_risk / nailed_on) out of first-party club and
@@ -234,7 +234,7 @@ change.
 ## Coefficients and validation
 
 All tunable constants load once at import time from
-`config/model-coefficients.json` via `src/fpl_intel/coefficients.py`
+`config/model-coefficients.json` via `src/fpl_intel/modeling/coefficients.py`
 (falling back to `_DEFAULTS` for any missing key) -- a plain file read,
 not a computation. `data/history/`'s prior-season CSVs and the scripts
 below are only involved in *producing* that file; nothing the live

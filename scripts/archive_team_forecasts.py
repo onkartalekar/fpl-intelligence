@@ -16,7 +16,7 @@ by `.github/workflows/scheduled-refresh.yml` (issue #102's own dependency note: 
 workflow's existing hourly tick rather than introducing a second independent scheduler), but takes
 no opinion on what invokes it.
 
-Deadline-window resolution reuses `fpl_intel.deadline_windows` -- the same live-bootstrap-fetch +
+Deadline-window resolution reuses `fpl_intel.sources.deadline_windows` -- the same live-bootstrap-fetch +
 stateless-window-check arithmetic `send_deadline_reminder.py`/`trigger_scheduled_refresh.py`
 already use, checked against all three of `CHECKPOINT_LEAD_HOURS` (the same 3/12/24-hour values
 issue #79 already exposes to visitors as their reminder-timing choice, `server.py`'s
@@ -48,7 +48,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.deadline_windows import (
+from fpl_intel.sources.deadline_windows import (
     DeadlineDataError, in_send_window, load_bootstrap_and_fixtures, next_unfinished_event,
 )
 

@@ -87,7 +87,9 @@ _DEFAULT_WEIGHTS = (
     0.7429,
 )
 
-_WEIGHTS_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-minutes-weights.json"
+# Issue: package reorg moved this file one level deeper (src/fpl_intel/ -> src/fpl_intel/
+# modeling/), so this needs parents[3] to still reach the repo root, not parents[2].
+_WEIGHTS_PATH = Path(__file__).resolve().parents[3] / "config" / "ml-minutes-weights.json"
 
 _MATURITY_CAP_FIXTURES = 20.0
 

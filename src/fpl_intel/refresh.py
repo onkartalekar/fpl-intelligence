@@ -9,17 +9,9 @@ from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
 
-from .catalog import build_fixture_catalog, build_player_catalog
-from .fpl_data import (
-    fetch_bootstrap,
-    fetch_event_live,
-    fetch_fixtures,
-    summarize_bootstrap,
-)
 from .generation import publish_generation, resolve_artifact
-from .manager_data import collect_public_manager, fetch_manager_event_picks, summarize_manager
-from . import ml_minutes
-from .model_performance import (
+from .modeling import ml_minutes
+from .modeling.model_performance import (
     archive_forecast,
     archive_shadow_forecast,
     build_performance_report,
@@ -27,11 +19,19 @@ from .model_performance import (
     normalize_live_event,
     normalize_manager_picks,
 )
-from . import profiles
-from .recommendations import build_gw_recommendations
-from .transfer_decisions import build_draft_decisions, build_transfer_decisions
-from .relevance import enrich_transfers, summarize_clubs
-from .transfers import canonical_club, normalize_transfer
+from .modeling.recommendations import build_gw_recommendations
+from .modeling.transfer_decisions import build_draft_decisions, build_transfer_decisions
+from .sources.catalog import build_fixture_catalog, build_player_catalog
+from .sources.fpl_data import (
+    fetch_bootstrap,
+    fetch_event_live,
+    fetch_fixtures,
+    summarize_bootstrap,
+)
+from .sources.manager_data import collect_public_manager, fetch_manager_event_picks, summarize_manager
+from .sources.relevance import enrich_transfers, summarize_clubs
+from .sources.transfers import canonical_club, normalize_transfer
+from .storage import profiles
 
 
 class RefreshAlreadyRunning(RuntimeError):

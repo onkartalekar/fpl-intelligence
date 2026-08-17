@@ -9,7 +9,7 @@ from . import minutes as minutes_model
 from . import team_strength
 from .coefficients import load_coefficients
 from .projection import component_points_for_event, component_rate_baselines, player_component_rates
-from .transfers import canonical_club
+from ..sources.transfers import canonical_club
 
 
 _COEFFICIENTS = load_coefficients()

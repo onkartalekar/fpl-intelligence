@@ -30,8 +30,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.recommendations import build_gw_recommendations
-from fpl_intel.transfer_decisions import build_draft_decisions, build_transfer_decisions
+from fpl_intel.modeling.recommendations import build_gw_recommendations
+from fpl_intel.modeling.transfer_decisions import build_draft_decisions, build_transfer_decisions
 
 # Real FPL's actual position split, inspected directly from a real bootstrap snapshot (573
 # players) -- not an arbitrary round number, so sort/candidate-list costs that scale with

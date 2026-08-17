@@ -23,8 +23,8 @@ from email.message import EmailMessage
 import smtplib
 
 from . import email_template
-from .release_notes import CATEGORIES as _RELEASE_NOTES_CATEGORIES
 from .reminder_confirmation import ReminderEmailError, _read_smtp_config, _SEND_TIMEOUT_SECONDS
+from ..storage.release_notes import CATEGORIES as _RELEASE_NOTES_CATEGORIES
 
 
 def compose_release_notes_subscription_email(confirm_url):

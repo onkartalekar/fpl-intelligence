@@ -27,7 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from fpl_intel.backtest import load_season, season_comparisons
+from fpl_intel.modeling.backtest import load_season, season_comparisons
 
 
 FIT_SEASONS = ["2022-23", "2023-24", "2024-25"]

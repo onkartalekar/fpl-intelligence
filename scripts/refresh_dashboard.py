@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.pl_transfers import fetch_confirmed_transfers
+from fpl_intel.sources.pl_transfers import fetch_confirmed_transfers
 from fpl_intel.refresh import RefreshAlreadyRunning, _refresh_project_unlocked, project_refresh_lock
 
 _BUSY_EXIT_CODE = 75

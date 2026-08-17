@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import uuid
 
-from .fpl_data import save_json
+from .sources.fpl_data import save_json
 
 
 def _safe_generation_dir(root):

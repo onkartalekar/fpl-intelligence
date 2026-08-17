@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 
-from fpl_intel.release_notes import (
+from fpl_intel.storage.release_notes import (
     AUDIENCES,
     CATEGORIES,
     ReleaseNotesValidationError,

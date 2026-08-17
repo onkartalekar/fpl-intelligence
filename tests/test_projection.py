@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from fpl_intel.projection import (
+from fpl_intel.modeling.projection import (
     _CLEAN_SHEET_PROBABILITY_BY_DIFFICULTY,
     _FDR_ATTACK_MULTIPLIER,
     _GOALS_CONCEDED_DIFFICULTY_MULTIPLIER,

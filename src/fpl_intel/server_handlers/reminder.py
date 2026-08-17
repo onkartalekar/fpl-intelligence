@@ -14,8 +14,8 @@ import sys
 import traceback
 from urllib.parse import parse_qs
 
-from .. import profiles
-from .. import reminder_confirmation
+from ..notifications import reminder_confirmation
+from ..storage import profiles
 from .common import (
     ALLOWED_REMINDER_LEAD_HOURS, REMINDER_EMAIL_MAX_LENGTH, coerce_team_id, hash_pin,
     profiles_db_path, render_reminder_confirm_page,

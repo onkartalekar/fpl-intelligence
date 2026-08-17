@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import traceback
 
-from .. import reminder_confirmation
+from ..notifications import reminder_confirmation
 from .common import REMINDER_EMAIL_MAX_LENGTH
 
 # Issue #110: category is a fixed, closed option set, mirroring the profile form's `risk_profile`

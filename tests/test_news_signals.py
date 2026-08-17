@@ -2,7 +2,7 @@ import json
 import os
 import unittest
 
-from fpl_intel.news_signals import (
+from fpl_intel.sources.news_signals import (
     bounded_minutes_adjustment,
     extract_availability_signals,
     fetch_news_item,
@@ -97,7 +97,7 @@ class ExtractAvailabilitySignalsTests(unittest.TestCase):
     def test_openai_compatible_provider_uses_its_own_caller(self):
         # No explicit caller -- proves provider selection, not the caller
         # override, is what resolves the right backend.
-        import fpl_intel.news_signals as module
+        import fpl_intel.sources.news_signals as module
 
         recorded_response = json.dumps([
             {
@@ -121,7 +121,7 @@ class ExtractAvailabilitySignalsTests(unittest.TestCase):
         self.assertEqual(signals[0]["player"], "Some Player")
 
     def test_provider_env_var_selects_provider_when_none_passed_explicitly(self):
-        import fpl_intel.news_signals as module
+        import fpl_intel.sources.news_signals as module
 
         original_caller = module._PROVIDERS["openai_compatible"]["caller"]
         module._PROVIDERS["openai_compatible"]["caller"] = _fixed_response("[]")
@@ -141,7 +141,7 @@ class ExtractAvailabilitySignalsTests(unittest.TestCase):
 
 class OpenAICompatibleCallerTests(unittest.TestCase):
     def test_returns_none_when_api_base_or_model_env_vars_are_unset(self):
-        import fpl_intel.news_signals as module
+        import fpl_intel.sources.news_signals as module
 
         for var in ("FPL_INTEL_LLM_API_BASE", "FPL_INTEL_LLM_MODEL"):
             os.environ.pop(var, None)
@@ -178,7 +178,7 @@ class FetchNewsItemTests(unittest.TestCase):
     def test_strips_tags_and_scripts_to_plain_text(self):
         # This exercises the parsing logic directly against a fixed HTML
         # string rather than making a live request.
-        import fpl_intel.news_signals as module
+        import fpl_intel.sources.news_signals as module
 
         html = b"<html><head><style>.x{color:red}</style></head><body><script>evil()</script><p>Player is fit.</p></body></html>"
 
@@ -203,7 +203,7 @@ class FetchNewsItemTests(unittest.TestCase):
         self.assertNotIn("color:red", result["text"])
 
     def test_rejects_non_first_party_or_local_urls_before_network_access(self):
-        import fpl_intel.news_signals as module
+        import fpl_intel.sources.news_signals as module
 
         original_urlopen = module.urlopen
         module.urlopen = lambda *args, **kwargs: self.fail("network must not be reached")
