@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from . import profiles
 from . import release_notes
-from .dashboard import render_dashboard
+from .dashboard import APP_ICON_PNG, render_dashboard
 from .generation import resolve_artifact
 from .rate_limit import CooldownLimiter
 from .server_handlers import common
@@ -60,6 +60,12 @@ from .server_handlers.team_lookup import (
 # `_handle_refresh`'s own processing (including its own separate subprocess `timeout=300` in
 # `_default_refresh_action`) takes.
 _CONNECTION_TIMEOUT_SECONDS = 20
+
+# Issue #216: everything here is public dashboard data (the same content any visitor's browser
+# already renders), so there's nothing to disallow -- this exists to give crawlers (Twitterbot,
+# Applebot, search bots, ...) an explicit 200 "you may fetch anything" instead of a 404, which a
+# well-behaved bot otherwise politely checks for and logs before every fetch anyway.
+_ROBOTS_TXT = b"User-agent: *\nAllow: /\n"
 
 
 def create_server(
@@ -296,6 +302,24 @@ def create_server(
             if not getattr(self, "_head_request", False):
                 self.wfile.write(body)
 
+        def _send_static(self, body, content_type):
+            """Issue #216: the icon and robots.txt responses -- fixed bytes, chosen once at
+            process start (APP_ICON_PNG at import time, _ROBOTS_TXT as a module constant), never
+            per-request-generated like _json/_send_html's bodies. Skips _compress_if_accepted
+            (the PNG is already compressed and gzipping it would only add overhead; robots.txt is
+            a couple dozen bytes, too small for gzip's own framing to pay for itself) and allows
+            caching (unlike every other response here, which sets Cache-Control: no-store) since
+            neither ever changes within a running process -- a day is long enough to cut repeat-
+            crawler traffic without risking a stale icon surviving a deploy that changes it.
+            """
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            if not getattr(self, "_head_request", False):
+                self.wfile.write(body)
+
         def _rate_limit_exempt(self):
             """Issue #125: a caller holding the operator token is exempt from the visitor-tuned
             per-IP `lookup_limiter` cooldown -- otherwise a trusted script looping over several
@@ -471,9 +495,17 @@ def create_server(
             if path == "/api/registered-teams":
                 self._handle_registered_teams()
                 return
-            if path == "/favicon.ico":
-                self.send_response(204)
-                self.end_headers()
+            # Issue #216: previously /favicon.ico alone answered 204 (no icon), and every other
+            # icon/robots.txt path a real browser or crawler tries fell through to the generic
+            # 404 below -- confirmed live via access logs (Twitterbot, Applebot, and iOS Safari's
+            # own NetworkingExtension all hit these within minutes of a tweet linking the
+            # dashboard). All three icon paths now serve the same brand PNG; the *-precomposed
+            # variant is iOS's older, pre-iOS7 lookup that some Safari versions still try first.
+            if path in {"/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"}:
+                self._send_static(APP_ICON_PNG, "image/png")
+                return
+            if path == "/robots.txt":
+                self._send_static(_ROBOTS_TXT, "text/plain; charset=utf-8")
                 return
             self._json(404, {"status": "error", "message": "Not found"})
 
@@ -483,9 +515,9 @@ def create_server(
             # confirmed live: Railway's own platform health check hits "/" this way) falling
             # through to the stdlib's generic "Unsupported method" 501, spamming logs with
             # nothing actionable in them. Reuses do_GET's exact routing rather than duplicating
-            # it -- every response path already funnels through _json/_send_html, both of which
-            # skip the body write (but still send the real headers, Content-Length included) when
-            # this flag is set.
+            # it -- every response path already funnels through _json/_send_html/_send_static, all
+            # of which skip the body write (but still send the real headers, Content-Length
+            # included) when this flag is set.
             self._head_request = True
             try:
                 self.do_GET()

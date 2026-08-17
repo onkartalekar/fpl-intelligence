@@ -19,6 +19,13 @@ _STATIC_DIR = Path(__file__).resolve().parent
 _DASHBOARD_CSS = (_STATIC_DIR / "dashboard.css").read_text(encoding="utf-8")
 _DASHBOARD_JS = (_STATIC_DIR / "dashboard.js").read_text(encoding="utf-8")
 
+# Issue #216: a single brand-colored PNG (a mint "--accent" dot on the "--bg" navy square, see
+# dashboard.css) reused for every icon a browser or crawler asks for -- /favicon.ico, /apple-
+# touch-icon.png, and /apple-touch-icon-precomposed.png (server.py wires all three to it). Read
+# once at import time as bytes, the same pattern as _DASHBOARD_CSS/_DASHBOARD_JS just above,
+# just not decoded as text since it's binary.
+APP_ICON_PNG = (_STATIC_DIR / "app-icon.png").read_bytes()
+
 
 _TEMPLATE = r'''<!doctype html>
 <html lang="en">
@@ -26,6 +33,8 @@ _TEMPLATE = r'''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FPL Intelligence Workspace</title>
+<link rel="icon" href="/favicon.ico" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>__DASHBOARD_CSS__</style>
 </head>
 <body><script>(function(){var stored=null;try{stored=localStorage.getItem('fpl-theme')}catch(error){}var theme=stored==='light'||stored==='dark'?stored:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',theme)})();</script><div class="app">
