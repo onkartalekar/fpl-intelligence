@@ -3,14 +3,17 @@
 A visual companion to `README.md`'s "Environment variables" section and `MODEL.md`'s prose pipeline
 description (issue #127) -- neither has a picture of how its pieces actually fit together, and
 tracing that today means reading both docs plus several `plans/issue-*.md` files and the code
-itself. Two diagrams: the system (this repo's runtime components and how they call each other),
-and the projection model's own internal pipeline.
+itself. Three diagrams: the system (this repo's runtime components and how they call each other),
+the source-code layout (`src/fpl_intel/`'s subpackages and their dependency direction), and the
+projection model's own internal pipeline.
 
 **Keeping this current**: if a change adds or removes a cross-component call -- a new endpoint, a
 new GitHub Actions workflow, a new external dependency -- update the system diagram below as part
 of that change. `.claude/skills/ship-issue/SKILL.md` carries this as an explicit step so it's
 surfaced at the same point every such change already goes through, rather than silently drifting
 (as this diagram's own first draft did mid-session, more than once, while it was being written).
+The same applies to the code-layout diagram whenever a module moves subpackages or a new one is
+added.
 
 ## System
 
@@ -88,10 +91,47 @@ and `/api/manager-view` (issue #125) and `/api/reminder-teams` (issue #105) exis
 every GitHub-Actions-hosted script reads Railway's live, already-computed state over HTTP instead
 of assuming local file access it will never have.
 
+## Code layout
+
+`src/fpl_intel/` split from ~30 flat modules into four domain subpackages (plus the already-
+existing `server_handlers/` from issue #210) once it got too large to navigate as one directory.
+Arrows show the real dependency direction, checked for cycles before the split: the top-level
+layer depends on all four domain packages; none of the domain packages depend back on it or on
+each other's siblings outside their own subpackage.
+
+```mermaid
+flowchart TB
+    subgraph app["src/fpl_intel/ top level"]
+        server["server.py + server_handlers/<br/>(HTTP layer, issue #27/#210)"]
+        dashboardPy["dashboard.py<br/>(HTML rendering)"]
+        refreshPy["refresh.py + generation.py<br/>(shared-refresh orchestration, issue #46)"]
+        decisionCache["decision_cache.py<br/>(per-request cache, issue #208)"]
+    end
+
+    sources["sources/<br/>data ingestion + normalization"]
+    modeling["modeling/<br/>projection + decision pipeline<br/>(see Model pipeline below)"]
+    storage["storage/<br/>profiles.db, release-notes.json"]
+    notifications["notifications/<br/>email compose + send"]
+
+    server --> sources
+    server --> modeling
+    server --> storage
+    server --> notifications
+    dashboardPy --> sources
+    refreshPy --> sources
+    refreshPy --> modeling
+    refreshPy --> storage
+    decisionCache --> refreshPy
+
+    classDef domain stroke-width:2px
+    class sources,modeling,storage,notifications domain
+```
+
 ## Model pipeline
 
-Nested under `server.py`'s refresh call inside the system diagram above -- this is what actually
-happens when `refresh.py`/`generation.py` recompute the shared dashboard state. See `MODEL.md` for
+Nested under `server.py`'s refresh call inside the system diagram above, and the internals of the
+`modeling/` package shown in the code-layout diagram above -- this is what actually happens when
+`refresh.py`/`generation.py` recompute the shared dashboard state. See `MODEL.md` for
 the full prose treatment of every stage; this is the shape only.
 
 ```mermaid
