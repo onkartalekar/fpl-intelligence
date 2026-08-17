@@ -14,17 +14,23 @@ _TRUSTED_LINK_DOMAINS = sorted(
 # highlighting, real diffs, a real linter) and are inlined into the
 # generated dashboard.html at generation time below, exactly as
 # __DASHBOARD_DATA__ already is -- the served artifact stays a single
-# self-contained file, only the source representation changes.
+# self-contained file, only the source representation changes. Grouped into
+# css/js/img subfolders by type (rather than sitting flat alongside this
+# package's ~30 .py modules) purely as source-tree organization -- these are
+# still read once at import time and inlined, never served as literal static
+# files over HTTP (see IMPLEMENTATION_PLAN.md's "Considered and declined --
+# serving CSS/JS as separate HTTP-served files" for why), so the subfolder
+# split has no effect on served behavior.
 _STATIC_DIR = Path(__file__).resolve().parent
-_DASHBOARD_CSS = (_STATIC_DIR / "dashboard.css").read_text(encoding="utf-8")
-_DASHBOARD_JS = (_STATIC_DIR / "dashboard.js").read_text(encoding="utf-8")
+_DASHBOARD_CSS = (_STATIC_DIR / "css" / "dashboard.css").read_text(encoding="utf-8")
+_DASHBOARD_JS = (_STATIC_DIR / "js" / "dashboard.js").read_text(encoding="utf-8")
 
 # Issue #216: a single brand-colored PNG (a mint "--accent" dot on the "--bg" navy square, see
 # dashboard.css) reused for every icon a browser or crawler asks for -- /favicon.ico, /apple-
 # touch-icon.png, and /apple-touch-icon-precomposed.png (server.py wires all three to it). Read
 # once at import time as bytes, the same pattern as _DASHBOARD_CSS/_DASHBOARD_JS just above,
 # just not decoded as text since it's binary.
-APP_ICON_PNG = (_STATIC_DIR / "app-icon.png").read_bytes()
+APP_ICON_PNG = (_STATIC_DIR / "img" / "app-icon.png").read_bytes()
 
 
 _TEMPLATE = r'''<!doctype html>
