@@ -25,7 +25,47 @@ _TRUSTED_LINK_DOMAINS = sorted(
 _STATIC_DIR = Path(__file__).resolve().parent
 _TEMPLATE = (_STATIC_DIR / "templates" / "dashboard-shell.html").read_text(encoding="utf-8")
 _DASHBOARD_CSS = (_STATIC_DIR / "css" / "dashboard.css").read_text(encoding="utf-8")
-_DASHBOARD_JS = (_STATIC_DIR / "js" / "dashboard.js").read_text(encoding="utf-8")
+
+# Issue #223: dashboard.js itself (~125KB across ~90 top-level functions with no internal section
+# structure) was split into these per-feature source files under js/dashboard/, concatenated here
+# in this exact order before inlining -- a direct extension of the same "real files, concatenated
+# and inlined at generation time" mechanism #51/#54 already established for CSS/JS as a whole,
+# not a new one. Deliberately NOT real ES modules: every function below still shares mutable
+# module-level state by design (globals like `state`, `decision`, `draftSelection`), so the
+# concatenated result is exactly one script's worth of code, byte-for-byte identical to the
+# pre-split single dashboard.js (verified via the same A/B render comparison this repo's other
+# CSS/JS changes use).
+#
+# Concatenation order is NOT alphabetical -- it mirrors dependency order in the original single
+# file and matters for correctness, not just readability:
+#   1. core.js must load first: every other file's top-level code (event-listener wiring that
+#      runs immediately, not deferred into a callback) reads `byId`/`esc`/`foldDiacritics`/the
+#      shared `state`/`decision`/`performance` module state declared here. `const`/`let` bindings
+#      are not hoisted the way `function` declarations are -- reading one before its declaring
+#      file has run is a ReferenceError, not just a stale value.
+#   2. gates-and-bootstrap.js must load last: its own top-level code is the final call sequence
+#      (`setupThemeToggle(); ...; restoreWorkspaceContext();`) that actually invokes every other
+#      file's setup/render functions -- it has to run only once every other file's own top-level
+#      `const`/`let` declarations have already executed.
+#   3. The 8 files in between only reference each other from inside function bodies (never from
+#      their own top-level code), so their relative order among themselves doesn't affect
+#      correctness -- ordered here to roughly match the original file's layout.
+_DASHBOARD_JS_FILES = [
+    "core.js",
+    "overview-transfers-players.js",
+    "whats-new.js",
+    "fixtures.js",
+    "decision-center.js",
+    "model-performance.js",
+    "workspace-context.js",
+    "profile-forms.js",
+    "draft-squad.js",
+    "gates-and-bootstrap.js",
+]
+_DASHBOARD_JS = "".join(
+    (_STATIC_DIR / "js" / "dashboard" / name).read_text(encoding="utf-8")
+    for name in _DASHBOARD_JS_FILES
+)
 
 # The shell's theme-detection script is a second, separate inline <script> the shell carries
 # beyond __DASHBOARD_JS__ -- it has to run synchronously before first paint (reads a stored
