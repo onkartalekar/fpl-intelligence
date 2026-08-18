@@ -1,38 +1,602 @@
-
-const state=JSON.parse(document.getElementById('dashboard-data').textContent);const transfers=state.transfers||[];const players=state.players||[];const fixtures=state.fixtures||[];const releaseNotes=state.release_notes||[];let whatsNewFilter='all';const decision=state.decision_center||{status:'model_unavailable'};const performance=state.model_performance||{status:'waiting_for_results',comparisons:[],summary:{},by_horizon:{},calibration:{recommendations:[]},team_performance:{comparisons:[]},player_performance:{comparisons:[]}};const byId=id=>document.getElementById(id);const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const state = JSON.parse(document.getElementById("dashboard-data").textContent);
+const transfers = state.transfers || [];
+const players = state.players || [];
+const fixtures = state.fixtures || [];
+const releaseNotes = state.release_notes || [];
+let whatsNewFilter = "all";
+const decision = state.decision_center || { status: "model_unavailable" };
+const performance = state.model_performance || {
+  status: "waiting_for_results",
+  comparisons: [],
+  summary: {},
+  by_horizon: {},
+  calibration: { recommendations: [] },
+  team_performance: { comparisons: [] },
+  player_performance: { comparisons: [] },
+};
+const byId = (id) => document.getElementById(id);
+const esc = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ],
+  );
 // Bug fix: player search used a plain substring match with no accent-folding, so a query could
 // never match *through* an accented character in a name -- "Guehi" never matched "Guéhi" because
 // the plain "e" you typed is never === the "é" in the name. A query that only needed the
 // ASCII-prefix of a name (e.g. "guimar" against "Guimarães") looked like it worked by
 // coincidence, since it never reached the accent at all. Strip diacritics from both sides before
 // comparing so every query works the same regardless of where an accent falls in the name.
-const foldDiacritics=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');const pageSize=20;let page=1;let playerPage=1;let selectedBreakdownPlayerId=null;let selectedRationaleMap={};const prefersReducedMotion=()=>window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const trustedLinkDomains=new Set(__TRUSTED_LINK_DOMAINS__);
-function safeLink(url,label){try{const parsed=new URL(url);const host=parsed.hostname.toLowerCase().replace(/^www\./,'');if(parsed.protocol==='https:'&&trustedLinkDomains.has(host))return `<a href="${esc(parsed.href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;}catch(error){}return `<span>${esc(label)} · invalid or untrusted source URL</span>`;}
-const titles={overview:state.fpl.season_phase==='in_season'?'Season overview':'Preseason overview',decisions:'Decision Center',squad:'My Team',draft:'Draft Squad',profile:'My Profile',players:'Player Explorer',fixtures:'Fixtures',transfers:'Transfers & News',performance:'Model Performance',model:'Model Status',contact:'Contact Us','whats-new':"What's New"};
-const seasonLabel=()=>state.fpl.ready_for_2026_27?(state.fpl.season_phase==='in_season'?'2026/27 season active':'2026/27 FPL feed ready'):'Waiting for 2026/27 FPL launch';const timezoneLabel=state.timezone==='America/New_York'?'Eastern Time (New York)':state.timezone;byId('topbar-timezone').textContent=timezoneLabel;byId('topbar-risk').textContent=`${(state.profile&&state.profile.risk_profile)||'balanced'} risk`;
-function showView(name){document.querySelectorAll('.view').forEach(node=>node.classList.toggle('active',node.id===`view-${name}`));document.querySelectorAll('[data-view]').forEach(node=>{const active=node.dataset.view===name;node.classList.toggle('active',active);active?node.setAttribute('aria-current','page'):node.removeAttribute('aria-current');});byId('mobile-nav').value=name;byId('view-title').textContent=titles[name]||'FPL Intelligence';if(name==='transfers')applyFilters();if(name==='whats-new')renderWhatsNew();if(name==='draft'){renderDraftHealth();renderDraftPitch();}window.scrollTo({top:0,behavior:'smooth'});}
-document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));byId('mobile-nav').addEventListener('change',event=>showView(event.target.value));
-function fmtDate(value,withTime=false){if(!value)return 'Not recorded';const options=withTime?{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.timezone,timeZoneName:'short'}:{month:'short',day:'numeric',year:'numeric',timeZone:state.timezone};return new Intl.DateTimeFormat('en-US',options).format(new Date(value));}
-function deadlineText(){if(!state.fpl.next_deadline)return 'Deadline appears when the 2026/27 feed launches.';const deadline=new Date(state.fpl.next_deadline);if(deadline <= Date.now())return `${state.fpl.next_event_name||'Deadline'} · ${fmtDate(state.fpl.next_deadline,true)} · Deadline passed. Refresh required to load the next deadline.`;const hours=Math.floor((deadline-Date.now())/3600000);const days=Math.floor(hours/24);const remainder=hours%24;return `${state.fpl.next_event_name||'Next deadline'} · ${fmtDate(state.fpl.next_deadline,true)} · ${days}d ${remainder}h remaining`;}
-function renderOverview(){const summary=state.transfer_summary||{total:transfers.length,high:0,medium:0,low:0,actionable:0};const relevantNew=transfers.filter(row=>['high','medium'].includes(row.fpl_relevance)&&row.freshness==='new_7d').length;byId('season-readiness').textContent=seasonLabel();byId('new-count').textContent=relevantNew;byId('high-count').textContent=summary.high||0;byId('pending-count').textContent=summary.medium||0;byId('deadline-status').textContent=deadlineText();if(state.fpl.season_phase==='in_season')byId('preseason-workflow').hidden=true;
-const attention=[];if((state.manager||{}).connection_status==='not_configured')attention.push({level:'Setup',kind:'info',title:'Connect your FPL team',body:'Enter your FPL team ID in the Manager profile form on the My Profile view, then save.',action:'Open My Profile',view:'profile'});if((state.manager||{}).connection_status!=='not_configured'&&!(state.profile||{}).reminder_status)attention.push({level:'Setup',kind:'info',title:'Get deadline reminders',body:'Get an email before each gameweek deadline with your recommended moves.',action:'Open My Profile',view:'profile'});if(!state.fpl.ready_for_2026_27)attention.push({level:'Monitor',kind:'info',title:'2026/27 FPL feed is not available yet',body:'Prices, positions, fixtures, and draft optimization remain locked.',action:'Review model status',view:'model'});else if(decision.status==='active_preliminary')attention.push({level:'Ready',kind:'ready',title:'Preliminary GW1 recommendation is available',body:'Official player and fixture data now powers a legal five-gameweek opening-squad baseline.',action:'Open Decision Center',view:'decisions'});else attention.push({level:'Review',kind:'info',title:'Target-season feed verified',body:'Official data is ready, but the recommendation model does not yet have complete inputs.',action:'Review model status',view:'model'});if(relevantNew)attention.push({level:'Review',kind:'',title:`${relevantNew} relevant changes this week`,body:'Review affected clubs and potential role changes before updating a draft.',action:'Open transfers',view:'transfers'});if(!relevantNew&&state.fpl.ready_for_2026_27)attention.push({level:'Info',kind:'info',title:'No material transfer changes this week',body:'No immediate transfer-news review is required.'});byId('attention').innerHTML=attention.map(item=>`<div class="attention-item"><span class="severity ${item.kind}">${esc(item.level)}</span><div><strong>${esc(item.title)}</strong><span class="muted">${esc(item.body)}</span></div>${item.view?`<button class="attention-action" data-go="${item.view}">${esc(item.action)}</button>`:''}</div>`).join('');document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.go)));
-byId('freshness').innerHTML=`<dt>Last refreshed</dt><dd>${esc(fmtDate(state.generated_at,true))}</dd><dt>Timezone</dt><dd>${esc(timezoneLabel)}</dd><dt>FPL feed</dt><dd class="${state.fpl.ready_for_2026_27?'status-good':'status-wait'}">${esc(seasonLabel())}</dd><dt>Official records</dt><dd>${summary.total||0}</dd>`;renderChanges();
-const clubs=(state.club_summaries||[]).filter(item=>item.relevant_moves>0).slice(0,10);byId('club-summary').innerHTML=clubs.length?clubs.map(item=>`<button class="club-card" data-club="${esc(item.club)}"><strong>${esc(item.club)}</strong><small>${item.arrivals} in · ${item.departures} out · ${item.relevant_moves} relevant</small></button>`).join(''):'<div class="empty">No relevant club movements are available yet.</div>';document.querySelectorAll('.club-card').forEach(button=>button.addEventListener('click',()=>{byId('club-filter').value=button.dataset.club;page=1;showView('transfers');}));}
-function renderChanges(){const changes=state.changes_since_last_refresh||{};if(!changes.has_previous_snapshot){byId('changes').innerHTML='<div class="muted">Baseline snapshot recorded. Material changes will appear after the next refresh.</div>';return;}const rows=[];if(changes.new_confirmed_transfers)rows.push(['New confirmed movements',`+${changes.new_confirmed_transfers}`]);if(changes.new_fpl_players)rows.push(['New FPL players',`+${changes.new_fpl_players}`]);if(changes.club_mapping_changes)rows.push(['Club mappings changed',changes.club_mapping_changes]);if(changes.availability_changes)rows.push(['Availability changes',changes.availability_changes]);byId('changes').innerHTML=rows.length?rows.map(row=>`<div class="change-row"><span>${esc(row[0])}</span><span class="change-value">${esc(row[1])}</span></div>`).join(''):'<div class="status-good">No material changes since your last refresh.</div>';}
-function populateFilters(){const clubs=(state.club_summaries||[]).map(item=>item.club).filter(Boolean).sort((a,b)=>a.localeCompare(b));byId('club-filter').insertAdjacentHTML('beforeend',clubs.map(club=>`<option value="${esc(club)}">${esc(club)}</option>`).join(''));}
-function filteredRows(){const query=byId('transfer-search').value.trim().toLocaleLowerCase();const club=byId('club-filter').value;const relevance=byId('relevance-filter').value;const direction=byId('direction-filter').value;const movement=byId('movement-filter').value;const freshness=byId('freshness-filter').value;return transfers.filter(row=>{const text=[row.player,row.from_club,row.to_club,row.premier_league_club].join(' ').toLocaleLowerCase();const relevanceOk=relevance==='all'||relevance==='actionable'&&['high','medium'].includes(row.fpl_relevance)||row.fpl_relevance===relevance;const freshOk=freshness==='all'||freshness==='recent14'&&['new_7d','recent_14d'].includes(row.freshness)||row.freshness===freshness;return(!query||text.includes(query))&&(club==='all'||row.premier_league_club===club||row.from_club===club||row.to_club===club)&&relevanceOk&&(direction==='all'||row.movement_direction===direction)&&(movement==='all'||row.movement_type===movement)&&freshOk;});}
-const readable={pending_new_season_fpl:'Awaiting 2026/27 FPL match',matched_current_fpl:'Matched to current 2026/27 FPL player',matched_prior_fpl:'Matched to prior FPL player',confirmed_first_party:'First-party confirmed','transfer-in':'Transfer in','transfer-out':'Transfer out','loan-in':'Loan in','loan-out':'Loan out','player-released':'Released','end-of-loan':'End of loan'};const label=value=>readable[value]||String(value||'Not recorded').replaceAll('_',' ');
-function whyMatters(row){if(row.matched_fpl_element_id)return 'Known FPL player changed club or squad context.';if(row.movement_direction==='in')return 'Confirmed arrival may affect roles and starting minutes.';if(row.movement_direction==='out')return 'Departure may change minutes for the remaining squad.';return 'Retained as verified squad evidence.';}
-function renderFilterChips(){const values=[['relevance-filter',byId('relevance-filter').selectedOptions[0].text],['freshness-filter',byId('freshness-filter').selectedOptions[0].text]];if(byId('transfer-search').value)values.unshift(['transfer-search',`Search: ${byId('transfer-search').value}`]);if(byId('club-filter').value!=='all')values.push(['club-filter',byId('club-filter').value]);if(byId('direction-filter').value!=='all')values.push(['direction-filter',byId('direction-filter').selectedOptions[0].text]);if(byId('movement-filter').value!=='all')values.push(['movement-filter',byId('movement-filter').selectedOptions[0].text]);byId('active-filters').innerHTML=values.map(item=>`<button class="filter-chip" data-clear="${item[0]}" type="button">${esc(item[1])} ×</button>`).join('');document.querySelectorAll('[data-clear]').forEach(button=>button.addEventListener('click',()=>{const id=button.dataset.clear;byId(id).value=id==='transfer-search'?'':'all';page=1;applyFilters();}));}
-function applyFilters(){const rows=filteredRows();const pages=Math.max(1,Math.ceil(rows.length/pageSize));page=Math.min(page,pages);const visible=rows.slice((page-1)*pageSize,page*pageSize);byId('result-count').textContent=`${rows.length} result${rows.length===1?'':'s'}`;byId('page-label').textContent=`Page ${page} of ${pages}`;byId('prev-page').disabled=page<=1;byId('next-page').disabled=page>=pages;renderFilterChips();const feed=byId('feed');if(!visible.length){feed.innerHTML='<div class="empty">No confirmed transfers match these filters. Broaden the date or relevance setting.</div>';return;}feed.innerHTML=visible.map(row=>`<button class="transfer"><span><strong>${esc(row.player)}</strong><small>${esc(row.from_club)} → ${esc(row.to_club)} · ${esc(fmtDate(row.announced_at))}</small><span class="why">${esc(whyMatters(row))}</span><span class="tags"><span class="tag ${esc(row.fpl_relevance)}">${esc(label(row.fpl_relevance))} relevance</span><span class="tag">${esc(label(row.movement_type))}</span><span class="tag">${esc(label(row.fpl_reconciliation_status))}</span></span></span><span class="muted">${esc(row.premier_league_club)}</span></button>`).join('');feed.querySelectorAll('.transfer').forEach((button,index)=>button.addEventListener('click',()=>inspect(visible[index])));}
-function inspect(row){const links=(row.supporting_source_urls||[row.source_url]).filter(Boolean).map((url,index)=>safeLink(url,`Source ${index+1}`)).join(' · ');byId('inspector').className='';byId('inspector').innerHTML=`<dl><dt>Player</dt><dd>${esc(row.player)}</dd><dt>Movement</dt><dd>${esc(row.from_club)} → ${esc(row.to_club)}</dd><dt>Why it matters</dt><dd>${esc(whyMatters(row))}</dd><dt>PL club</dt><dd>${esc(row.premier_league_club)}</dd><dt>Announced</dt><dd>${esc(fmtDate(row.announced_at,true))}</dd><dt>FPL relevance</dt><dd>${esc(label(row.fpl_relevance))}</dd><dt>Verification</dt><dd>${esc(label(row.verification_status))}</dd><dt>FPL status</dt><dd>${esc(label(row.fpl_reconciliation_status))}</dd><dt>Evidence</dt><dd>${links}</dd></dl>`;}
-const filterIds=['transfer-search','club-filter','relevance-filter','direction-filter','movement-filter','freshness-filter'];filterIds.forEach(id=>byId(id).addEventListener(id==='transfer-search'?'input':'change',()=>{page=1;applyFilters();}));byId('reset-filters').addEventListener('click',()=>{byId('transfer-search').value='';byId('club-filter').value='all';byId('relevance-filter').value='actionable';byId('direction-filter').value='all';byId('movement-filter').value='all';byId('freshness-filter').value='recent14';page=1;applyFilters();});byId('prev-page').addEventListener('click',()=>{page=Math.max(1,page-1);applyFilters();});byId('next-page').addEventListener('click',()=>{page+=1;applyFilters();});
-function setupPlayerExplorer(){const clubs=[...new Set(players.map(player=>player.club).filter(Boolean))].sort((a,b)=>a.localeCompare(b));const positions=[...new Set(players.map(player=>player.position).filter(Boolean))].sort((a,b)=>a.localeCompare(b));byId('player-club-filter').insertAdjacentHTML('beforeend',clubs.map(club=>`<option value="${esc(club)}">${esc(club)}</option>`).join(''));byId('player-position-filter').insertAdjacentHTML('beforeend',positions.map(position=>`<option value="${esc(position)}">${esc(position)}</option>`).join(''));['player-search','player-club-filter','player-position-filter','player-sort'].forEach(id=>byId(id).addEventListener(id==='player-search'?'input':'change',()=>{playerPage=1;renderPlayers();}));byId('player-prev').addEventListener('click',()=>{playerPage=Math.max(1,playerPage-1);renderPlayers();});byId('player-next').addEventListener('click',()=>{playerPage+=1;renderPlayers();});renderPlayers();}
-function renderPlayers(){const query=foldDiacritics(byId('player-search').value.trim().toLocaleLowerCase());const club=byId('player-club-filter').value;const position=byId('player-position-filter').value;const sort=byId('player-sort').value;const rows=players.filter(player=>(!query||foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase()).includes(query))&&(club==='all'||player.club===club)&&(position==='all'||player.position===position));const comparisons={name:(a,b)=>(a.name||'').localeCompare(b.name||''),'price-desc':(a,b)=>b.price-a.price||(a.name||'').localeCompare(b.name||''),'price-asc':(a,b)=>a.price-b.price||(a.name||'').localeCompare(b.name||''),'ownership-desc':(a,b)=>b.ownership-a.ownership||(a.name||'').localeCompare(b.name||'')};rows.sort(comparisons[sort]||comparisons['price-desc']);const pages=Math.max(1,Math.ceil(rows.length/30));playerPage=Math.min(playerPage,pages);const visible=rows.slice((playerPage-1)*30,playerPage*30);byId('player-count').textContent=`${rows.length} player${rows.length===1?'':'s'}`;byId('player-page').textContent=`Page ${playerPage} of ${pages}`;byId('player-prev').disabled=playerPage<=1;byId('player-next').disabled=playerPage>=pages;const statuses={a:'Available',d:'Doubtful',i:'Injured',s:'Suspended',u:'Unavailable',n:'Not available'};byId('player-results').innerHTML=visible.length?visible.map(player=>`<tr class="player-row"><th scope="row"><strong>${esc(player.name)}</strong><small>${esc(player.full_name||'')}</small></th><td>${esc(player.club)}</td><td>${esc(player.position)}</td><td class="price">£${Number(player.price).toFixed(1)}m</td><td>${Number(player.ownership).toFixed(1)}%</td><td><strong>${esc(statuses[player.status]||player.status||'Unknown')}</strong>${player.news?`<small>${esc(player.news)}</small>`:''}</td></tr>`).join(''):'<tr><td colspan="6"><div class="empty">No players match these filters.</div></td></tr>';}
-function whatsNewFormattedDate(dateStr){const [year,month,day]=dateStr.split('-').map(Number);const date=new Date(Date.UTC(year,month-1,day));return new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(date);}
-function whatsNewMatches(entry,query){if(!query)return true;const haystack=[entry.headline,entry.summary,...entry.changes.flatMap(change=>[change.title,change.description,change.category])].join(' ').toLowerCase();return haystack.includes(query.toLowerCase());}
-function whatsNewChangeRowHtml(change){return `<div class="whats-new-change"><span class="whats-new-tag whats-new-tag-${esc(change.category.toLowerCase())}">${esc(change.category)}</span><div><strong>${esc(change.title)}</strong><div class="muted">${esc(change.description)}</div></div></div>`;}
+const foldDiacritics = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+const pageSize = 20;
+let page = 1;
+let playerPage = 1;
+let selectedBreakdownPlayerId = null;
+let selectedRationaleMap = {};
+const prefersReducedMotion = () =>
+  window.matchMedia &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const trustedLinkDomains = new Set(__TRUSTED_LINK_DOMAINS__);
+function safeLink(url, label) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (parsed.protocol === "https:" && trustedLinkDomains.has(host))
+      return `<a href="${esc(parsed.href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+  } catch (error) {}
+  return `<span>${esc(label)} · invalid or untrusted source URL</span>`;
+}
+const titles = {
+  overview:
+    state.fpl.season_phase === "in_season"
+      ? "Season overview"
+      : "Preseason overview",
+  decisions: "Decision Center",
+  squad: "My Team",
+  draft: "Draft Squad",
+  profile: "My Profile",
+  players: "Player Explorer",
+  fixtures: "Fixtures",
+  transfers: "Transfers & News",
+  performance: "Model Performance",
+  model: "Model Status",
+  contact: "Contact Us",
+  "whats-new": "What's New",
+};
+const seasonLabel = () =>
+  state.fpl.ready_for_2026_27
+    ? state.fpl.season_phase === "in_season"
+      ? "2026/27 season active"
+      : "2026/27 FPL feed ready"
+    : "Waiting for 2026/27 FPL launch";
+const timezoneLabel =
+  state.timezone === "America/New_York"
+    ? "Eastern Time (New York)"
+    : state.timezone;
+byId("topbar-timezone").textContent = timezoneLabel;
+byId("topbar-risk").textContent =
+  `${(state.profile && state.profile.risk_profile) || "balanced"} risk`;
+function showView(name) {
+  document
+    .querySelectorAll(".view")
+    .forEach((node) =>
+      node.classList.toggle("active", node.id === `view-${name}`),
+    );
+  document.querySelectorAll("[data-view]").forEach((node) => {
+    const active = node.dataset.view === name;
+    node.classList.toggle("active", active);
+    active
+      ? node.setAttribute("aria-current", "page")
+      : node.removeAttribute("aria-current");
+  });
+  byId("mobile-nav").value = name;
+  byId("view-title").textContent = titles[name] || "FPL Intelligence";
+  if (name === "transfers") applyFilters();
+  if (name === "whats-new") renderWhatsNew();
+  if (name === "draft") {
+    renderDraftHealth();
+    renderDraftPitch();
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+document
+  .querySelectorAll("[data-view]")
+  .forEach((button) =>
+    button.addEventListener("click", () => showView(button.dataset.view)),
+  );
+byId("mobile-nav").addEventListener("change", (event) =>
+  showView(event.target.value),
+);
+function fmtDate(value, withTime = false) {
+  if (!value) return "Not recorded";
+  const options = withTime
+    ? {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: state.timezone,
+        timeZoneName: "short",
+      }
+    : {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: state.timezone,
+      };
+  return new Intl.DateTimeFormat("en-US", options).format(new Date(value));
+}
+function deadlineText() {
+  if (!state.fpl.next_deadline)
+    return "Deadline appears when the 2026/27 feed launches.";
+  const deadline = new Date(state.fpl.next_deadline);
+  if (deadline <= Date.now())
+    return `${state.fpl.next_event_name || "Deadline"} · ${fmtDate(state.fpl.next_deadline, true)} · Deadline passed. Refresh required to load the next deadline.`;
+  const hours = Math.floor((deadline - Date.now()) / 3600000);
+  const days = Math.floor(hours / 24);
+  const remainder = hours % 24;
+  return `${state.fpl.next_event_name || "Next deadline"} · ${fmtDate(state.fpl.next_deadline, true)} · ${days}d ${remainder}h remaining`;
+}
+function renderOverview() {
+  const summary = state.transfer_summary || {
+    total: transfers.length,
+    high: 0,
+    medium: 0,
+    low: 0,
+    actionable: 0,
+  };
+  const relevantNew = transfers.filter(
+    (row) =>
+      ["high", "medium"].includes(row.fpl_relevance) &&
+      row.freshness === "new_7d",
+  ).length;
+  byId("season-readiness").textContent = seasonLabel();
+  byId("new-count").textContent = relevantNew;
+  byId("high-count").textContent = summary.high || 0;
+  byId("pending-count").textContent = summary.medium || 0;
+  byId("deadline-status").textContent = deadlineText();
+  if (state.fpl.season_phase === "in_season")
+    byId("preseason-workflow").hidden = true;
+  const attention = [];
+  if ((state.manager || {}).connection_status === "not_configured")
+    attention.push({
+      level: "Setup",
+      kind: "info",
+      title: "Connect your FPL team",
+      body: "Enter your FPL team ID in the Manager profile form on the My Profile view, then save.",
+      action: "Open My Profile",
+      view: "profile",
+    });
+  if (
+    (state.manager || {}).connection_status !== "not_configured" &&
+    !(state.profile || {}).reminder_status
+  )
+    attention.push({
+      level: "Setup",
+      kind: "info",
+      title: "Get deadline reminders",
+      body: "Get an email before each gameweek deadline with your recommended moves.",
+      action: "Open My Profile",
+      view: "profile",
+    });
+  if (!state.fpl.ready_for_2026_27)
+    attention.push({
+      level: "Monitor",
+      kind: "info",
+      title: "2026/27 FPL feed is not available yet",
+      body: "Prices, positions, fixtures, and draft optimization remain locked.",
+      action: "Review model status",
+      view: "model",
+    });
+  else if (decision.status === "active_preliminary")
+    attention.push({
+      level: "Ready",
+      kind: "ready",
+      title: "Preliminary GW1 recommendation is available",
+      body: "Official player and fixture data now powers a legal five-gameweek opening-squad baseline.",
+      action: "Open Decision Center",
+      view: "decisions",
+    });
+  else
+    attention.push({
+      level: "Review",
+      kind: "info",
+      title: "Target-season feed verified",
+      body: "Official data is ready, but the recommendation model does not yet have complete inputs.",
+      action: "Review model status",
+      view: "model",
+    });
+  if (relevantNew)
+    attention.push({
+      level: "Review",
+      kind: "",
+      title: `${relevantNew} relevant changes this week`,
+      body: "Review affected clubs and potential role changes before updating a draft.",
+      action: "Open transfers",
+      view: "transfers",
+    });
+  if (!relevantNew && state.fpl.ready_for_2026_27)
+    attention.push({
+      level: "Info",
+      kind: "info",
+      title: "No material transfer changes this week",
+      body: "No immediate transfer-news review is required.",
+    });
+  byId("attention").innerHTML = attention
+    .map(
+      (item) =>
+        `<div class="attention-item"><span class="severity ${item.kind}">${esc(item.level)}</span><div><strong>${esc(item.title)}</strong><span class="muted">${esc(item.body)}</span></div>${item.view ? `<button class="attention-action" data-go="${item.view}">${esc(item.action)}</button>` : ""}</div>`,
+    )
+    .join("");
+  document
+    .querySelectorAll("[data-go]")
+    .forEach((button) =>
+      button.addEventListener("click", () => showView(button.dataset.go)),
+    );
+  byId("freshness").innerHTML =
+    `<dt>Last refreshed</dt><dd>${esc(fmtDate(state.generated_at, true))}</dd><dt>Timezone</dt><dd>${esc(timezoneLabel)}</dd><dt>FPL feed</dt><dd class="${state.fpl.ready_for_2026_27 ? "status-good" : "status-wait"}">${esc(seasonLabel())}</dd><dt>Official records</dt><dd>${summary.total || 0}</dd>`;
+  renderChanges();
+  const clubs = (state.club_summaries || [])
+    .filter((item) => item.relevant_moves > 0)
+    .slice(0, 10);
+  byId("club-summary").innerHTML = clubs.length
+    ? clubs
+        .map(
+          (item) =>
+            `<button class="club-card" data-club="${esc(item.club)}"><strong>${esc(item.club)}</strong><small>${item.arrivals} in · ${item.departures} out · ${item.relevant_moves} relevant</small></button>`,
+        )
+        .join("")
+    : '<div class="empty">No relevant club movements are available yet.</div>';
+  document.querySelectorAll(".club-card").forEach((button) =>
+    button.addEventListener("click", () => {
+      byId("club-filter").value = button.dataset.club;
+      page = 1;
+      showView("transfers");
+    }),
+  );
+}
+function renderChanges() {
+  const changes = state.changes_since_last_refresh || {};
+  if (!changes.has_previous_snapshot) {
+    byId("changes").innerHTML =
+      '<div class="muted">Baseline snapshot recorded. Material changes will appear after the next refresh.</div>';
+    return;
+  }
+  const rows = [];
+  if (changes.new_confirmed_transfers)
+    rows.push([
+      "New confirmed movements",
+      `+${changes.new_confirmed_transfers}`,
+    ]);
+  if (changes.new_fpl_players)
+    rows.push(["New FPL players", `+${changes.new_fpl_players}`]);
+  if (changes.club_mapping_changes)
+    rows.push(["Club mappings changed", changes.club_mapping_changes]);
+  if (changes.availability_changes)
+    rows.push(["Availability changes", changes.availability_changes]);
+  byId("changes").innerHTML = rows.length
+    ? rows
+        .map(
+          (row) =>
+            `<div class="change-row"><span>${esc(row[0])}</span><span class="change-value">${esc(row[1])}</span></div>`,
+        )
+        .join("")
+    : '<div class="status-good">No material changes since your last refresh.</div>';
+}
+function populateFilters() {
+  const clubs = (state.club_summaries || [])
+    .map((item) => item.club)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  byId("club-filter").insertAdjacentHTML(
+    "beforeend",
+    clubs
+      .map((club) => `<option value="${esc(club)}">${esc(club)}</option>`)
+      .join(""),
+  );
+}
+function filteredRows() {
+  const query = byId("transfer-search").value.trim().toLocaleLowerCase();
+  const club = byId("club-filter").value;
+  const relevance = byId("relevance-filter").value;
+  const direction = byId("direction-filter").value;
+  const movement = byId("movement-filter").value;
+  const freshness = byId("freshness-filter").value;
+  return transfers.filter((row) => {
+    const text = [
+      row.player,
+      row.from_club,
+      row.to_club,
+      row.premier_league_club,
+    ]
+      .join(" ")
+      .toLocaleLowerCase();
+    const relevanceOk =
+      relevance === "all" ||
+      (relevance === "actionable" &&
+        ["high", "medium"].includes(row.fpl_relevance)) ||
+      row.fpl_relevance === relevance;
+    const freshOk =
+      freshness === "all" ||
+      (freshness === "recent14" &&
+        ["new_7d", "recent_14d"].includes(row.freshness)) ||
+      row.freshness === freshness;
+    return (
+      (!query || text.includes(query)) &&
+      (club === "all" ||
+        row.premier_league_club === club ||
+        row.from_club === club ||
+        row.to_club === club) &&
+      relevanceOk &&
+      (direction === "all" || row.movement_direction === direction) &&
+      (movement === "all" || row.movement_type === movement) &&
+      freshOk
+    );
+  });
+}
+const readable = {
+  pending_new_season_fpl: "Awaiting 2026/27 FPL match",
+  matched_current_fpl: "Matched to current 2026/27 FPL player",
+  matched_prior_fpl: "Matched to prior FPL player",
+  confirmed_first_party: "First-party confirmed",
+  "transfer-in": "Transfer in",
+  "transfer-out": "Transfer out",
+  "loan-in": "Loan in",
+  "loan-out": "Loan out",
+  "player-released": "Released",
+  "end-of-loan": "End of loan",
+};
+const label = (value) =>
+  readable[value] || String(value || "Not recorded").replaceAll("_", " ");
+function whyMatters(row) {
+  if (row.matched_fpl_element_id)
+    return "Known FPL player changed club or squad context.";
+  if (row.movement_direction === "in")
+    return "Confirmed arrival may affect roles and starting minutes.";
+  if (row.movement_direction === "out")
+    return "Departure may change minutes for the remaining squad.";
+  return "Retained as verified squad evidence.";
+}
+function renderFilterChips() {
+  const values = [
+    ["relevance-filter", byId("relevance-filter").selectedOptions[0].text],
+    ["freshness-filter", byId("freshness-filter").selectedOptions[0].text],
+  ];
+  if (byId("transfer-search").value)
+    values.unshift([
+      "transfer-search",
+      `Search: ${byId("transfer-search").value}`,
+    ]);
+  if (byId("club-filter").value !== "all")
+    values.push(["club-filter", byId("club-filter").value]);
+  if (byId("direction-filter").value !== "all")
+    values.push([
+      "direction-filter",
+      byId("direction-filter").selectedOptions[0].text,
+    ]);
+  if (byId("movement-filter").value !== "all")
+    values.push([
+      "movement-filter",
+      byId("movement-filter").selectedOptions[0].text,
+    ]);
+  byId("active-filters").innerHTML = values
+    .map(
+      (item) =>
+        `<button class="filter-chip" data-clear="${item[0]}" type="button">${esc(item[1])} ×</button>`,
+    )
+    .join("");
+  document.querySelectorAll("[data-clear]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = button.dataset.clear;
+      byId(id).value = id === "transfer-search" ? "" : "all";
+      page = 1;
+      applyFilters();
+    }),
+  );
+}
+function applyFilters() {
+  const rows = filteredRows();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  page = Math.min(page, pages);
+  const visible = rows.slice((page - 1) * pageSize, page * pageSize);
+  byId("result-count").textContent =
+    `${rows.length} result${rows.length === 1 ? "" : "s"}`;
+  byId("page-label").textContent = `Page ${page} of ${pages}`;
+  byId("prev-page").disabled = page <= 1;
+  byId("next-page").disabled = page >= pages;
+  renderFilterChips();
+  const feed = byId("feed");
+  if (!visible.length) {
+    feed.innerHTML =
+      '<div class="empty">No confirmed transfers match these filters. Broaden the date or relevance setting.</div>';
+    return;
+  }
+  feed.innerHTML = visible
+    .map(
+      (row) =>
+        `<button class="transfer"><span><strong>${esc(row.player)}</strong><small>${esc(row.from_club)} → ${esc(row.to_club)} · ${esc(fmtDate(row.announced_at))}</small><span class="why">${esc(whyMatters(row))}</span><span class="tags"><span class="tag ${esc(row.fpl_relevance)}">${esc(label(row.fpl_relevance))} relevance</span><span class="tag">${esc(label(row.movement_type))}</span><span class="tag">${esc(label(row.fpl_reconciliation_status))}</span></span></span><span class="muted">${esc(row.premier_league_club)}</span></button>`,
+    )
+    .join("");
+  feed
+    .querySelectorAll(".transfer")
+    .forEach((button, index) =>
+      button.addEventListener("click", () => inspect(visible[index])),
+    );
+}
+function inspect(row) {
+  const links = (row.supporting_source_urls || [row.source_url])
+    .filter(Boolean)
+    .map((url, index) => safeLink(url, `Source ${index + 1}`))
+    .join(" · ");
+  byId("inspector").className = "";
+  byId("inspector").innerHTML =
+    `<dl><dt>Player</dt><dd>${esc(row.player)}</dd><dt>Movement</dt><dd>${esc(row.from_club)} → ${esc(row.to_club)}</dd><dt>Why it matters</dt><dd>${esc(whyMatters(row))}</dd><dt>PL club</dt><dd>${esc(row.premier_league_club)}</dd><dt>Announced</dt><dd>${esc(fmtDate(row.announced_at, true))}</dd><dt>FPL relevance</dt><dd>${esc(label(row.fpl_relevance))}</dd><dt>Verification</dt><dd>${esc(label(row.verification_status))}</dd><dt>FPL status</dt><dd>${esc(label(row.fpl_reconciliation_status))}</dd><dt>Evidence</dt><dd>${links}</dd></dl>`;
+}
+const filterIds = [
+  "transfer-search",
+  "club-filter",
+  "relevance-filter",
+  "direction-filter",
+  "movement-filter",
+  "freshness-filter",
+];
+filterIds.forEach((id) =>
+  byId(id).addEventListener(
+    id === "transfer-search" ? "input" : "change",
+    () => {
+      page = 1;
+      applyFilters();
+    },
+  ),
+);
+byId("reset-filters").addEventListener("click", () => {
+  byId("transfer-search").value = "";
+  byId("club-filter").value = "all";
+  byId("relevance-filter").value = "actionable";
+  byId("direction-filter").value = "all";
+  byId("movement-filter").value = "all";
+  byId("freshness-filter").value = "recent14";
+  page = 1;
+  applyFilters();
+});
+byId("prev-page").addEventListener("click", () => {
+  page = Math.max(1, page - 1);
+  applyFilters();
+});
+byId("next-page").addEventListener("click", () => {
+  page += 1;
+  applyFilters();
+});
+function setupPlayerExplorer() {
+  const clubs = [
+    ...new Set(players.map((player) => player.club).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  const positions = [
+    ...new Set(players.map((player) => player.position).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  byId("player-club-filter").insertAdjacentHTML(
+    "beforeend",
+    clubs
+      .map((club) => `<option value="${esc(club)}">${esc(club)}</option>`)
+      .join(""),
+  );
+  byId("player-position-filter").insertAdjacentHTML(
+    "beforeend",
+    positions
+      .map(
+        (position) =>
+          `<option value="${esc(position)}">${esc(position)}</option>`,
+      )
+      .join(""),
+  );
+  [
+    "player-search",
+    "player-club-filter",
+    "player-position-filter",
+    "player-sort",
+  ].forEach((id) =>
+    byId(id).addEventListener(
+      id === "player-search" ? "input" : "change",
+      () => {
+        playerPage = 1;
+        renderPlayers();
+      },
+    ),
+  );
+  byId("player-prev").addEventListener("click", () => {
+    playerPage = Math.max(1, playerPage - 1);
+    renderPlayers();
+  });
+  byId("player-next").addEventListener("click", () => {
+    playerPage += 1;
+    renderPlayers();
+  });
+  renderPlayers();
+}
+function renderPlayers() {
+  const query = foldDiacritics(
+    byId("player-search").value.trim().toLocaleLowerCase(),
+  );
+  const club = byId("player-club-filter").value;
+  const position = byId("player-position-filter").value;
+  const sort = byId("player-sort").value;
+  const rows = players.filter(
+    (player) =>
+      (!query ||
+        foldDiacritics(
+          `${player.name} ${player.full_name || ""}`.toLocaleLowerCase(),
+        ).includes(query)) &&
+      (club === "all" || player.club === club) &&
+      (position === "all" || player.position === position),
+  );
+  const comparisons = {
+    name: (a, b) => (a.name || "").localeCompare(b.name || ""),
+    "price-desc": (a, b) =>
+      b.price - a.price || (a.name || "").localeCompare(b.name || ""),
+    "price-asc": (a, b) =>
+      a.price - b.price || (a.name || "").localeCompare(b.name || ""),
+    "ownership-desc": (a, b) =>
+      b.ownership - a.ownership || (a.name || "").localeCompare(b.name || ""),
+  };
+  rows.sort(comparisons[sort] || comparisons["price-desc"]);
+  const pages = Math.max(1, Math.ceil(rows.length / 30));
+  playerPage = Math.min(playerPage, pages);
+  const visible = rows.slice((playerPage - 1) * 30, playerPage * 30);
+  byId("player-count").textContent =
+    `${rows.length} player${rows.length === 1 ? "" : "s"}`;
+  byId("player-page").textContent = `Page ${playerPage} of ${pages}`;
+  byId("player-prev").disabled = playerPage <= 1;
+  byId("player-next").disabled = playerPage >= pages;
+  const statuses = {
+    a: "Available",
+    d: "Doubtful",
+    i: "Injured",
+    s: "Suspended",
+    u: "Unavailable",
+    n: "Not available",
+  };
+  byId("player-results").innerHTML = visible.length
+    ? visible
+        .map(
+          (player) =>
+            `<tr class="player-row"><th scope="row"><strong>${esc(player.name)}</strong><small>${esc(player.full_name || "")}</small></th><td>${esc(player.club)}</td><td>${esc(player.position)}</td><td class="price">£${Number(player.price).toFixed(1)}m</td><td>${Number(player.ownership).toFixed(1)}%</td><td><strong>${esc(statuses[player.status] || player.status || "Unknown")}</strong>${player.news ? `<small>${esc(player.news)}</small>` : ""}</td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="6"><div class="empty">No players match these filters.</div></td></tr>';
+}
+function whatsNewFormattedDate(dateStr) {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+function whatsNewMatches(entry, query) {
+  if (!query) return true;
+  const haystack = [
+    entry.headline,
+    entry.summary,
+    ...entry.changes.flatMap((change) => [
+      change.title,
+      change.description,
+      change.category,
+    ]),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query.toLowerCase());
+}
+function whatsNewChangeRowHtml(change) {
+  return `<div class="whats-new-change"><span class="whats-new-tag whats-new-tag-${esc(change.category.toLowerCase())}">${esc(change.category)}</span><div><strong>${esc(change.title)}</strong><div class="muted">${esc(change.description)}</div></div></div>`;
+}
 // Issue #196: split each entry's changes by who they're actually for, not by category -- a
 // `Fix`/`Chore` category alone can't tell a user-visible change from an internal-only one (see
 // release_notes_email.py's identical split for the full rationale, shared here so the dashboard's
@@ -40,64 +604,512 @@ function whatsNewChangeRowHtml(change){return `<div class="whats-new-change"><sp
 // before this field existed (all of history, by explicit decision -- not worth backfilling).
 // Returns '' when the section has no matching changes, so an all-user-facing entry never renders
 // an empty "Under the hood" heading.
-function whatsNewSectionHtml(label,changes){if(!changes.length)return '';return `<div class="whats-new-section-label">${esc(label)}</div>${changes.map(whatsNewChangeRowHtml).join('')}`;}
-function renderWhatsNew(){const query=(byId('whats-new-search').value||'').trim();const rows=releaseNotes.filter(entry=>{const changes=whatsNewFilter==='all'?entry.changes:(entry.changes||[]).filter(change=>change.category===whatsNewFilter);return changes.length>0&&whatsNewMatches(entry,query);});byId('whats-new-count').textContent=`${rows.length} ${rows.length===1?'entry':'entries'}`;if(!rows.length){byId('whats-new-entries').innerHTML=releaseNotes.length?'<div class="empty">No release notes match this search or filter.</div>':'<div class="empty">No release notes published yet -- check back after the next update.</div>';return;}byId('whats-new-entries').innerHTML=rows.map((entry,index)=>{const changes=whatsNewFilter==='all'?entry.changes:entry.changes.filter(change=>change.category===whatsNewFilter);const forYou=changes.filter(change=>(change.audience||'user')==='user');const underTheHood=changes.filter(change=>(change.audience||'user')==='developer');const changeRows=whatsNewSectionHtml("What's new for you",forYou)+whatsNewSectionHtml('Under the hood (for the developer in you)',underTheHood);return `<details class="whats-new-entry panel"${index===0?' open':''}><summary><span class="whats-new-date">${esc(whatsNewFormattedDate(entry.date))}</span><span class="whats-new-headline">${esc(entry.headline)}</span></summary><p class="muted">${esc(entry.summary)}</p>${changeRows}</details>`;}).join('');}
-function setupWhatsNew(){byId('whats-new-search').addEventListener('input',renderWhatsNew);document.querySelectorAll('[data-whats-new-filter]').forEach(button=>button.addEventListener('click',()=>{whatsNewFilter=button.dataset.whatsNewFilter;document.querySelectorAll('[data-whats-new-filter]').forEach(node=>node.classList.toggle('active',node===button));renderWhatsNew();}));renderWhatsNew();setupWhatsNewSubscribe();}
-function setupWhatsNewSubscribe(){const emailInput=byId('whats-new-subscribe-email');const saveButton=byId('whats-new-subscribe-save');const message=byId('whats-new-subscribe-message');const form=byId('whats-new-subscribe-form');if(!servedLive()){emailInput.disabled=true;saveButton.disabled=true;message.textContent='Start the local dashboard service to subscribe.';return;}form.addEventListener('submit',async event=>{event.preventDefault();message.textContent='';const email=emailInput.value.trim();if(!email||!email.includes('@')){message.textContent='Enter a valid email address.';return;}saveButton.disabled=true;message.textContent='Subscribing…';try{const response=await fetch('/api/release-notes-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const responsePayload=await response.json().catch(()=>({message:'Subscribe returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Subscribe failed with status ${response.status}`);message.textContent=responsePayload.message||'Check your email to confirm.';form.reset();}catch(error){message.textContent=`Subscribe failed: ${error.message}`;}finally{saveButton.disabled=false;}});}
-function setupFixtures(){const events=[...new Set(fixtures.map(row=>row.event).filter(Boolean))].sort((a,b)=>a-b);byId('fixture-gameweek').innerHTML=events.length?events.map(event=>`<option value="${event}">Gameweek ${event}</option>`).join(''):'<option value="">No gameweeks</option>';const preferred=String(state.fpl.next_event_id||events[0]||'');if(events.map(String).includes(preferred))byId('fixture-gameweek').value=preferred;const clubs=[...new Set(fixtures.flatMap(row=>[row.home_team,row.away_team]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));byId('fixture-club-filter').insertAdjacentHTML('beforeend',clubs.map(club=>`<option value="${esc(club)}">${esc(club)}</option>`).join(''));byId('fixture-gameweek-prev').addEventListener('click',()=>stepFixtureGameweek(-1));byId('fixture-gameweek-next').addEventListener('click',()=>stepFixtureGameweek(1));byId('fixture-club-filter').addEventListener('change',renderFixtures);renderFixtures();}
-function stepFixtureGameweek(delta){const select=byId('fixture-gameweek');const options=[...select.options].filter(option=>option.value);if(!options.length)return;const index=options.findIndex(option=>option.value===select.value);const nextIndex=Math.min(options.length-1,Math.max(0,(index<0?0:index)+delta));if(options[nextIndex].value===select.value)return;select.value=options[nextIndex].value;renderFixtures();}
-function renderFixtures(){const select=byId('fixture-gameweek');const options=[...select.options].filter(option=>option.value);const index=options.findIndex(option=>option.value===select.value);byId('fixture-gameweek-value').textContent=options.length?(options[index]||options[0]).textContent:'No gameweeks';byId('fixture-gameweek-prev').disabled=!options.length||index<=0;byId('fixture-gameweek-next').disabled=!options.length||index<0||index>=options.length-1;const event=Number(select.value);const club=byId('fixture-club-filter').value;const rows=fixtures.filter(row=>(!event||row.event===event)&&(club==='all'||row.home_team===club||row.away_team===club)).sort((a,b)=>String(a.kickoff_time||'').localeCompare(String(b.kickoff_time||'')));byId('fixture-count').textContent=`${rows.length} fixture${rows.length===1?'':'s'}`;byId('fixture-results').innerHTML=rows.length?rows.map(row=>{const result=row.finished?`${row.home_score} – ${row.away_score}`:'vs';return `<div class="fixture-row"><span class="muted">${esc(fmtDate(row.kickoff_time,true))}</span><span class="fixture-team"><strong>${esc(row.home_team)}</strong><span class="difficulty d${esc(row.home_difficulty)}" title="Home difficulty">${esc(row.home_difficulty)}</span></span><strong>${esc(result)}</strong><span class="fixture-team away"><strong>${esc(row.away_team)}</strong><span class="difficulty d${esc(row.away_difficulty)}" title="Away difficulty">${esc(row.away_difficulty)}</span></span></div>`;}).join(''):'<div class="empty">No fixtures match this gameweek and club.</div>';}
-const breakdownKeys=['appearance','attacking','clean_sheet','goals_conceded','defensive_contribution','saves','bonus','residual'];
-const breakdownLabels=['Appear','Attack','Clean sheet','Conceded','Def. contrib.','Saves','Bonus','Residual'];
-const breakdownBuckets=[{label:'Appearance',keys:['appearance'],cls:'bucket-appearance'},{label:'Attacking',keys:['attacking'],cls:'bucket-attacking'},{label:'Clean sheet',keys:['clean_sheet'],cls:'bucket-clean-sheet'},{label:'Def./saves/bonus/residual',keys:['defensive_contribution','saves','bonus','residual'],cls:'bucket-other'}];
-function renderPlayerBreakdown(player){selectedBreakdownPlayerId=player.id;const modelNotes=[player.uses_team_strength?'fitted opponent model':null,player.uses_recency_minutes?'recency-weighted minutes':null].filter(Boolean).join(' · ');byId('player-breakdown-name').textContent=`${player.name} · ${player.position_short} · ${player.club}${modelNotes?` · ${modelNotes}`:''}`;const events=player.projection_events||[];const rows=player.component_xp||[];
-if(!events.length||!rows.length){byId('player-breakdown-table').innerHTML='<div class="empty">No per-event breakdown is available for this player.</div>';renderSelectionRationale(player);return;}
-const totals=events.map((event,index)=>{const row=rows[index]||{};const modeled=Number(row.modeled_total_before_ep_next??breakdownKeys.reduce((sum,key)=>sum+Number(row[key]||0),0));const adjustment=Number(row.ep_next_adjustment||0);return Number(row.blended_total??modeled+adjustment);});
-const maxTotal=Math.max(5,...totals.map(value=>Math.max(0,value)));
-const legend=breakdownBuckets.map(bucket=>`<span><i class="${bucket.cls}"></i>${esc(bucket.label)}</span>`).join('');
-const bars=events.map((event,index)=>{const row=rows[index]||{};const blended=totals[index];const opponents=row.opponents||[];const chips=opponents.length?opponents.map(opponent=>`<span class="difficulty d${opponent.difficulty}" title="${esc(opponent.club_short)}${opponent.is_home?' (H)':' (A)'}">${esc(opponent.club_short)}</span>`).join(''):'<span class="muted" style="font-size:11px">No fixture</span>';const segments=breakdownBuckets.map(bucket=>{const value=bucket.keys.reduce((sum,key)=>sum+Number(row[key]||0),0);const pct=maxTotal>0?Math.max(0,value)/maxTotal*100:0;return `<div class="breakdown-segment ${bucket.cls}" style="width:${pct.toFixed(1)}%" title="${esc(bucket.label)}: ${value.toFixed(2)}"></div>`;}).join('');return `<div class="breakdown-bar-row"><div class="breakdown-bar-gw">GW${event}<br>${chips}</div><div class="breakdown-bar-track">${segments}</div><div class="breakdown-bar-total">${blended.toFixed(2)}</div></div>`;}).join('');
-const exactTable=`<div class="breakdown-exact">${events.map((event,index)=>{const row=rows[index]||{};const modeled=Number(row.modeled_total_before_ep_next??breakdownKeys.reduce((sum,key)=>sum+Number(row[key]||0),0));const adjustment=Number(row.ep_next_adjustment||0);const blended=totals[index];const opponentLabel=(row.opponents||[]).length?row.opponents.map(opponent=>`${opponent.club_short}${opponent.is_home?' (H)':' (A)'}`).join(', '):'No fixture';const fields=breakdownKeys.map((key,keyIndex)=>`<span>${breakdownLabels[keyIndex]}<b>${Number(row[key]||0).toFixed(2)}</b></span>`).join('');return `<div class="breakdown-exact-row"><div class="breakdown-exact-gw">GW${event}<small class="muted">${esc(opponentLabel)}</small></div><div class="breakdown-exact-grid">${fields}<span>Modeled<b>${modeled.toFixed(2)}</b></span><span>ep_next adj.<b>${adjustment.toFixed(2)}</b></span><span>Final xPts<b class="total">${blended.toFixed(2)}</b></span></div></div>`;}).join('')}</div>`;
-byId('player-breakdown-table').innerHTML=`<div class="breakdown-legend">${legend}</div><div class="breakdown-bars">${bars}</div><p class="breakdown-note">Each bar is composed of named scoring components from official rate stats and fixture data, plus a shrunk over/under-performance residual. Bar segments show gross positive contribution only; the number shown is the true final total after the goals-conceded deduction, which can make it lower than the bar implies.</p><details class="model-disclosure"><summary>Show exact component values</summary>${exactTable}</details>`;
-renderSelectionRationale(player);}
-function renderSelectionRationale(player){const alternatives=selectedRationaleMap[player.id]||[];byId('player-rationale').innerHTML=alternatives.length?`<h3 style="font-size:14px;margin:0 0 8px">Why ${esc(player.name)} over other ${esc(player.position_short)} options</h3><div class="decision-list">${alternatives.map(alternative=>{const price=alternative.price_delta>=0?`+£${alternative.price_delta.toFixed(1)}m`:`-£${Math.abs(alternative.price_delta).toFixed(1)}m`;const xp=alternative.xp_5_delta>=0?`+${alternative.xp_5_delta.toFixed(1)} pts`:`${alternative.xp_5_delta.toFixed(1)} pts`;return `<div class="decision-row"><span>${esc(alternative.name)}<br><span class="muted">£${Number(alternative.price).toFixed(1)}m · ${Number(alternative.xp_5).toFixed(1)} xPts (5 GW)</span></span><b>${price} <span class="muted">vs this pick</span><br>${xp}</b></div>`;}).join('')}</div><p class="breakdown-note">These are the highest-projected ${esc(player.position_short)} players not in this squad. A higher xPts alternative that isn't selected was usually judged not worth its extra cost against the rest of the squad, or carries more minutes risk.</p>`:'';}
-function selectPlayerCard(player,options={}){document.querySelectorAll('[data-player-id].selected').forEach(node=>node.classList.remove('selected'));document.querySelectorAll(`[data-player-id="${player.id}"]`).forEach(node=>node.classList.add('selected'));renderPlayerBreakdown(player);if(options.scroll){const panel=byId('decision-section-breakdown');if(panel)panel.scrollIntoView({behavior:prefersReducedMotion()?'auto':'smooth',block:'nearest'});}}
-function attachBreakdownHandlers(squadPlayers,preferredDefault,rationaleMap){selectedRationaleMap=rationaleMap||{};document.querySelectorAll('[data-player-id]').forEach(node=>{const id=Number(node.dataset.playerId);const player=(squadPlayers||[]).find(row=>row.id===id);if(!player)return;node.addEventListener('click',()=>selectPlayerCard(player,{scroll:true}));node.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();selectPlayerCard(player,{scroll:true});}});});const target=(squadPlayers||[]).find(row=>row.id===selectedBreakdownPlayerId)||preferredDefault||(squadPlayers||[])[0];if(target)selectPlayerCard(target,{scroll:false});}
-function bindTabs(containerId,selector,activate){const container=byId(containerId);const tabs=[...container.querySelectorAll(selector)];tabs.forEach(tab=>{tab.addEventListener('click',()=>activate(tab));tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=tabs.indexOf(tab);const targetIndex=event.key==='Home'?0:event.key==='End'?tabs.length-1:event.key==='ArrowRight'?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;const target=tabs[targetIndex];activate(target);const next=byId(target.id);if(next)next.focus();});});}
-function setupDecisionSubnav(){
-const nav=document.querySelector('.decision-subnav');
-if(!nav)return;
-const chips=[...nav.querySelectorAll('[data-scroll-to]')];
-const setActive=chip=>{chips.forEach(c=>c.classList.remove('active'));if(chip)chip.classList.add('active');};
-let suppressUntil=0;
-chips.forEach(chip=>chip.addEventListener('click',()=>{const target=byId(chip.dataset.scrollTo);if(!target)return;const collapsedAncestor=target.closest('details');if(collapsedAncestor)collapsedAncestor.open=true;setActive(chip);suppressUntil=Date.now()+900;target.scrollIntoView({behavior:prefersReducedMotion()?'auto':'smooth',block:'start'});}));
-if(!('IntersectionObserver' in window))return;
-const watchedIds=['decision-section-summary','decision-section-weekly','decision-section-profiles','decision-section-xi','decision-section-bench','decision-section-squad'];
-const sections=watchedIds.map(id=>byId(id)).filter(Boolean);
-const observer=new IntersectionObserver(entries=>{
-if(Date.now()<suppressUntil)return;
-entries.forEach(entry=>{
-if(!entry.isIntersecting)return;
-const activeChip=nav.querySelector(`[data-scroll-to="${entry.target.id}"]`);
-if(!activeChip)return;
-setActive(activeChip);
-});
-},{rootMargin:'-140px 0px -70% 0px',threshold:0});
-sections.forEach(section=>observer.observe(section));
+function whatsNewSectionHtml(label, changes) {
+  if (!changes.length) return "";
+  return `<div class="whats-new-section-label">${esc(label)}</div>${changes.map(whatsNewChangeRowHtml).join("")}`;
 }
-function renderProfileRangeStrips(profiles,selectedId){
-if(!profiles.length){byId('profile-range-strips').innerHTML='';return;}
-const metricsList=profiles.map(profile=>profile.metrics||{});
-const axisMin=Math.floor(Math.min(...metricsList.map(m=>Number(m.lower_5gw||0)))/25)*25;
-const axisMax=Math.ceil(Math.max(...metricsList.map(m=>Number(m.upper_5gw||0)))/25)*25;
-const span=Math.max(1,axisMax-axisMin);
-byId('profile-range-strips').innerHTML=profiles.map(profile=>{
-const m=profile.metrics||{};const lower=Number(m.lower_5gw||0);const central=Number(m.central_5gw||0);const upper=Number(m.upper_5gw||0);
-const left=(lower-axisMin)/span*100;const width=(upper-lower)/span*100;const tick=(central-axisMin)/span*100;
-const active=profile.id===selectedId;
-return `<div class="range-strip-row${active?' active':''}"><span class="range-strip-label">${esc(profile.label)}</span><div class="range-strip-track"><div class="range-strip-fill" style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></div><div class="range-strip-tick" style="left:${tick.toFixed(1)}%"></div></div><span class="range-strip-value">${central.toFixed(1)}</span></div>`;
-}).join('');
+function renderWhatsNew() {
+  const query = (byId("whats-new-search").value || "").trim();
+  const rows = releaseNotes.filter((entry) => {
+    const changes =
+      whatsNewFilter === "all"
+        ? entry.changes
+        : (entry.changes || []).filter(
+            (change) => change.category === whatsNewFilter,
+          );
+    return changes.length > 0 && whatsNewMatches(entry, query);
+  });
+  byId("whats-new-count").textContent =
+    `${rows.length} ${rows.length === 1 ? "entry" : "entries"}`;
+  if (!rows.length) {
+    byId("whats-new-entries").innerHTML = releaseNotes.length
+      ? '<div class="empty">No release notes match this search or filter.</div>'
+      : '<div class="empty">No release notes published yet -- check back after the next update.</div>';
+    return;
+  }
+  byId("whats-new-entries").innerHTML = rows
+    .map((entry, index) => {
+      const changes =
+        whatsNewFilter === "all"
+          ? entry.changes
+          : entry.changes.filter(
+              (change) => change.category === whatsNewFilter,
+            );
+      const forYou = changes.filter(
+        (change) => (change.audience || "user") === "user",
+      );
+      const underTheHood = changes.filter(
+        (change) => (change.audience || "user") === "developer",
+      );
+      const changeRows =
+        whatsNewSectionHtml("What's new for you", forYou) +
+        whatsNewSectionHtml(
+          "Under the hood (for the developer in you)",
+          underTheHood,
+        );
+      return `<details class="whats-new-entry panel"${index === 0 ? " open" : ""}><summary><span class="whats-new-date">${esc(whatsNewFormattedDate(entry.date))}</span><span class="whats-new-headline">${esc(entry.headline)}</span></summary><p class="muted">${esc(entry.summary)}</p>${changeRows}</details>`;
+    })
+    .join("");
 }
-function renderRotationPlan(selected,squad){const panel=byId('decision-rotation-panel');const horizons=selected.evaluation_horizons||{};const horizon=horizons['5']||horizons['3']||horizons['1'];const rows=(horizon&&horizon.event_lineups)||[];if(!rows.length){panel.hidden=true;return;}panel.hidden=false;const byIdMap=new Map((squad.players||[]).map(player=>[player.id,player]));const name=id=>(byIdMap.get(id)||{}).name||'Unknown';const baseline=new Set(rows[0].lineup_player_ids||[]);byId('decision-rotation').innerHTML=rows.map((row,index)=>{const currentIds=new Set(row.lineup_player_ids||[]);let changesText='Baseline XI';if(index>0){const inNames=[...currentIds].filter(id=>!baseline.has(id)).map(name);const outNames=[...baseline].filter(id=>!currentIds.has(id)).map(name);const parts=[];if(inNames.length)parts.push(`In: ${inNames.join(', ')}`);if(outNames.length)parts.push(`Out: ${outNames.join(', ')}`);changesText=parts.length?parts.join(' · '):'Unchanged XI';}return `<div class="decision-row"><span><strong>GW${row.event} · ${esc(row.formation)}</strong><br><span class="muted">C ${esc(name(row.captain_id))} · VC ${esc(name(row.vice_captain_id))} · ${esc(changesText)}</span></span><b>${Number(row.central_points).toFixed(1)} pts<br><span class="muted">${Number(row.lower_points).toFixed(1)}–${Number(row.upper_points).toFixed(1)}</span></b></div>`;}).join('');byId('decision-rotation-meta').textContent=`Event-specific lineups · ${selected.label}`;}
+function setupWhatsNew() {
+  byId("whats-new-search").addEventListener("input", renderWhatsNew);
+  document.querySelectorAll("[data-whats-new-filter]").forEach((button) =>
+    button.addEventListener("click", () => {
+      whatsNewFilter = button.dataset.whatsNewFilter;
+      document
+        .querySelectorAll("[data-whats-new-filter]")
+        .forEach((node) => node.classList.toggle("active", node === button));
+      renderWhatsNew();
+    }),
+  );
+  renderWhatsNew();
+  setupWhatsNewSubscribe();
+}
+function setupWhatsNewSubscribe() {
+  const emailInput = byId("whats-new-subscribe-email");
+  const saveButton = byId("whats-new-subscribe-save");
+  const message = byId("whats-new-subscribe-message");
+  const form = byId("whats-new-subscribe-form");
+  if (!servedLive()) {
+    emailInput.disabled = true;
+    saveButton.disabled = true;
+    message.textContent = "Start the local dashboard service to subscribe.";
+    return;
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    message.textContent = "";
+    const email = emailInput.value.trim();
+    if (!email || !email.includes("@")) {
+      message.textContent = "Enter a valid email address.";
+      return;
+    }
+    saveButton.disabled = true;
+    message.textContent = "Subscribing…";
+    try {
+      const response = await fetch("/api/release-notes-subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const responsePayload = await response
+        .json()
+        .catch(() => ({
+          message: "Subscribe returned an unreadable response.",
+        }));
+      if (!response.ok)
+        throw new Error(
+          responsePayload.message ||
+            `Subscribe failed with status ${response.status}`,
+        );
+      message.textContent =
+        responsePayload.message || "Check your email to confirm.";
+      form.reset();
+    } catch (error) {
+      message.textContent = `Subscribe failed: ${error.message}`;
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+}
+function setupFixtures() {
+  const events = [
+    ...new Set(fixtures.map((row) => row.event).filter(Boolean)),
+  ].sort((a, b) => a - b);
+  byId("fixture-gameweek").innerHTML = events.length
+    ? events
+        .map((event) => `<option value="${event}">Gameweek ${event}</option>`)
+        .join("")
+    : '<option value="">No gameweeks</option>';
+  const preferred = String(state.fpl.next_event_id || events[0] || "");
+  if (events.map(String).includes(preferred))
+    byId("fixture-gameweek").value = preferred;
+  const clubs = [
+    ...new Set(
+      fixtures.flatMap((row) => [row.home_team, row.away_team]).filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  byId("fixture-club-filter").insertAdjacentHTML(
+    "beforeend",
+    clubs
+      .map((club) => `<option value="${esc(club)}">${esc(club)}</option>`)
+      .join(""),
+  );
+  byId("fixture-gameweek-prev").addEventListener("click", () =>
+    stepFixtureGameweek(-1),
+  );
+  byId("fixture-gameweek-next").addEventListener("click", () =>
+    stepFixtureGameweek(1),
+  );
+  byId("fixture-club-filter").addEventListener("change", renderFixtures);
+  renderFixtures();
+}
+function stepFixtureGameweek(delta) {
+  const select = byId("fixture-gameweek");
+  const options = [...select.options].filter((option) => option.value);
+  if (!options.length) return;
+  const index = options.findIndex((option) => option.value === select.value);
+  const nextIndex = Math.min(
+    options.length - 1,
+    Math.max(0, (index < 0 ? 0 : index) + delta),
+  );
+  if (options[nextIndex].value === select.value) return;
+  select.value = options[nextIndex].value;
+  renderFixtures();
+}
+function renderFixtures() {
+  const select = byId("fixture-gameweek");
+  const options = [...select.options].filter((option) => option.value);
+  const index = options.findIndex((option) => option.value === select.value);
+  byId("fixture-gameweek-value").textContent = options.length
+    ? (options[index] || options[0]).textContent
+    : "No gameweeks";
+  byId("fixture-gameweek-prev").disabled = !options.length || index <= 0;
+  byId("fixture-gameweek-next").disabled =
+    !options.length || index < 0 || index >= options.length - 1;
+  const event = Number(select.value);
+  const club = byId("fixture-club-filter").value;
+  const rows = fixtures
+    .filter(
+      (row) =>
+        (!event || row.event === event) &&
+        (club === "all" || row.home_team === club || row.away_team === club),
+    )
+    .sort((a, b) =>
+      String(a.kickoff_time || "").localeCompare(String(b.kickoff_time || "")),
+    );
+  byId("fixture-count").textContent =
+    `${rows.length} fixture${rows.length === 1 ? "" : "s"}`;
+  byId("fixture-results").innerHTML = rows.length
+    ? rows
+        .map((row) => {
+          const result = row.finished
+            ? `${row.home_score} – ${row.away_score}`
+            : "vs";
+          return `<div class="fixture-row"><span class="muted">${esc(fmtDate(row.kickoff_time, true))}</span><span class="fixture-team"><strong>${esc(row.home_team)}</strong><span class="difficulty d${esc(row.home_difficulty)}" title="Home difficulty">${esc(row.home_difficulty)}</span></span><strong>${esc(result)}</strong><span class="fixture-team away"><strong>${esc(row.away_team)}</strong><span class="difficulty d${esc(row.away_difficulty)}" title="Away difficulty">${esc(row.away_difficulty)}</span></span></div>`;
+        })
+        .join("")
+    : '<div class="empty">No fixtures match this gameweek and club.</div>';
+}
+const breakdownKeys = [
+  "appearance",
+  "attacking",
+  "clean_sheet",
+  "goals_conceded",
+  "defensive_contribution",
+  "saves",
+  "bonus",
+  "residual",
+];
+const breakdownLabels = [
+  "Appear",
+  "Attack",
+  "Clean sheet",
+  "Conceded",
+  "Def. contrib.",
+  "Saves",
+  "Bonus",
+  "Residual",
+];
+const breakdownBuckets = [
+  { label: "Appearance", keys: ["appearance"], cls: "bucket-appearance" },
+  { label: "Attacking", keys: ["attacking"], cls: "bucket-attacking" },
+  { label: "Clean sheet", keys: ["clean_sheet"], cls: "bucket-clean-sheet" },
+  {
+    label: "Def./saves/bonus/residual",
+    keys: ["defensive_contribution", "saves", "bonus", "residual"],
+    cls: "bucket-other",
+  },
+];
+function renderPlayerBreakdown(player) {
+  selectedBreakdownPlayerId = player.id;
+  const modelNotes = [
+    player.uses_team_strength ? "fitted opponent model" : null,
+    player.uses_recency_minutes ? "recency-weighted minutes" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  byId("player-breakdown-name").textContent =
+    `${player.name} · ${player.position_short} · ${player.club}${modelNotes ? ` · ${modelNotes}` : ""}`;
+  const events = player.projection_events || [];
+  const rows = player.component_xp || [];
+  if (!events.length || !rows.length) {
+    byId("player-breakdown-table").innerHTML =
+      '<div class="empty">No per-event breakdown is available for this player.</div>';
+    renderSelectionRationale(player);
+    return;
+  }
+  const totals = events.map((event, index) => {
+    const row = rows[index] || {};
+    const modeled = Number(
+      row.modeled_total_before_ep_next ??
+        breakdownKeys.reduce((sum, key) => sum + Number(row[key] || 0), 0),
+    );
+    const adjustment = Number(row.ep_next_adjustment || 0);
+    return Number(row.blended_total ?? modeled + adjustment);
+  });
+  const maxTotal = Math.max(5, ...totals.map((value) => Math.max(0, value)));
+  const legend = breakdownBuckets
+    .map(
+      (bucket) =>
+        `<span><i class="${bucket.cls}"></i>${esc(bucket.label)}</span>`,
+    )
+    .join("");
+  const bars = events
+    .map((event, index) => {
+      const row = rows[index] || {};
+      const blended = totals[index];
+      const opponents = row.opponents || [];
+      const chips = opponents.length
+        ? opponents
+            .map(
+              (opponent) =>
+                `<span class="difficulty d${opponent.difficulty}" title="${esc(opponent.club_short)}${opponent.is_home ? " (H)" : " (A)"}">${esc(opponent.club_short)}</span>`,
+            )
+            .join("")
+        : '<span class="muted" style="font-size:11px">No fixture</span>';
+      const segments = breakdownBuckets
+        .map((bucket) => {
+          const value = bucket.keys.reduce(
+            (sum, key) => sum + Number(row[key] || 0),
+            0,
+          );
+          const pct = maxTotal > 0 ? (Math.max(0, value) / maxTotal) * 100 : 0;
+          return `<div class="breakdown-segment ${bucket.cls}" style="width:${pct.toFixed(1)}%" title="${esc(bucket.label)}: ${value.toFixed(2)}"></div>`;
+        })
+        .join("");
+      return `<div class="breakdown-bar-row"><div class="breakdown-bar-gw">GW${event}<br>${chips}</div><div class="breakdown-bar-track">${segments}</div><div class="breakdown-bar-total">${blended.toFixed(2)}</div></div>`;
+    })
+    .join("");
+  const exactTable = `<div class="breakdown-exact">${events
+    .map((event, index) => {
+      const row = rows[index] || {};
+      const modeled = Number(
+        row.modeled_total_before_ep_next ??
+          breakdownKeys.reduce((sum, key) => sum + Number(row[key] || 0), 0),
+      );
+      const adjustment = Number(row.ep_next_adjustment || 0);
+      const blended = totals[index];
+      const opponentLabel = (row.opponents || []).length
+        ? row.opponents
+            .map(
+              (opponent) =>
+                `${opponent.club_short}${opponent.is_home ? " (H)" : " (A)"}`,
+            )
+            .join(", ")
+        : "No fixture";
+      const fields = breakdownKeys
+        .map(
+          (key, keyIndex) =>
+            `<span>${breakdownLabels[keyIndex]}<b>${Number(row[key] || 0).toFixed(2)}</b></span>`,
+        )
+        .join("");
+      return `<div class="breakdown-exact-row"><div class="breakdown-exact-gw">GW${event}<small class="muted">${esc(opponentLabel)}</small></div><div class="breakdown-exact-grid">${fields}<span>Modeled<b>${modeled.toFixed(2)}</b></span><span>ep_next adj.<b>${adjustment.toFixed(2)}</b></span><span>Final xPts<b class="total">${blended.toFixed(2)}</b></span></div></div>`;
+    })
+    .join("")}</div>`;
+  byId("player-breakdown-table").innerHTML =
+    `<div class="breakdown-legend">${legend}</div><div class="breakdown-bars">${bars}</div><p class="breakdown-note">Each bar is composed of named scoring components from official rate stats and fixture data, plus a shrunk over/under-performance residual. Bar segments show gross positive contribution only; the number shown is the true final total after the goals-conceded deduction, which can make it lower than the bar implies.</p><details class="model-disclosure"><summary>Show exact component values</summary>${exactTable}</details>`;
+  renderSelectionRationale(player);
+}
+function renderSelectionRationale(player) {
+  const alternatives = selectedRationaleMap[player.id] || [];
+  byId("player-rationale").innerHTML = alternatives.length
+    ? `<h3 style="font-size:14px;margin:0 0 8px">Why ${esc(player.name)} over other ${esc(player.position_short)} options</h3><div class="decision-list">${alternatives
+        .map((alternative) => {
+          const price =
+            alternative.price_delta >= 0
+              ? `+£${alternative.price_delta.toFixed(1)}m`
+              : `-£${Math.abs(alternative.price_delta).toFixed(1)}m`;
+          const xp =
+            alternative.xp_5_delta >= 0
+              ? `+${alternative.xp_5_delta.toFixed(1)} pts`
+              : `${alternative.xp_5_delta.toFixed(1)} pts`;
+          return `<div class="decision-row"><span>${esc(alternative.name)}<br><span class="muted">£${Number(alternative.price).toFixed(1)}m · ${Number(alternative.xp_5).toFixed(1)} xPts (5 GW)</span></span><b>${price} <span class="muted">vs this pick</span><br>${xp}</b></div>`;
+        })
+        .join(
+          "",
+        )}</div><p class="breakdown-note">These are the highest-projected ${esc(player.position_short)} players not in this squad. A higher xPts alternative that isn't selected was usually judged not worth its extra cost against the rest of the squad, or carries more minutes risk.</p>`
+    : "";
+}
+function selectPlayerCard(player, options = {}) {
+  document
+    .querySelectorAll("[data-player-id].selected")
+    .forEach((node) => node.classList.remove("selected"));
+  document
+    .querySelectorAll(`[data-player-id="${player.id}"]`)
+    .forEach((node) => node.classList.add("selected"));
+  renderPlayerBreakdown(player);
+  if (options.scroll) {
+    const panel = byId("decision-section-breakdown");
+    if (panel)
+      panel.scrollIntoView({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "nearest",
+      });
+  }
+}
+function attachBreakdownHandlers(squadPlayers, preferredDefault, rationaleMap) {
+  selectedRationaleMap = rationaleMap || {};
+  document.querySelectorAll("[data-player-id]").forEach((node) => {
+    const id = Number(node.dataset.playerId);
+    const player = (squadPlayers || []).find((row) => row.id === id);
+    if (!player) return;
+    node.addEventListener("click", () =>
+      selectPlayerCard(player, { scroll: true }),
+    );
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectPlayerCard(player, { scroll: true });
+      }
+    });
+  });
+  const target =
+    (squadPlayers || []).find((row) => row.id === selectedBreakdownPlayerId) ||
+    preferredDefault ||
+    (squadPlayers || [])[0];
+  if (target) selectPlayerCard(target, { scroll: false });
+}
+function bindTabs(containerId, selector, activate) {
+  const container = byId(containerId);
+  const tabs = [...container.querySelectorAll(selector)];
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => activate(tab));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+        return;
+      event.preventDefault();
+      const index = tabs.indexOf(tab);
+      const targetIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : event.key === "ArrowRight"
+              ? (index + 1) % tabs.length
+              : (index - 1 + tabs.length) % tabs.length;
+      const target = tabs[targetIndex];
+      activate(target);
+      const next = byId(target.id);
+      if (next) next.focus();
+    });
+  });
+}
+function setupDecisionSubnav() {
+  const nav = document.querySelector(".decision-subnav");
+  if (!nav) return;
+  const chips = [...nav.querySelectorAll("[data-scroll-to]")];
+  const setActive = (chip) => {
+    chips.forEach((c) => c.classList.remove("active"));
+    if (chip) chip.classList.add("active");
+  };
+  let suppressUntil = 0;
+  chips.forEach((chip) =>
+    chip.addEventListener("click", () => {
+      const target = byId(chip.dataset.scrollTo);
+      if (!target) return;
+      const collapsedAncestor = target.closest("details");
+      if (collapsedAncestor) collapsedAncestor.open = true;
+      setActive(chip);
+      suppressUntil = Date.now() + 900;
+      target.scrollIntoView({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "start",
+      });
+    }),
+  );
+  if (!("IntersectionObserver" in window)) return;
+  const watchedIds = [
+    "decision-section-summary",
+    "decision-section-weekly",
+    "decision-section-profiles",
+    "decision-section-xi",
+    "decision-section-bench",
+    "decision-section-squad",
+  ];
+  const sections = watchedIds.map((id) => byId(id)).filter(Boolean);
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (Date.now() < suppressUntil) return;
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const activeChip = nav.querySelector(
+          `[data-scroll-to="${entry.target.id}"]`,
+        );
+        if (!activeChip) return;
+        setActive(activeChip);
+      });
+    },
+    { rootMargin: "-140px 0px -70% 0px", threshold: 0 },
+  );
+  sections.forEach((section) => observer.observe(section));
+}
+function renderProfileRangeStrips(profiles, selectedId) {
+  if (!profiles.length) {
+    byId("profile-range-strips").innerHTML = "";
+    return;
+  }
+  const metricsList = profiles.map((profile) => profile.metrics || {});
+  const axisMin =
+    Math.floor(
+      Math.min(...metricsList.map((m) => Number(m.lower_5gw || 0))) / 25,
+    ) * 25;
+  const axisMax =
+    Math.ceil(
+      Math.max(...metricsList.map((m) => Number(m.upper_5gw || 0))) / 25,
+    ) * 25;
+  const span = Math.max(1, axisMax - axisMin);
+  byId("profile-range-strips").innerHTML = profiles
+    .map((profile) => {
+      const m = profile.metrics || {};
+      const lower = Number(m.lower_5gw || 0);
+      const central = Number(m.central_5gw || 0);
+      const upper = Number(m.upper_5gw || 0);
+      const left = ((lower - axisMin) / span) * 100;
+      const width = ((upper - lower) / span) * 100;
+      const tick = ((central - axisMin) / span) * 100;
+      const active = profile.id === selectedId;
+      return `<div class="range-strip-row${active ? " active" : ""}"><span class="range-strip-label">${esc(profile.label)}</span><div class="range-strip-track"><div class="range-strip-fill" style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></div><div class="range-strip-tick" style="left:${tick.toFixed(1)}%"></div></div><span class="range-strip-value">${central.toFixed(1)}</span></div>`;
+    })
+    .join("");
+}
+function renderRotationPlan(selected, squad) {
+  const panel = byId("decision-rotation-panel");
+  const horizons = selected.evaluation_horizons || {};
+  const horizon = horizons["5"] || horizons["3"] || horizons["1"];
+  const rows = (horizon && horizon.event_lineups) || [];
+  if (!rows.length) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const byIdMap = new Map(
+    (squad.players || []).map((player) => [player.id, player]),
+  );
+  const name = (id) => (byIdMap.get(id) || {}).name || "Unknown";
+  const baseline = new Set(rows[0].lineup_player_ids || []);
+  byId("decision-rotation").innerHTML = rows
+    .map((row, index) => {
+      const currentIds = new Set(row.lineup_player_ids || []);
+      let changesText = "Baseline XI";
+      if (index > 0) {
+        const inNames = [...currentIds]
+          .filter((id) => !baseline.has(id))
+          .map(name);
+        const outNames = [...baseline]
+          .filter((id) => !currentIds.has(id))
+          .map(name);
+        const parts = [];
+        if (inNames.length) parts.push(`In: ${inNames.join(", ")}`);
+        if (outNames.length) parts.push(`Out: ${outNames.join(", ")}`);
+        changesText = parts.length ? parts.join(" · ") : "Unchanged XI";
+      }
+      return `<div class="decision-row"><span><strong>GW${row.event} · ${esc(row.formation)}</strong><br><span class="muted">C ${esc(name(row.captain_id))} · VC ${esc(name(row.vice_captain_id))} · ${esc(changesText)}</span></span><b>${Number(row.central_points).toFixed(1)} pts<br><span class="muted">${Number(row.lower_points).toFixed(1)}–${Number(row.upper_points).toFixed(1)}</span></b></div>`;
+    })
+    .join("");
+  byId("decision-rotation-meta").textContent =
+    `Event-specific lineups · ${selected.label}`;
+}
 // Issue #158: the "Compare risk profiles" panel (options tabs + range strips + stat-tile
 // comparison) used to be built inline inside renderDecision() from decision.profile_recommendations
 // alone -- always a freshly optimized, generic squad, never personalized to a declared draft or
@@ -106,104 +1118,876 @@ function renderRotationPlan(selected,squad){const panel=byId('decision-rotation-
 // transfer_decisions.py's build_draft_decisions/build_transfer_decisions) once
 // weekly.status==='active', falling back to the generic benchmark otherwise. Called from
 // renderDecision() below so every existing call site keeps working unchanged.
-function renderProfileComparison(profileId=null){
-const weekly=decision.weekly_decisions||{};const personalized=weekly.status==='active';
-// Bug fix: decision-section-profiles lives, by default, inside <details id="decision-benchmark-
-// details"> -- fine while it only ever showed the generic benchmark, but that <details> collapses
-// shut (renderWeeklyDecision's weekly-priority demote) the moment personalized data exists, which
-// silently hid the one thing inside it that had just become personalized and relevant. Relocate
-// the actual section node itself (not a copy -- there's only ever one) into the always-visible
-// "Personalized weekly decision" section when personalized, and back to its usual spot inside the
-// benchmark details otherwise. Safe to move: every listener inside it is rebound fresh on each
-// render via bindTabs, nothing here depends on the node's position remaining stable, and
-// IntersectionObserver/scrollIntoView track the element by reference, not by DOM location.
-const profilesSection=byId('decision-section-profiles');const weeklyMount=byId('weekly-profile-comparison-mount');const homeAnchor=byId('decision-section-profiles-home');
-if(personalized&&weeklyMount)weeklyMount.appendChild(profilesSection);else if(homeAnchor)homeAnchor.after(profilesSection);
-const benchmarkProfiles=decision.profile_recommendations||[];const legacy={id:'balanced',label:'Balanced',summary:'Central projection baseline',risk_note:'Preliminary model uncertainty.',objective:'Central five-gameweek projection',metrics:{}};
-const availableProfiles=personalized?(weekly.profiles||[]):(benchmarkProfiles.length?benchmarkProfiles:[legacy]);
-byId('profile-comparison-heading').textContent=personalized?'Compare risk profiles for your squad':'Compare risk profiles';
-byId('profile-comparison-subtitle').textContent=personalized?'Same 15 players throughout -- switching profiles changes captaincy and rotation assumptions, not who’s in your squad.':'Select a team to update the XI, bench, captaincy, and full squad below.';
-if(!availableProfiles.length){byId('profile-options').innerHTML='';byId('profile-range-strips').innerHTML='';byId('profile-comparison').innerHTML='<div class="empty">No risk-profile comparison is available.</div>';return;}
-const selectedId=profileId||(personalized?weekly.default_profile:decision.default_profile)||'balanced';const selected=availableProfiles.find(row=>row.id===selectedId)||availableProfiles[0];const metrics=selected.metrics||{};
-byId('profile-options').innerHTML=availableProfiles.map(profile=>{const profileMetrics=profile.metrics||{};return `<button id="profile-tab-${esc(profile.id)}" type="button" role="tab" aria-selected="${profile.id===selected.id}" aria-controls="profile-panel" tabindex="${profile.id===selected.id?'0':'-1'}" class="profile-option ${profile.id===selected.id?'active':''}" data-profile="${esc(profile.id)}"><strong>${esc(profile.label)}</strong><span>${esc(profile.summary)}</span><span>1 / 3 / 5 GW central · ${Number(profileMetrics.central_1gw||0).toFixed(1)} / ${Number(profileMetrics.central_3gw||0).toFixed(1)} / ${Number(profileMetrics.central_5gw||0).toFixed(1)} xPts</span><span>5-GW range ${Number(profileMetrics.lower_5gw||0).toFixed(1)}–${Number(profileMetrics.upper_5gw||0).toFixed(1)}</span></button>`;}).join('');byId('profile-panel').setAttribute('aria-labelledby',`profile-tab-${selected.id}`);bindTabs('profile-options','[data-profile]',button=>{renderDecision(button.dataset.profile);renderWeeklyDecision(button.dataset.profile);});
-renderProfileRangeStrips(availableProfiles,selected.id);
-// Personalized case: squad membership is identical across all three profiles (only captaincy/
-// rotation assumptions vary), so the benchmark's "changed players in/out" sentence would always
-// report zero changes -- replaced with a captaincy delta, sourced from each profile's own "roll"
-// scenario (the visitor's declared squad as-is, never a post-transfer squad) for player names.
-let explanationText;
-if(personalized){
-const rollSquads=availableProfiles.map(profile=>{const roll=(profile.scenarios||[]).find(row=>row.action==='roll');return (roll&&roll.squad)||[];});
-const nameFor=id=>{for(const squadRow of rollSquads){const found=squadRow.find(player=>player.id===id);if(found)return found.name;}return 'Unknown';};
-const captainByProfile=availableProfiles.map(profile=>({label:profile.label,captainId:((profile.evaluation_horizons||{})['1']||{}).captain_id}));
-const distinctCaptainIds=[...new Set(captainByProfile.map(row=>row.captainId).filter(id=>id!=null))];
-explanationText=distinctCaptainIds.length<=1?`Same captain and lineup across all three profiles for Gameweek ${weekly.event||''}.`:captainByProfile.map(row=>`${row.label} captains ${esc(nameFor(row.captainId))}`).join('; ')+'.';
-}else{
-const comparison=selected.comparison_to_balanced||{};const changed=comparison.changed_players||{};const incoming=Array.isArray(changed)?changed:(changed.in||[]);const outgoing=Array.isArray(changed)?[]:(changed.out||[]);explanationText=selected.id==='balanced'?'Default central-projection reference team.':`${comparison.shared_players??0}/15 players shared with Balanced. ${incoming.length?`In: ${incoming.join(', ')}. `:''}${outgoing.length?`Out: ${outgoing.join(', ')}.`:''}`;
+function renderProfileComparison(profileId = null) {
+  const weekly = decision.weekly_decisions || {};
+  const personalized = weekly.status === "active";
+  // Bug fix: decision-section-profiles lives, by default, inside <details id="decision-benchmark-
+  // details"> -- fine while it only ever showed the generic benchmark, but that <details> collapses
+  // shut (renderWeeklyDecision's weekly-priority demote) the moment personalized data exists, which
+  // silently hid the one thing inside it that had just become personalized and relevant. Relocate
+  // the actual section node itself (not a copy -- there's only ever one) into the always-visible
+  // "Personalized weekly decision" section when personalized, and back to its usual spot inside the
+  // benchmark details otherwise. Safe to move: every listener inside it is rebound fresh on each
+  // render via bindTabs, nothing here depends on the node's position remaining stable, and
+  // IntersectionObserver/scrollIntoView track the element by reference, not by DOM location.
+  const profilesSection = byId("decision-section-profiles");
+  const weeklyMount = byId("weekly-profile-comparison-mount");
+  const homeAnchor = byId("decision-section-profiles-home");
+  if (personalized && weeklyMount) weeklyMount.appendChild(profilesSection);
+  else if (homeAnchor) homeAnchor.after(profilesSection);
+  const benchmarkProfiles = decision.profile_recommendations || [];
+  const legacy = {
+    id: "balanced",
+    label: "Balanced",
+    summary: "Central projection baseline",
+    risk_note: "Preliminary model uncertainty.",
+    objective: "Central five-gameweek projection",
+    metrics: {},
+  };
+  const availableProfiles = personalized
+    ? weekly.profiles || []
+    : benchmarkProfiles.length
+      ? benchmarkProfiles
+      : [legacy];
+  byId("profile-comparison-heading").textContent = personalized
+    ? "Compare risk profiles for your squad"
+    : "Compare risk profiles";
+  byId("profile-comparison-subtitle").textContent = personalized
+    ? "Same 15 players throughout -- switching profiles changes captaincy and rotation assumptions, not who’s in your squad."
+    : "Select a team to update the XI, bench, captaincy, and full squad below.";
+  if (!availableProfiles.length) {
+    byId("profile-options").innerHTML = "";
+    byId("profile-range-strips").innerHTML = "";
+    byId("profile-comparison").innerHTML =
+      '<div class="empty">No risk-profile comparison is available.</div>';
+    return;
+  }
+  const selectedId =
+    profileId ||
+    (personalized ? weekly.default_profile : decision.default_profile) ||
+    "balanced";
+  const selected =
+    availableProfiles.find((row) => row.id === selectedId) ||
+    availableProfiles[0];
+  const metrics = selected.metrics || {};
+  byId("profile-options").innerHTML = availableProfiles
+    .map((profile) => {
+      const profileMetrics = profile.metrics || {};
+      return `<button id="profile-tab-${esc(profile.id)}" type="button" role="tab" aria-selected="${profile.id === selected.id}" aria-controls="profile-panel" tabindex="${profile.id === selected.id ? "0" : "-1"}" class="profile-option ${profile.id === selected.id ? "active" : ""}" data-profile="${esc(profile.id)}"><strong>${esc(profile.label)}</strong><span>${esc(profile.summary)}</span><span>1 / 3 / 5 GW central · ${Number(profileMetrics.central_1gw || 0).toFixed(1)} / ${Number(profileMetrics.central_3gw || 0).toFixed(1)} / ${Number(profileMetrics.central_5gw || 0).toFixed(1)} xPts</span><span>5-GW range ${Number(profileMetrics.lower_5gw || 0).toFixed(1)}–${Number(profileMetrics.upper_5gw || 0).toFixed(1)}</span></button>`;
+    })
+    .join("");
+  byId("profile-panel").setAttribute(
+    "aria-labelledby",
+    `profile-tab-${selected.id}`,
+  );
+  bindTabs("profile-options", "[data-profile]", (button) => {
+    renderDecision(button.dataset.profile);
+    renderWeeklyDecision(button.dataset.profile);
+  });
+  renderProfileRangeStrips(availableProfiles, selected.id);
+  // Personalized case: squad membership is identical across all three profiles (only captaincy/
+  // rotation assumptions vary), so the benchmark's "changed players in/out" sentence would always
+  // report zero changes -- replaced with a captaincy delta, sourced from each profile's own "roll"
+  // scenario (the visitor's declared squad as-is, never a post-transfer squad) for player names.
+  let explanationText;
+  if (personalized) {
+    const rollSquads = availableProfiles.map((profile) => {
+      const roll = (profile.scenarios || []).find(
+        (row) => row.action === "roll",
+      );
+      return (roll && roll.squad) || [];
+    });
+    const nameFor = (id) => {
+      for (const squadRow of rollSquads) {
+        const found = squadRow.find((player) => player.id === id);
+        if (found) return found.name;
+      }
+      return "Unknown";
+    };
+    const captainByProfile = availableProfiles.map((profile) => ({
+      label: profile.label,
+      captainId: ((profile.evaluation_horizons || {})["1"] || {}).captain_id,
+    }));
+    const distinctCaptainIds = [
+      ...new Set(
+        captainByProfile.map((row) => row.captainId).filter((id) => id != null),
+      ),
+    ];
+    explanationText =
+      distinctCaptainIds.length <= 1
+        ? `Same captain and lineup across all three profiles for Gameweek ${weekly.event || ""}.`
+        : captainByProfile
+            .map(
+              (row) => `${row.label} captains ${esc(nameFor(row.captainId))}`,
+            )
+            .join("; ") + ".";
+  } else {
+    const comparison = selected.comparison_to_balanced || {};
+    const changed = comparison.changed_players || {};
+    const incoming = Array.isArray(changed) ? changed : changed.in || [];
+    const outgoing = Array.isArray(changed) ? [] : changed.out || [];
+    explanationText =
+      selected.id === "balanced"
+        ? "Default central-projection reference team."
+        : `${comparison.shared_players ?? 0}/15 players shared with Balanced. ${incoming.length ? `In: ${incoming.join(", ")}. ` : ""}${outgoing.length ? `Out: ${outgoing.join(", ")}.` : ""}`;
+  }
+  byId("profile-comparison").innerHTML =
+    `<div class="profile-stat"><b>${Number(metrics.central_1gw || 0).toFixed(1)}</b><span>1-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.central_3gw || 0).toFixed(1)}</b><span>3-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.central_5gw || 0).toFixed(1)}</b><span>5-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.average_expected_minutes || 0).toFixed(0)}</b><span>Average expected minutes</span></div><div class="profile-stat"><b>${Number(metrics.average_ownership || 0).toFixed(1)}%</b><span>Average ownership</span></div><div class="profile-stat"><b>${Number(metrics.low_confidence_players || 0)}</b><span>Low-confidence players</span></div><div class="profile-explanation"><strong>${esc(selected.objective || selected.summary)}</strong><br><span class="muted">5-GW uncertainty range: ${Number(metrics.lower_5gw || 0).toFixed(1)}–${Number(metrics.upper_5gw || 0).toFixed(1)} xPts.</span><br>${esc(explanationText)}${selected.risk_note ? ` <span class="status-wait">Main trade-off: ${esc(selected.risk_note)}</span>` : ""}</div>`;
 }
-byId('profile-comparison').innerHTML=`<div class="profile-stat"><b>${Number(metrics.central_1gw||0).toFixed(1)}</b><span>1-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.central_3gw||0).toFixed(1)}</b><span>3-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.central_5gw||0).toFixed(1)}</b><span>5-GW modeled xPts</span></div><div class="profile-stat"><b>${Number(metrics.average_expected_minutes||0).toFixed(0)}</b><span>Average expected minutes</span></div><div class="profile-stat"><b>${Number(metrics.average_ownership||0).toFixed(1)}%</b><span>Average ownership</span></div><div class="profile-stat"><b>${Number(metrics.low_confidence_players||0)}</b><span>Low-confidence players</span></div><div class="profile-explanation"><strong>${esc(selected.objective||selected.summary)}</strong><br><span class="muted">5-GW uncertainty range: ${Number(metrics.lower_5gw||0).toFixed(1)}–${Number(metrics.upper_5gw||0).toFixed(1)} xPts.</span><br>${esc(explanationText)}${selected.risk_note?` <span class="status-wait">Main trade-off: ${esc(selected.risk_note)}</span>`:''}</div>`;
+function renderDecision(profileId = null) {
+  renderProfileComparison(profileId);
+  const profiles = decision.profile_recommendations || [];
+  const legacy = {
+    id: "balanced",
+    label: "Balanced",
+    summary: "Central projection baseline",
+    risk_note: "Preliminary model uncertainty.",
+    objective: "Central five-gameweek projection",
+    squad: decision.recommended_squad,
+    captaincy: decision.captaincy || [],
+    metrics: {},
+  };
+  const availableProfiles = profiles.length ? profiles : [legacy];
+  const selectedId = profileId || decision.default_profile || "balanced";
+  const selected =
+    availableProfiles.find((row) => row.id === selectedId) ||
+    availableProfiles[0];
+  const active =
+    decision.status === "active_preliminary" && selected && selected.squad;
+  if (!active) {
+    byId("decision-status").className = "status-wait";
+    byId("decision-status").textContent = "Recommendation unavailable";
+    byId("decision-summary").innerHTML =
+      `<div class="empty">${esc(decision.reason || "Projection and optimization inputs are incomplete.")}</div>`;
+    byId("decision-rotation-panel").hidden = true;
+    [
+      "recommended-xi",
+      "recommended-bench",
+      "captaincy-list",
+      "decision-model",
+      "recommended-squad",
+      "decision-watchlist",
+      "player-breakdown-table",
+    ].forEach(
+      (id) =>
+        (byId(id).innerHTML =
+          '<div class="empty">No modeled recommendation is available.</div>'),
+    );
+    byId("player-breakdown-name").textContent =
+      "Select a player above to inspect its projection";
+    return;
+  }
+  const squad = selected.squad;
+  const captainId = squad.captain && squad.captain.id;
+  const viceId = squad.vice_captain && squad.vice_captain.id;
+  const card = (player, index = null) => {
+    const role =
+      player.id === captainId ? " (C)" : player.id === viceId ? " (VC)" : "";
+    const reserve =
+      player.position_short === "GKP" && index !== null
+        ? "Reserve goalkeeper · "
+        : index === null
+          ? ""
+          : `Bench ${index + 1} · `;
+    return `<div class="recommendation-card ${player.id === captainId ? "captain" : ""}" data-player-id="${player.id}" tabindex="0" role="button" aria-label="Inspect ${esc(player.name)}'s scoring breakdown"><strong>${esc(player.name)}${role}</strong><span>${esc(player.position_short)} · ${esc(player.club)} · £${Number(player.price).toFixed(1)}m</span><span>${reserve}${Number(player.expected_minutes).toFixed(0)} expected min · ${esc(player.confidence)} confidence</span><span class="projection">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span><span>5-GW range ${Number(player.lower_5).toFixed(1)}–${Number(player.upper_5).toFixed(1)}</span></div>`;
+  };
+  const pitch = (lineup) =>
+    ["FWD", "MID", "DEF", "GKP"]
+      .map((position) => {
+        const row = (lineup || []).filter(
+          (player) => player.position_short === position,
+        );
+        return `<div class="pitch-row pitch-${position.toLowerCase()}">${row
+          .map((player) => {
+            const role =
+              player.id === captainId ? "C" : player.id === viceId ? "VC" : "";
+            return `<div class="pitch-player ${player.id === captainId ? "captain" : ""}" data-player-id="${player.id}" tabindex="0" role="button" title="${esc(player.name)} · ${esc(player.club)} · ${Number(player.expected_minutes).toFixed(0)} expected minutes"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;
+          })
+          .join("")}</div>`;
+      })
+      .join("");
+  byId("decision-eyebrow").textContent =
+    `Preliminary GW${decision.event || 1} benchmark`;
+  byId("decision-heading").textContent =
+    decision.event === 1 ? "Opening-squad decision" : "Fresh-squad benchmark";
+  byId("decision-context").textContent =
+    decision.event === 1
+      ? "This is a reproducible preseason baseline, not a guarantee. Your unpublished draft is not inferred."
+      : "This benchmark shows the best fresh squad for comparison; use the personalized weekly decision below for actual transfers.";
+  byId("recommended-xi-heading").textContent =
+    `Recommended GW${decision.event || 1} XI`;
+  byId("decision-status").className = "status-good";
+  byId("decision-status").textContent = `Active · ${selected.label} profile`;
+  byId("decision-summary").innerHTML =
+    `<div class="decision-metric"><b>£${Number(squad.cost).toFixed(1)}m</b><span>Squad cost</span></div><div class="decision-metric"><b>£${Number(squad.money_remaining).toFixed(1)}m</b><span>Money remaining</span></div><div class="decision-metric"><b>${Number(squad.projected_event_points_including_captain ?? squad.projected_gw1_points_including_captain).toFixed(1)}</b><span>Modeled GW${decision.event || 1} points, captain included</span></div><div class="decision-metric"><b>${esc(squad.captain.name)}</b><span>Captain · ${Number(squad.captain.xp_1).toFixed(1)} xPts before doubling</span></div><div class="decision-metric"><b>${esc(squad.vice_captain.name)}</b><span>Vice-captain</span></div>`;
+  byId("recommended-formation").textContent =
+    `${esc(squad.formation)} · ${esc(selected.label)} · xPts shown for 1 / 3 / 5 GWs`;
+  byId("recommended-xi").setAttribute(
+    "aria-label",
+    `${squad.formation} recommended formation: ${(squad.starting_xi || []).map((player) => `${player.name}${player.id === captainId ? " captain" : player.id === viceId ? " vice-captain" : ""}`).join(", ")}`,
+  );
+  byId("recommended-xi").innerHTML = pitch(squad.starting_xi || []);
+  byId("recommended-bench").innerHTML = (squad.bench || [])
+    .map((player, index) => card(player, index))
+    .join("");
+  byId("recommended-squad").innerHTML = (squad.players || [])
+    .map((player) => card(player))
+    .join("");
+  renderRotationPlan(selected, squad);
+  byId("captaincy-list").innerHTML = (
+    selected.captaincy ||
+    decision.captaincy ||
+    []
+  )
+    .map(
+      (player, index) =>
+        `<div class="decision-row"><span><strong>${index + 1}. ${esc(player.name)}</strong><br><span class="muted">${esc(player.club)} · ${Number(player.expected_minutes).toFixed(0)} expected min</span></span><b>${Number(player.xp_1).toFixed(1)} xPts</b></div>`,
+    )
+    .join("");
+  const model = decision.model || {};
+  const inputs = (model.inputs || [])
+    .map(
+      (item) =>
+        `<div class="decision-note"><strong>Input</strong><br>${esc(item)}</div>`,
+    )
+    .join("");
+  const limits = (model.limitations || [])
+    .map(
+      (item) =>
+        `<div class="decision-note"><strong>Risk</strong><br>${esc(item)}</div>`,
+    )
+    .join("");
+  byId("decision-model").innerHTML =
+    `<div class="model-summary-grid"><div class="decision-note"><strong>${esc(model.name || "Projection model")} v${esc(model.version || "")}</strong><br>No betting odds. Generated ${esc(fmtDate(decision.generated_at, true))}.</div><div class="decision-note"><strong>${esc(selected.label)} objective</strong><br>${esc(selected.objective || selected.summary)}</div></div><details class="model-disclosure"><summary>Show model inputs and risks (${(model.inputs || []).length} inputs · ${(model.limitations || []).length} risks)</summary><div class="model-detail-grid">${inputs}${limits}</div></details>`;
+  const squadIds = new Set((squad.players || []).map((player) => player.id));
+  const watchlistData = decision.watchlist || {};
+  const watchlistPlayers = [];
+  const watchlistGroups = ["GKP", "DEF", "MID", "FWD"]
+    .map((position) => {
+      const entries = (watchlistData[position] || []).filter(
+        (player) => !squadIds.has(player.id),
+      );
+      if (!entries.length) return "";
+      watchlistPlayers.push(...entries);
+      return `<div class="watchlist-group"><h3>${esc(position)}</h3><div class="recommendation-grid compact">${entries.map((player) => card(player)).join("")}</div></div>`;
+    })
+    .join("");
+  byId("decision-watchlist").innerHTML =
+    watchlistGroups ||
+    '<div class="empty">Every top-projected option is already in this squad.</div>';
+  attachBreakdownHandlers(
+    squad.players.concat(watchlistPlayers),
+    squad.captain,
+    squad.selection_rationale,
+  );
 }
-function renderDecision(profileId=null){
-renderProfileComparison(profileId);
-const profiles=decision.profile_recommendations||[];const legacy={id:'balanced',label:'Balanced',summary:'Central projection baseline',risk_note:'Preliminary model uncertainty.',objective:'Central five-gameweek projection',squad:decision.recommended_squad,captaincy:decision.captaincy||[],metrics:{}};const availableProfiles=profiles.length?profiles:[legacy];const selectedId=profileId||decision.default_profile||'balanced';const selected=availableProfiles.find(row=>row.id===selectedId)||availableProfiles[0];const active=decision.status==='active_preliminary'&&selected&&selected.squad;if(!active){byId('decision-status').className='status-wait';byId('decision-status').textContent='Recommendation unavailable';byId('decision-summary').innerHTML=`<div class="empty">${esc(decision.reason||'Projection and optimization inputs are incomplete.')}</div>`;byId('decision-rotation-panel').hidden=true;['recommended-xi','recommended-bench','captaincy-list','decision-model','recommended-squad','decision-watchlist','player-breakdown-table'].forEach(id=>byId(id).innerHTML='<div class="empty">No modeled recommendation is available.</div>');byId('player-breakdown-name').textContent='Select a player above to inspect its projection';return;}
-const squad=selected.squad;const captainId=squad.captain&&squad.captain.id;const viceId=squad.vice_captain&&squad.vice_captain.id;const card=(player,index=null)=>{const role=player.id===captainId?' (C)':player.id===viceId?' (VC)':'';const reserve=player.position_short==='GKP'&&index!==null?'Reserve goalkeeper · ':index===null?'':`Bench ${index+1} · `;return `<div class="recommendation-card ${player.id===captainId?'captain':''}" data-player-id="${player.id}" tabindex="0" role="button" aria-label="Inspect ${esc(player.name)}'s scoring breakdown"><strong>${esc(player.name)}${role}</strong><span>${esc(player.position_short)} · ${esc(player.club)} · £${Number(player.price).toFixed(1)}m</span><span>${reserve}${Number(player.expected_minutes).toFixed(0)} expected min · ${esc(player.confidence)} confidence</span><span class="projection">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span><span>5-GW range ${Number(player.lower_5).toFixed(1)}–${Number(player.upper_5).toFixed(1)}</span></div>`;};
-const pitch=(lineup)=>['FWD','MID','DEF','GKP'].map(position=>{const row=(lineup||[]).filter(player=>player.position_short===position);return `<div class="pitch-row pitch-${position.toLowerCase()}">${row.map(player=>{const role=player.id===captainId?'C':player.id===viceId?'VC':'';return `<div class="pitch-player ${player.id===captainId?'captain':''}" data-player-id="${player.id}" tabindex="0" role="button" title="${esc(player.name)} · ${esc(player.club)} · ${Number(player.expected_minutes).toFixed(0)} expected minutes"><strong>${esc(player.name)}${role?` (${role})`:''}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;}).join('')}</div>`;}).join('');
-byId('decision-eyebrow').textContent=`Preliminary GW${decision.event||1} benchmark`;byId('decision-heading').textContent=decision.event===1?'Opening-squad decision':'Fresh-squad benchmark';byId('decision-context').textContent=decision.event===1?'This is a reproducible preseason baseline, not a guarantee. Your unpublished draft is not inferred.':'This benchmark shows the best fresh squad for comparison; use the personalized weekly decision below for actual transfers.';byId('recommended-xi-heading').textContent=`Recommended GW${decision.event||1} XI`;byId('decision-status').className='status-good';byId('decision-status').textContent=`Active · ${selected.label} profile`;byId('decision-summary').innerHTML=`<div class="decision-metric"><b>£${Number(squad.cost).toFixed(1)}m</b><span>Squad cost</span></div><div class="decision-metric"><b>£${Number(squad.money_remaining).toFixed(1)}m</b><span>Money remaining</span></div><div class="decision-metric"><b>${Number(squad.projected_event_points_including_captain??squad.projected_gw1_points_including_captain).toFixed(1)}</b><span>Modeled GW${decision.event||1} points, captain included</span></div><div class="decision-metric"><b>${esc(squad.captain.name)}</b><span>Captain · ${Number(squad.captain.xp_1).toFixed(1)} xPts before doubling</span></div><div class="decision-metric"><b>${esc(squad.vice_captain.name)}</b><span>Vice-captain</span></div>`;
-byId('recommended-formation').textContent=`${esc(squad.formation)} · ${esc(selected.label)} · xPts shown for 1 / 3 / 5 GWs`;byId('recommended-xi').setAttribute('aria-label',`${squad.formation} recommended formation: ${(squad.starting_xi||[]).map(player=>`${player.name}${player.id===captainId?' captain':player.id===viceId?' vice-captain':''}`).join(', ')}`);byId('recommended-xi').innerHTML=pitch(squad.starting_xi||[]);byId('recommended-bench').innerHTML=(squad.bench||[]).map((player,index)=>card(player,index)).join('');byId('recommended-squad').innerHTML=(squad.players||[]).map(player=>card(player)).join('');renderRotationPlan(selected,squad);byId('captaincy-list').innerHTML=(selected.captaincy||decision.captaincy||[]).map((player,index)=>`<div class="decision-row"><span><strong>${index+1}. ${esc(player.name)}</strong><br><span class="muted">${esc(player.club)} · ${Number(player.expected_minutes).toFixed(0)} expected min</span></span><b>${Number(player.xp_1).toFixed(1)} xPts</b></div>`).join('');const model=decision.model||{};const inputs=(model.inputs||[]).map(item=>`<div class="decision-note"><strong>Input</strong><br>${esc(item)}</div>`).join('');const limits=(model.limitations||[]).map(item=>`<div class="decision-note"><strong>Risk</strong><br>${esc(item)}</div>`).join('');byId('decision-model').innerHTML=`<div class="model-summary-grid"><div class="decision-note"><strong>${esc(model.name||'Projection model')} v${esc(model.version||'')}</strong><br>No betting odds. Generated ${esc(fmtDate(decision.generated_at,true))}.</div><div class="decision-note"><strong>${esc(selected.label)} objective</strong><br>${esc(selected.objective||selected.summary)}</div></div><details class="model-disclosure"><summary>Show model inputs and risks (${(model.inputs||[]).length} inputs · ${(model.limitations||[]).length} risks)</summary><div class="model-detail-grid">${inputs}${limits}</div></details>`;
-const squadIds=new Set((squad.players||[]).map(player=>player.id));const watchlistData=decision.watchlist||{};const watchlistPlayers=[];const watchlistGroups=['GKP','DEF','MID','FWD'].map(position=>{const entries=(watchlistData[position]||[]).filter(player=>!squadIds.has(player.id));if(!entries.length)return '';watchlistPlayers.push(...entries);return `<div class="watchlist-group"><h3>${esc(position)}</h3><div class="recommendation-grid compact">${entries.map(player=>card(player)).join('')}</div></div>`;}).join('');byId('decision-watchlist').innerHTML=watchlistGroups||'<div class="empty">Every top-projected option is already in this squad.</div>';
-attachBreakdownHandlers(squad.players.concat(watchlistPlayers),squad.captain,squad.selection_rationale);}
-function updateDraftLock(weekly){const note=byId('draft-locked-note');const editor=byId('draft-squad-editor');if(!note||!editor)return;const locked=weekly.status==='active'&&!weekly.draft;editor.hidden=locked;note.hidden=!locked;if(locked)note.innerHTML=(state.profile&&state.profile.draft_squad)?'<strong>Your draft squad is no longer active</strong>Your real published squad is now driving recommendations, so the draft you declared above is no longer used.':'<strong>Draft squad declarations are preseason-only</strong>Your real published squad is now available, so a declared draft is no longer needed.';}
-function renderWeeklyDecision(profileId=null){
-const weekly=decision.weekly_decisions||{};updateDraftLock(weekly);
-// Decision Center reorganization: whenever this section has a real, personalized recommendation
-// to show -- `weekly.status==='active'`, true both for a declared preseason draft (`weekly.draft`)
-// and for a real published squad once the season is under way -- the generic fresh-squad
-// benchmark below (summary + risk profiles + XI/captaincy + bench/model + squad detail, all one
-// unit: none of it is personalized) is no longer the most useful thing on the page. It collapses
-// into a single labeled reference and this section (plus the jump nav) moves ahead of it via
-// `.weekly-priority`'s flex `order` overrides (dashboard.css). NOT gated on `weekly.draft` alone
-// -- that flag goes false again post-GW1 even though a real squad's active recommendation is
-// exactly as much "more relevant than the generic benchmark" as the draft case was; only the
-// label text below still distinguishes "draft" from "real squad" phrasing.
-const weeklyPersonalized=weekly.status==='active';byId('decisions-content').classList.toggle('weekly-priority',weeklyPersonalized);const benchmarkDetails=byId('decision-benchmark-details');if(benchmarkDetails){benchmarkDetails.open=!weeklyPersonalized;const benchmarkLabel=byId('decision-benchmark-details-label');if(benchmarkLabel)benchmarkLabel.textContent=!weeklyPersonalized?'Preliminary recommendation':weekly.draft?'Reference: from-scratch squad (ignores your draft)':'Reference: from-scratch squad (see your weekly decision above)';}
-const ids=['weekly-summary','weekly-recommendation','weekly-scenarios','weekly-chip','weekly-rules'];if(weekly.status!=='active'){byId('decision-section-weekly').classList.add('collapsed');byId('weekly-plan').hidden=true;byId('weekly-branches').innerHTML='';byId('weekly-lineup').hidden=true;byId('weekly-profile-panel').hidden=true;byId('weekly-status').className='status-wait';byId('weekly-status').textContent=weekly.status==='waiting_for_gw2'?'Starts in Gameweek 2':weekly.status==='manager_not_configured'?'FPL team not connected':weekly.status==='team_not_found'?'Team not found':weekly.status==='draft_squad_invalid'?'Draft squad needs fixing':'Published squad required';byId('weekly-inactive-reason').hidden=false;byId('weekly-inactive-reason').textContent=weekly.reason||'Weekly recommendations activate after the first published squad is available.';byId('weekly-summary').innerHTML='';byId('weekly-recommendation').innerHTML='';byId('weekly-scenarios').innerHTML='';byId('weekly-chip').innerHTML='';byId('weekly-rules').innerHTML='';return;}
-const profiles=weekly.profiles||[];const selectedId=profileId||weekly.default_profile||'balanced';const selected=profiles.find(row=>row.id===selectedId)||profiles[0];if(!selected)return;const recommendation=selected.recommendation;const plan=selected.multiweek_plan||{};const actionLabels={roll:'Roll the transfer',single_transfer:'Make one transfer',double_transfer:'Make two transfers'};const labelFor=(action,count)=>action==='multi_transfer'?`Make ${count} transfers`:(actionLabels[action]||action);const actionLabel=labelFor(recommendation.action,recommendation.transfer_count);const transferPairs=(recommendation.transfers||[]).map(move=>`<div class="transfer-pair"><strong>${esc(move.out.name)} → ${esc(move.in.name)}</strong><span class="muted">Sell £${Number(move.out.selling_price).toFixed(1)}m · buy £${Number(move.in.price).toFixed(1)}m</span></div>`).join('')||'<div class="transfer-pair"><strong>No transfer</strong><span class="muted">Preserve the free transfer for the next deadline.</span></div>';
-byId('decision-section-weekly').classList.remove('collapsed');byId('weekly-profile-panel').hidden=false;byId('weekly-inactive-reason').hidden=true;byId('weekly-heading').textContent=weekly.draft?`Feedback on your declared Gameweek ${weekly.event} draft squad`:`Gameweek ${weekly.event} roll, transfer, and chip decision`;byId('weekly-status').className='status-good';byId('weekly-status').textContent=weekly.draft?`Draft feedback · ${selected.label}`:`Active · ${selected.label}`;
-// Bug fix: this section used to build its own separate Conservative/Balanced/Aggressive tab
-// strip here (id weekly-profile-options) -- a second, independent profile selector stacked
-// directly below the rich renderProfileComparison() panel above it (relocated into this same
-// section once personalized, see issue #158/#162), both driving the same three profiles.
-// renderProfileComparison()'s own tabs already call renderWeeklyDecision(profileId) on click
-// (and this function's own callers already pass a profileId through), so that panel already
-// fully serves as the selector for this section too -- removed the duplicate here rather than
-// keep two controls for one choice. weekly-profile-panel now points its aria-labelledby at the
-// surviving tab strip's button id instead of one that no longer exists.
-byId('weekly-profile-panel').setAttribute('aria-labelledby',`profile-tab-${selected.id}`);
-byId('weekly-summary').innerHTML=weekly.draft?`<div class="decision-metric"><b>No cost</b><span>Every suggested change before Gameweek 1</span></div><div class="decision-metric"><b>£${Number(weekly.bank||0).toFixed(1)}m</b><span>Unspent budget in your declared draft</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after suggested change</span></div><div class="decision-metric"><b>${Number(recommendation.net_gain_5gw).toFixed(1)}</b><span>5-GW gain vs your declared draft</span></div>`:`<div class="decision-metric"><b>${weekly.free_transfers}</b><span>Free transfer${weekly.free_transfers===1?'':'s'} now · ${weekly.free_transfer_source==='confirmed_local'?'confirmed locally':'estimated from public history'}</span></div><div class="decision-metric"><b>${recommendation.free_transfers_next_event}</b><span>Available next GW</span></div><div class="decision-metric"><b>${Number(plan.five_gameweek_advantage_over_roll||0).toFixed(1)}</b><span>5-GW planner edge over roll</span></div><div class="decision-metric"><b>${recommendation.point_cost?`−${recommendation.point_cost}`:'0'}</b><span>Immediate transfer cost</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after decision</span></div>`;
-byId('weekly-recommendation').innerHTML=`<strong>${esc(actionLabel)}</strong><p>${esc(recommendation.reason)}</p>${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
-byId('weekly-scenarios').innerHTML=(selected.scenarios||[]).map(scenario=>{const planned=(plan.alternatives||[]).find(item=>item.action===scenario.action);const edgeLine=weekly.draft?'':scenario.action==='multi_transfer'?'<span class="projection muted">Not evaluated by the 5-GW planner</span>':`<span class="projection">${Number((planned||{}).five_gameweek_delta_vs_roll||0).toFixed(1)} planner edge vs roll</span>`;const nextFtText=weekly.draft?'':` · ${scenario.free_transfers_next_event} FT next GW`;return `<div class="scenario-card ${scenario.action===recommendation.action?'recommended':''}"><strong>${esc(labelFor(scenario.action,scenario.transfer_count))}</strong><span>${scenario.transfer_count} transfer${scenario.transfer_count===1?'':'s'} · ${scenario.point_cost?`−${scenario.point_cost} hit`:'no hit'}</span>${edgeLine}<span>${Number(scenario.net_gain_5gw).toFixed(1)} direct 5-GW net · £${Number(scenario.bank_after).toFixed(1)}m bank${nextFtText}</span></div>`;}).join('');
-const branches=plan.conditional_branches||[];byId('weekly-plan').hidden=!plan.planning_method;if(plan.planning_method){byId('weekly-plan-confidence').textContent=`${esc(plan.confidence||'low')} confidence`;byId('weekly-plan-summary').innerHTML=`<div class="weekly-plan-stat"><b>${Number(plan.five_gameweek_advantage_over_roll||0).toFixed(1)}</b><span>5-GW advantage over roll</span></div><div class="weekly-plan-stat"><b>${Number(plan.roll_option_value||0).toFixed(1)}</b><span>Modeled value of the extra rolled transfer</span></div><div class="weekly-plan-stat"><b>${esc((plan.horizon_events||[]).map(event=>`GW${event}`).join('–'))}</b><span>Receding planning horizon</span></div>`;byId('weekly-branches').innerHTML=branches.map(branch=>{const branchLabel=actionLabels[branch.action]||branch.action;return `<div class="conditional-branch"><strong>GW${branch.event}: ${esc(branchLabel)} · provisional</strong><span>${esc(branch.condition)}</span><span>${branch.point_cost?`Potential −${branch.point_cost} hit · `:''}${branch.free_transfers_before} FT before · ${branch.free_transfers_next_event} FT next</span></div>`;}).join('')||'<div class="empty">No future action clears the current hold path. Recalculate after the next explicit refresh.</div>';byId('weekly-plan-assumptions').innerHTML=(plan.assumptions||[]).map(item=>`<div class="decision-note">${esc(item)}</div>`).join('');}
-const weeklyCaptainId=recommendation.captain&&recommendation.captain.id;const weeklyViceId=recommendation.vice_captain&&recommendation.vice_captain.id;const weeklyPitch=(lineup)=>['FWD','MID','DEF','GKP'].map(position=>{const row=(lineup||[]).filter(player=>player.position_short===position);return `<div class="pitch-row pitch-${position.toLowerCase()}">${row.map(player=>{const role=player.id===weeklyCaptainId?'C':player.id===weeklyViceId?'VC':'';return `<div class="pitch-player ${player.id===weeklyCaptainId?'captain':''}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role?` (${role})`:''}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;}).join('')}</div>`;}).join('');byId('weekly-lineup').hidden=false;byId('weekly-lineup-heading').textContent=`Recommended GW${weekly.event} XI · ${actionLabel}`;byId('weekly-lineup-meta').textContent=`${recommendation.formation} · ${selected.label}`;byId('weekly-pitch').setAttribute('aria-label',`${recommendation.formation} post-decision formation: ${(recommendation.starting_xi||[]).map(player=>`${player.name}${player.id===weeklyCaptainId?' captain':player.id===weeklyViceId?' vice-captain':''}`).join(', ')}`);byId('weekly-pitch').innerHTML=weeklyPitch(recommendation.starting_xi||[]);byId('weekly-bench').innerHTML=(recommendation.bench||[]).map((player,index)=>`<div class="weekly-bench-card"><strong>${index+1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span></div>`).join('');
-const chip=selected.chip_recommendation||{};const alternatives=(chip.alternatives||[]).map(item=>`<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts<br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`).join('');byId('weekly-chip').innerHTML=`<strong>${esc(chip.label||'Hold all chips')}</strong><p>${esc(chip.reason||'No chip recommendation is available.')}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points||0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives?`<div class="chip-alternatives">${alternatives}</div>`:''}`;
-const inventory=(weekly.chip_inventory||[]).map(item=>`${item.label}: ${item.available?'available':item.used_event?`used GW${item.used_event}`:`outside GW${item.start_event}–${item.stop_event}`}`).join(' · ');const rules=weekly.official_rules||{};const rulesPreview=weekly.draft?`Once Gameweek 1 begins, one free transfer per Gameweek applies, up to ${esc(rules.maximum_free_transfers)} stored; each excess transfer costs ${esc(rules.extra_transfer_cost)} points.`:`<strong>Official rules reviewed</strong><br>One free transfer per Gameweek, up to ${esc(rules.maximum_free_transfers)} stored; each excess transfer costs ${esc(rules.extra_transfer_cost)} points. ${esc(inventory)}`;byId('weekly-rules').innerHTML=`${rulesPreview}<br>${safeLink(rules.source,'Official FPL rules')}<br><span class="status-wait">${esc(weekly.state_warning)}</span>`;}
-function renderManager(){const manager=state.manager||{connection_status:'not_configured',squad:[]};const value=value=>value===null||value===''||value===false?'Not yet available':value;const money=value=>value===null||value===''?'Not yet available':`£${(Number(value)/10).toFixed(1)}m`;if(manager.connection_status==='lookup_failed'){const failNote='Team not found, or the official FPL API is temporarily unavailable. Check the team ID and try again.';byId('my-team-summary').innerHTML=`<div class="empty">${esc(failNote)}</div>`;byId('manager-status').textContent=failNote;byId('squad-grid').innerHTML='<div class="empty">No public squad is connected.</div>';return;}if(manager.connection_status==='not_configured'){const setupNote='Enter your FPL team ID (from your FPL entry URL) in the Manager profile form on the My Profile view, then save.';byId('my-team-summary').innerHTML=`<div class="empty">No public team ID is configured. ${esc(setupNote)}</div>`;byId('manager-status').textContent=setupNote;byId('squad-grid').innerHTML='<div class="empty">No public squad is connected.</div>';return;}byId('my-team-summary').innerHTML=`<div class="team-stat"><b>${esc(manager.team_name||'Unnamed team')}</b><span>${esc(manager.manager_name||'Manager')}</span></div><div class="team-stat"><b>${esc(manager.team_id)}</b><span>Team ID</span></div><div class="team-stat"><b>${esc(value(manager.overall_rank))}</b><span>Overall rank</span></div><div class="team-stat"><b>${esc(value(manager.overall_points))}</b><span>Points</span></div><div class="team-stat"><b>${esc(money(manager.team_value))}</b><span>Team value</span></div><div class="team-stat"><b>${esc(money(manager.bank))}</b><span>Bank</span></div>`;if(!manager.squad_publicly_available){byId('manager-status').className='empty';byId('manager-status').textContent='Connected to the official public entry. Public GW1 squad is hidden until the deadline, so no draft players are inferred.';byId('squad-grid').innerHTML='<div class="empty">Public GW1 squad is hidden until the deadline. The dashboard will load it after official FPL publishes the picks.</div>';return;}byId('manager-status').className='status-good';byId('manager-status').textContent=`Connected · ${manager.squad.length} public picks loaded`;const positions={1:'Goalkeeper',2:'Defender',3:'Midfielder',4:'Forward'};byId('squad-grid').innerHTML=manager.squad.map(player=>`<div class="player-card"><strong>${esc(player.name)}${player.is_captain?' (C)':player.is_vice_captain?' (VC)':''}</strong><span>${esc(positions[player.element_type]||'Player')} · ${esc(money(player.price))}</span><span>${player.position<=11?'Starting XI':`Bench ${player.position-11}`}</span></div>`).join('');}
-function renderPerformance(){const summary=performance.summary||{};const calibration=performance.calibration||{recommendations:[]};const format=value=>value==null?'Awaiting':Number(value).toFixed(1);const coverage=summary.range_coverage==null?'Awaiting':`${(Number(summary.range_coverage)*100).toFixed(0)}%`;const active=performance.status==='active';byId('performance-status').className=active?'status-good':'status-wait';byId('performance-status').textContent=active?`${performance.completed_comparisons} completed comparison${performance.completed_comparisons===1?'':'s'}`:'Starts after Gameweek 1 is final';byId('performance-summary').innerHTML=`<div class="decision-metric"><b>${Number(performance.completed_comparisons||0)}</b><span>Completed profile-horizon comparisons</span></div><div class="decision-metric"><b>${Number(performance.actual_events_collected||0)}</b><span>Official Gameweeks collected</span></div><div class="decision-metric"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="decision-metric"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div><div class="decision-metric"><b>${coverage}</b><span>Uncertainty-range coverage</span></div>`;const horizons=performance.by_horizon||{};byId('performance-horizons').innerHTML=[1,3,5].map(horizon=>{const row=horizons[String(horizon)]||{};return `<div class="performance-card"><b>${format(row.mae)}</b><span>${horizon}-GW MAE · ${Number(row.count||0)} completed</span><span>Bias ${format(row.bias)} · coverage ${row.range_coverage==null?'Awaiting':`${(Number(row.range_coverage)*100).toFixed(0)}%`}</span></div>`;}).join('');byId('performance-calibration').innerHTML=`<p class="${calibration.ready?'status-good':'status-wait'}">${esc(calibration.status||'Waiting for enough completed forecasts.')}</p>${(calibration.recommendations||[]).map(item=>`<div class="decision-note">${esc(item)}</div>`).join('')}<div class="decision-note"><strong>Improvement policy</strong><br>Use error, bias, and interval coverage to review minutes, scoring-rate, and uncertainty assumptions. No weights are silently retuned from a small sample.</div>`;const comparisons=performance.comparisons||[];byId('performance-history').innerHTML=comparisons.length?comparisons.slice(0,50).map(row=>{const error=Number(row.error);return `<tr class="performance-row"><th scope="row">GW${row.origin_event}</th><td>${esc(row.profile_label)}</td><td>${row.horizon} GW</td><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error>0?'positive':error<0?'negative':''}">${error>0?'+':''}${error.toFixed(1)}</td><td>${row.inside_range?'Yes':'No'}</td></tr>`;}).join(''):'<tr><td colspan="7"><div class="empty">No completed comparison yet. The current pre-GW1 forecast is stored locally and will be scored after official results are final.</div></td></tr>';byId('performance-method').textContent=performance.method||'Frozen pre-event forecasts are compared with official FPL points.';const collectionErrors=performance.collection_errors||[];byId('performance-errors').innerHTML=collectionErrors.map(error=>`<div class="limitation-note"><strong>Result collection issue</strong>${esc(error.message||error)}</div>`).join('');}
-function renderShadowModels(){const shadowModels=performance.shadow_models||{};const versions=Object.keys(shadowModels);const statusEl=byId('shadow-models-status');const format=value=>value==null?'Awaiting':Number(value).toFixed(1);if(!versions.length){statusEl.className='status-wait';statusEl.textContent='No shadow models tracked yet';byId('shadow-models-list').innerHTML='<p class="empty">No experimental models are currently running in shadow.</p>';return;}statusEl.className='status-good';statusEl.textContent=`${versions.length} shadow model${versions.length===1?'':'s'} tracked`;byId('shadow-models-list').innerHTML=versions.map(version=>{const model=shadowModels[version]||{};const summary=model.summary||{};const active=model.status==='active';const completed=Number(model.comparisons?.length||0);const coverage=summary.range_coverage==null?'Awaiting':`${(Number(summary.range_coverage)*100).toFixed(0)}%`;return `<div style="margin-top:12px"><div class="section-heading"><h3 style="font-size:14px;margin:0">${esc(version)}</h3><span class="${active?'status-good':'status-wait'}">${active?`${completed} completed comparison${completed===1?'':'s'}`:'Awaiting completed Gameweeks'}</span></div><div class="performance-horizons"><div class="performance-card"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="performance-card"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div><div class="performance-card"><b>${coverage}</b><span>Uncertainty-range coverage</span></div></div></div>`;}).join('');}
-function renderTeamPerformance(){const manager=state.manager||{connection_status:'not_configured'};const teamPerformance=performance.team_performance||{comparisons:[]};const comparisons=teamPerformance.comparisons||[];const statusEl=byId('performance-team-status');const summaryEl=byId('performance-team-summary');const historyEl=byId('performance-team-history');const methodEl=byId('performance-team-method');if(manager.connection_status==='not_configured'){statusEl.className='status-wait';statusEl.textContent='FPL team not connected';summaryEl.innerHTML='';historyEl.innerHTML='<tr><td colspan="5"><div class="empty">Enter your FPL team ID in the Manager profile form on the My Profile view, then save.</div></td></tr>';methodEl.textContent='';return;}if(!comparisons.length){statusEl.className='status-wait';summaryEl.innerHTML='';if(!performance.actual_events_collected){statusEl.textContent='Waiting for completed Gameweeks';historyEl.innerHTML='<tr><td colspan="5"><div class="empty">No Gameweek has finished yet. Team comparisons appear after official results are collected.</div></td></tr>';}else{statusEl.textContent='Waiting for a frozen pre-deadline forecast';historyEl.innerHTML='<tr><td colspan="5"><div class="empty">No pre-deadline player forecast was frozen for a finished Gameweek yet, so no team comparison can be shown. Results are never backfilled with hindsight lineups.</div></td></tr>';}methodEl.textContent=teamPerformance.method||'';return;}statusEl.className='status-good';statusEl.textContent=`${comparisons.length} completed Gameweek${comparisons.length===1?'':'s'}`;const summary=teamPerformance.summary||{};const format=value=>value==null?'Awaiting':Number(value).toFixed(1);summaryEl.innerHTML=`<div class="decision-metric"><b>${Number(summary.count||0)}</b><span>Completed Gameweeks</span></div><div class="decision-metric"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="decision-metric"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div>`;historyEl.innerHTML=comparisons.slice().sort((a,b)=>b.event-a.event).map(row=>{const error=Number(row.error);return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error>0?'positive':error<0?'negative':''}">${error>0?'+':''}${error.toFixed(1)}</td><td>${row.inside_range?'Yes':'No'}</td></tr>`;}).join('');methodEl.textContent=teamPerformance.method||'';}
-function renderPlayerPerformance(){const playerPerformance=performance.player_performance||{comparisons:[]};const comparisons=playerPerformance.comparisons||[];const playerById={};players.forEach(player=>{playerById[player.id]=player;});const label=id=>playerById[id]?playerById[id].name:`Player ${id}`;const commentedIds=[...new Set(comparisons.map(row=>row.element_id))];const squad=(state.manager&&state.manager.squad)||[];const squadIds=new Set(squad.map(player=>player.element_id));const byName=(a,b)=>label(a).localeCompare(label(b));const squadForecastIds=commentedIds.filter(id=>squadIds.has(id)).sort(byName);const otherForecastIds=commentedIds.filter(id=>!squadIds.has(id)).sort(byName);const select=byId('performance-player-select');const previousValue=select.value;const optgroup=(title,ids)=>ids.length?`<optgroup label="${esc(title)}">${ids.map(id=>`<option value="${id}">${esc(label(id))}</option>`).join('')}</optgroup>`:'';select.innerHTML=optgroup('My squad',squadForecastIds)+optgroup('All forecast players',otherForecastIds);if(!commentedIds.length){byId('performance-player-history').innerHTML='<tr><td colspan="5"><div class="empty">No frozen per-player forecasts have been compared with results yet.</div></td></tr>';byId('performance-player-summary').textContent='';return;}const defaultId=squadForecastIds.length?squadForecastIds[0]:otherForecastIds[0];let selected=Number(previousValue);if(!commentedIds.includes(selected))selected=defaultId;select.value=String(selected);const renderRows=()=>{const id=Number(select.value);const rows=comparisons.filter(row=>row.element_id===id).slice().sort((a,b)=>b.event-a.event);byId('performance-player-history').innerHTML=rows.length?rows.map(row=>{const error=Number(row.error);return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error>0?'positive':error<0?'negative':''}">${error>0?'+':''}${error.toFixed(1)}</td><td>${row.inside_range?'Yes':'No'}</td></tr>`;}).join(''):'<tr><td colspan="5"><div class="empty">No completed comparison yet for this player.</div></td></tr>';const count=rows.length;const mae=count?rows.reduce((total,row)=>total+Math.abs(row.error),0)/count:null;const bias=count?rows.reduce((total,row)=>total+row.error,0)/count:null;byId('performance-player-summary').textContent=count?`${count} completed comparison${count===1?'':'s'} · MAE ${mae.toFixed(1)} · bias ${bias>=0?'+':''}${bias.toFixed(1)}`:'No completed comparison yet for this player.';};select.onchange=renderRows;renderRows();}
-function renderModel(){byId('model-readiness').innerHTML=`<dt>User-facing state</dt><dd>${esc(seasonLabel())}</dd><dt>Raw status</dt><dd>${esc(state.fpl.season_status)}</dd><dt>Phase</dt><dd>${esc(state.fpl.season_phase||'feed_pending')}</dd><dt>Players</dt><dd>${state.fpl.player_count}</dd><dt>Clubs</dt><dd>${state.fpl.team_count}</dd><dt>Decision model</dt><dd class="${decision.status==='active_preliminary'?'status-good':'status-wait'}">${esc(decision.status)}</dd><dt>Projection version</dt><dd>${esc((decision.model||{}).version||'Not active')}</dd><dt>Generated</dt><dd>${esc(state.generated_at)}</dd>`;const sources=state.sources||[];byId('source-list').innerHTML=sources.length?sources.map(source=>`<div class="source">${safeLink(source.url,source.name)}<span>Configured</span></div>`).join(''):'<div class="empty">No sources are registered.</div>';}
-function captureWorkspaceContext(){const activeView=(document.querySelector('.view.active')||{}).id?.replace('view-','')||'squad';const activeProfile=(document.querySelector('[data-profile][aria-selected="true"]')||{}).dataset?.profile||null;const controlIds=[...filterIds,'player-search','player-club-filter','player-position-filter','player-sort','fixture-gameweek','fixture-club-filter'];const controls=Object.fromEntries(controlIds.map(id=>[id,byId(id)?.value]).filter(([,value])=>value!==void 0));sessionStorage.setItem('fpl-workspace-context',JSON.stringify({view:activeView,profile:activeProfile,controls}));}
-function restoreWorkspaceContext(){let context={};try{context=JSON.parse(sessionStorage.getItem('fpl-workspace-context')||'{}');}catch(error){sessionStorage.removeItem('fpl-workspace-context');}Object.entries(context.controls||{}).forEach(([id,value])=>{const control=byId(id);if(control&&[...control.options||[]].some(option=>option.value===value)||control?.type==='search')control.value=value;});if(context.profile){renderDecision(context.profile);renderWeeklyDecision(context.profile);}renderPlayers();renderFixtures();applyFilters();showView(titles[context.view]?context.view:'squad');}
-function sourceSummary(payload){const sources=payload.source_statuses||{};const mark=value=>value==='ok'?'✓':value==='error'?'✕':'not active';return `FPL ${mark(sources.fpl)} · My Team ${mark(sources.manager)} · Transfers ${mark(sources.transfers)} · Fixtures ${mark(sources.fixtures)}`;}
+function updateDraftLock(weekly) {
+  const note = byId("draft-locked-note");
+  const editor = byId("draft-squad-editor");
+  if (!note || !editor) return;
+  const locked = weekly.status === "active" && !weekly.draft;
+  editor.hidden = locked;
+  note.hidden = !locked;
+  if (locked)
+    note.innerHTML =
+      state.profile && state.profile.draft_squad
+        ? "<strong>Your draft squad is no longer active</strong>Your real published squad is now driving recommendations, so the draft you declared above is no longer used."
+        : "<strong>Draft squad declarations are preseason-only</strong>Your real published squad is now available, so a declared draft is no longer needed.";
+}
+function renderWeeklyDecision(profileId = null) {
+  const weekly = decision.weekly_decisions || {};
+  updateDraftLock(weekly);
+  // Decision Center reorganization: whenever this section has a real, personalized recommendation
+  // to show -- `weekly.status==='active'`, true both for a declared preseason draft (`weekly.draft`)
+  // and for a real published squad once the season is under way -- the generic fresh-squad
+  // benchmark below (summary + risk profiles + XI/captaincy + bench/model + squad detail, all one
+  // unit: none of it is personalized) is no longer the most useful thing on the page. It collapses
+  // into a single labeled reference and this section (plus the jump nav) moves ahead of it via
+  // `.weekly-priority`'s flex `order` overrides (dashboard.css). NOT gated on `weekly.draft` alone
+  // -- that flag goes false again post-GW1 even though a real squad's active recommendation is
+  // exactly as much "more relevant than the generic benchmark" as the draft case was; only the
+  // label text below still distinguishes "draft" from "real squad" phrasing.
+  const weeklyPersonalized = weekly.status === "active";
+  byId("decisions-content").classList.toggle(
+    "weekly-priority",
+    weeklyPersonalized,
+  );
+  const benchmarkDetails = byId("decision-benchmark-details");
+  if (benchmarkDetails) {
+    benchmarkDetails.open = !weeklyPersonalized;
+    const benchmarkLabel = byId("decision-benchmark-details-label");
+    if (benchmarkLabel)
+      benchmarkLabel.textContent = !weeklyPersonalized
+        ? "Preliminary recommendation"
+        : weekly.draft
+          ? "Reference: from-scratch squad (ignores your draft)"
+          : "Reference: from-scratch squad (see your weekly decision above)";
+  }
+  const ids = [
+    "weekly-summary",
+    "weekly-recommendation",
+    "weekly-scenarios",
+    "weekly-chip",
+    "weekly-rules",
+  ];
+  if (weekly.status !== "active") {
+    byId("decision-section-weekly").classList.add("collapsed");
+    byId("weekly-plan").hidden = true;
+    byId("weekly-branches").innerHTML = "";
+    byId("weekly-lineup").hidden = true;
+    byId("weekly-profile-panel").hidden = true;
+    byId("weekly-status").className = "status-wait";
+    byId("weekly-status").textContent =
+      weekly.status === "waiting_for_gw2"
+        ? "Starts in Gameweek 2"
+        : weekly.status === "manager_not_configured"
+          ? "FPL team not connected"
+          : weekly.status === "team_not_found"
+            ? "Team not found"
+            : weekly.status === "draft_squad_invalid"
+              ? "Draft squad needs fixing"
+              : "Published squad required";
+    byId("weekly-inactive-reason").hidden = false;
+    byId("weekly-inactive-reason").textContent =
+      weekly.reason ||
+      "Weekly recommendations activate after the first published squad is available.";
+    byId("weekly-summary").innerHTML = "";
+    byId("weekly-recommendation").innerHTML = "";
+    byId("weekly-scenarios").innerHTML = "";
+    byId("weekly-chip").innerHTML = "";
+    byId("weekly-rules").innerHTML = "";
+    return;
+  }
+  const profiles = weekly.profiles || [];
+  const selectedId = profileId || weekly.default_profile || "balanced";
+  const selected = profiles.find((row) => row.id === selectedId) || profiles[0];
+  if (!selected) return;
+  const recommendation = selected.recommendation;
+  const plan = selected.multiweek_plan || {};
+  const actionLabels = {
+    roll: "Roll the transfer",
+    single_transfer: "Make one transfer",
+    double_transfer: "Make two transfers",
+  };
+  const labelFor = (action, count) =>
+    action === "multi_transfer"
+      ? `Make ${count} transfers`
+      : actionLabels[action] || action;
+  const actionLabel = labelFor(
+    recommendation.action,
+    recommendation.transfer_count,
+  );
+  const transferPairs =
+    (recommendation.transfers || [])
+      .map(
+        (move) =>
+          `<div class="transfer-pair"><strong>${esc(move.out.name)} → ${esc(move.in.name)}</strong><span class="muted">Sell £${Number(move.out.selling_price).toFixed(1)}m · buy £${Number(move.in.price).toFixed(1)}m</span></div>`,
+      )
+      .join("") ||
+    '<div class="transfer-pair"><strong>No transfer</strong><span class="muted">Preserve the free transfer for the next deadline.</span></div>';
+  byId("decision-section-weekly").classList.remove("collapsed");
+  byId("weekly-profile-panel").hidden = false;
+  byId("weekly-inactive-reason").hidden = true;
+  byId("weekly-heading").textContent = weekly.draft
+    ? `Feedback on your declared Gameweek ${weekly.event} draft squad`
+    : `Gameweek ${weekly.event} roll, transfer, and chip decision`;
+  byId("weekly-status").className = "status-good";
+  byId("weekly-status").textContent = weekly.draft
+    ? `Draft feedback · ${selected.label}`
+    : `Active · ${selected.label}`;
+  // Bug fix: this section used to build its own separate Conservative/Balanced/Aggressive tab
+  // strip here (id weekly-profile-options) -- a second, independent profile selector stacked
+  // directly below the rich renderProfileComparison() panel above it (relocated into this same
+  // section once personalized, see issue #158/#162), both driving the same three profiles.
+  // renderProfileComparison()'s own tabs already call renderWeeklyDecision(profileId) on click
+  // (and this function's own callers already pass a profileId through), so that panel already
+  // fully serves as the selector for this section too -- removed the duplicate here rather than
+  // keep two controls for one choice. weekly-profile-panel now points its aria-labelledby at the
+  // surviving tab strip's button id instead of one that no longer exists.
+  byId("weekly-profile-panel").setAttribute(
+    "aria-labelledby",
+    `profile-tab-${selected.id}`,
+  );
+  byId("weekly-summary").innerHTML = weekly.draft
+    ? `<div class="decision-metric"><b>No cost</b><span>Every suggested change before Gameweek 1</span></div><div class="decision-metric"><b>£${Number(weekly.bank || 0).toFixed(1)}m</b><span>Unspent budget in your declared draft</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after suggested change</span></div><div class="decision-metric"><b>${Number(recommendation.net_gain_5gw).toFixed(1)}</b><span>5-GW gain vs your declared draft</span></div>`
+    : `<div class="decision-metric"><b>${weekly.free_transfers}</b><span>Free transfer${weekly.free_transfers === 1 ? "" : "s"} now · ${weekly.free_transfer_source === "confirmed_local" ? "confirmed locally" : "estimated from public history"}</span></div><div class="decision-metric"><b>${recommendation.free_transfers_next_event}</b><span>Available next GW</span></div><div class="decision-metric"><b>${Number(plan.five_gameweek_advantage_over_roll || 0).toFixed(1)}</b><span>5-GW planner edge over roll</span></div><div class="decision-metric"><b>${recommendation.point_cost ? `−${recommendation.point_cost}` : "0"}</b><span>Immediate transfer cost</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after decision</span></div>`;
+  byId("weekly-recommendation").innerHTML =
+    `<strong>${esc(actionLabel)}</strong><p>${esc(recommendation.reason)}</p>${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
+  byId("weekly-scenarios").innerHTML = (selected.scenarios || [])
+    .map((scenario) => {
+      const planned = (plan.alternatives || []).find(
+        (item) => item.action === scenario.action,
+      );
+      const edgeLine = weekly.draft
+        ? ""
+        : scenario.action === "multi_transfer"
+          ? '<span class="projection muted">Not evaluated by the 5-GW planner</span>'
+          : `<span class="projection">${Number((planned || {}).five_gameweek_delta_vs_roll || 0).toFixed(1)} planner edge vs roll</span>`;
+      const nextFtText = weekly.draft
+        ? ""
+        : ` · ${scenario.free_transfers_next_event} FT next GW`;
+      return `<div class="scenario-card ${scenario.action === recommendation.action ? "recommended" : ""}"><strong>${esc(labelFor(scenario.action, scenario.transfer_count))}</strong><span>${scenario.transfer_count} transfer${scenario.transfer_count === 1 ? "" : "s"} · ${scenario.point_cost ? `−${scenario.point_cost} hit` : "no hit"}</span>${edgeLine}<span>${Number(scenario.net_gain_5gw).toFixed(1)} direct 5-GW net · £${Number(scenario.bank_after).toFixed(1)}m bank${nextFtText}</span></div>`;
+    })
+    .join("");
+  const branches = plan.conditional_branches || [];
+  byId("weekly-plan").hidden = !plan.planning_method;
+  if (plan.planning_method) {
+    byId("weekly-plan-confidence").textContent =
+      `${esc(plan.confidence || "low")} confidence`;
+    byId("weekly-plan-summary").innerHTML =
+      `<div class="weekly-plan-stat"><b>${Number(plan.five_gameweek_advantage_over_roll || 0).toFixed(1)}</b><span>5-GW advantage over roll</span></div><div class="weekly-plan-stat"><b>${Number(plan.roll_option_value || 0).toFixed(1)}</b><span>Modeled value of the extra rolled transfer</span></div><div class="weekly-plan-stat"><b>${esc((plan.horizon_events || []).map((event) => `GW${event}`).join("–"))}</b><span>Receding planning horizon</span></div>`;
+    byId("weekly-branches").innerHTML =
+      branches
+        .map((branch) => {
+          const branchLabel = actionLabels[branch.action] || branch.action;
+          return `<div class="conditional-branch"><strong>GW${branch.event}: ${esc(branchLabel)} · provisional</strong><span>${esc(branch.condition)}</span><span>${branch.point_cost ? `Potential −${branch.point_cost} hit · ` : ""}${branch.free_transfers_before} FT before · ${branch.free_transfers_next_event} FT next</span></div>`;
+        })
+        .join("") ||
+      '<div class="empty">No future action clears the current hold path. Recalculate after the next explicit refresh.</div>';
+    byId("weekly-plan-assumptions").innerHTML = (plan.assumptions || [])
+      .map((item) => `<div class="decision-note">${esc(item)}</div>`)
+      .join("");
+  }
+  const weeklyCaptainId = recommendation.captain && recommendation.captain.id;
+  const weeklyViceId =
+    recommendation.vice_captain && recommendation.vice_captain.id;
+  const weeklyPitch = (lineup) =>
+    ["FWD", "MID", "DEF", "GKP"]
+      .map((position) => {
+        const row = (lineup || []).filter(
+          (player) => player.position_short === position,
+        );
+        return `<div class="pitch-row pitch-${position.toLowerCase()}">${row
+          .map((player) => {
+            const role =
+              player.id === weeklyCaptainId
+                ? "C"
+                : player.id === weeklyViceId
+                  ? "VC"
+                  : "";
+            return `<div class="pitch-player ${player.id === weeklyCaptainId ? "captain" : ""}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;
+          })
+          .join("")}</div>`;
+      })
+      .join("");
+  byId("weekly-lineup").hidden = false;
+  byId("weekly-lineup-heading").textContent =
+    `Recommended GW${weekly.event} XI · ${actionLabel}`;
+  byId("weekly-lineup-meta").textContent =
+    `${recommendation.formation} · ${selected.label}`;
+  byId("weekly-pitch").setAttribute(
+    "aria-label",
+    `${recommendation.formation} post-decision formation: ${(recommendation.starting_xi || []).map((player) => `${player.name}${player.id === weeklyCaptainId ? " captain" : player.id === weeklyViceId ? " vice-captain" : ""}`).join(", ")}`,
+  );
+  byId("weekly-pitch").innerHTML = weeklyPitch(
+    recommendation.starting_xi || [],
+  );
+  byId("weekly-bench").innerHTML = (recommendation.bench || [])
+    .map(
+      (player, index) =>
+        `<div class="weekly-bench-card"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span></div>`,
+    )
+    .join("");
+  const chip = selected.chip_recommendation || {};
+  const alternatives = (chip.alternatives || [])
+    .map(
+      (item) =>
+        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts<br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
+    )
+    .join("");
+  byId("weekly-chip").innerHTML =
+    `<strong>${esc(chip.label || "Hold all chips")}</strong><p>${esc(chip.reason || "No chip recommendation is available.")}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
+  const inventory = (weekly.chip_inventory || [])
+    .map(
+      (item) =>
+        `${item.label}: ${item.available ? "available" : item.used_event ? `used GW${item.used_event}` : `outside GW${item.start_event}–${item.stop_event}`}`,
+    )
+    .join(" · ");
+  const rules = weekly.official_rules || {};
+  const rulesPreview = weekly.draft
+    ? `Once Gameweek 1 begins, one free transfer per Gameweek applies, up to ${esc(rules.maximum_free_transfers)} stored; each excess transfer costs ${esc(rules.extra_transfer_cost)} points.`
+    : `<strong>Official rules reviewed</strong><br>One free transfer per Gameweek, up to ${esc(rules.maximum_free_transfers)} stored; each excess transfer costs ${esc(rules.extra_transfer_cost)} points. ${esc(inventory)}`;
+  byId("weekly-rules").innerHTML =
+    `${rulesPreview}<br>${safeLink(rules.source, "Official FPL rules")}<br><span class="status-wait">${esc(weekly.state_warning)}</span>`;
+}
+function renderManager() {
+  const manager = state.manager || {
+    connection_status: "not_configured",
+    squad: [],
+  };
+  const value = (value) =>
+    value === null || value === "" || value === false
+      ? "Not yet available"
+      : value;
+  const money = (value) =>
+    value === null || value === ""
+      ? "Not yet available"
+      : `£${(Number(value) / 10).toFixed(1)}m`;
+  if (manager.connection_status === "lookup_failed") {
+    const failNote =
+      "Team not found, or the official FPL API is temporarily unavailable. Check the team ID and try again.";
+    byId("my-team-summary").innerHTML =
+      `<div class="empty">${esc(failNote)}</div>`;
+    byId("manager-status").textContent = failNote;
+    byId("squad-grid").innerHTML =
+      '<div class="empty">No public squad is connected.</div>';
+    return;
+  }
+  if (manager.connection_status === "not_configured") {
+    const setupNote =
+      "Enter your FPL team ID (from your FPL entry URL) in the Manager profile form on the My Profile view, then save.";
+    byId("my-team-summary").innerHTML =
+      `<div class="empty">No public team ID is configured. ${esc(setupNote)}</div>`;
+    byId("manager-status").textContent = setupNote;
+    byId("squad-grid").innerHTML =
+      '<div class="empty">No public squad is connected.</div>';
+    return;
+  }
+  byId("my-team-summary").innerHTML =
+    `<div class="team-stat"><b>${esc(manager.team_name || "Unnamed team")}</b><span>${esc(manager.manager_name || "Manager")}</span></div><div class="team-stat"><b>${esc(manager.team_id)}</b><span>Team ID</span></div><div class="team-stat"><b>${esc(value(manager.overall_rank))}</b><span>Overall rank</span></div><div class="team-stat"><b>${esc(value(manager.overall_points))}</b><span>Points</span></div><div class="team-stat"><b>${esc(money(manager.team_value))}</b><span>Team value</span></div><div class="team-stat"><b>${esc(money(manager.bank))}</b><span>Bank</span></div>`;
+  if (!manager.squad_publicly_available) {
+    byId("manager-status").className = "empty";
+    byId("manager-status").textContent =
+      "Connected to the official public entry. Public GW1 squad is hidden until the deadline, so no draft players are inferred.";
+    byId("squad-grid").innerHTML =
+      '<div class="empty">Public GW1 squad is hidden until the deadline. The dashboard will load it after official FPL publishes the picks.</div>';
+    return;
+  }
+  byId("manager-status").className = "status-good";
+  byId("manager-status").textContent =
+    `Connected · ${manager.squad.length} public picks loaded`;
+  const positions = {
+    1: "Goalkeeper",
+    2: "Defender",
+    3: "Midfielder",
+    4: "Forward",
+  };
+  byId("squad-grid").innerHTML = manager.squad
+    .map(
+      (player) =>
+        `<div class="player-card"><strong>${esc(player.name)}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}</strong><span>${esc(positions[player.element_type] || "Player")} · ${esc(money(player.price))}</span><span>${player.position <= 11 ? "Starting XI" : `Bench ${player.position - 11}`}</span></div>`,
+    )
+    .join("");
+}
+function renderPerformance() {
+  const summary = performance.summary || {};
+  const calibration = performance.calibration || { recommendations: [] };
+  const format = (value) =>
+    value == null ? "Awaiting" : Number(value).toFixed(1);
+  const coverage =
+    summary.range_coverage == null
+      ? "Awaiting"
+      : `${(Number(summary.range_coverage) * 100).toFixed(0)}%`;
+  const active = performance.status === "active";
+  byId("performance-status").className = active ? "status-good" : "status-wait";
+  byId("performance-status").textContent = active
+    ? `${performance.completed_comparisons} completed comparison${performance.completed_comparisons === 1 ? "" : "s"}`
+    : "Starts after Gameweek 1 is final";
+  byId("performance-summary").innerHTML =
+    `<div class="decision-metric"><b>${Number(performance.completed_comparisons || 0)}</b><span>Completed profile-horizon comparisons</span></div><div class="decision-metric"><b>${Number(performance.actual_events_collected || 0)}</b><span>Official Gameweeks collected</span></div><div class="decision-metric"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="decision-metric"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div><div class="decision-metric"><b>${coverage}</b><span>Uncertainty-range coverage</span></div>`;
+  const horizons = performance.by_horizon || {};
+  byId("performance-horizons").innerHTML = [1, 3, 5]
+    .map((horizon) => {
+      const row = horizons[String(horizon)] || {};
+      return `<div class="performance-card"><b>${format(row.mae)}</b><span>${horizon}-GW MAE · ${Number(row.count || 0)} completed</span><span>Bias ${format(row.bias)} · coverage ${row.range_coverage == null ? "Awaiting" : `${(Number(row.range_coverage) * 100).toFixed(0)}%`}</span></div>`;
+    })
+    .join("");
+  byId("performance-calibration").innerHTML =
+    `<p class="${calibration.ready ? "status-good" : "status-wait"}">${esc(calibration.status || "Waiting for enough completed forecasts.")}</p>${(calibration.recommendations || []).map((item) => `<div class="decision-note">${esc(item)}</div>`).join("")}<div class="decision-note"><strong>Improvement policy</strong><br>Use error, bias, and interval coverage to review minutes, scoring-rate, and uncertainty assumptions. No weights are silently retuned from a small sample.</div>`;
+  const comparisons = performance.comparisons || [];
+  byId("performance-history").innerHTML = comparisons.length
+    ? comparisons
+        .slice(0, 50)
+        .map((row) => {
+          const error = Number(row.error);
+          return `<tr class="performance-row"><th scope="row">GW${row.origin_event}</th><td>${esc(row.profile_label)}</td><td>${row.horizon} GW</td><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error > 0 ? "positive" : error < 0 ? "negative" : ""}">${error > 0 ? "+" : ""}${error.toFixed(1)}</td><td>${row.inside_range ? "Yes" : "No"}</td></tr>`;
+        })
+        .join("")
+    : '<tr><td colspan="7"><div class="empty">No completed comparison yet. The current pre-GW1 forecast is stored locally and will be scored after official results are final.</div></td></tr>';
+  byId("performance-method").textContent =
+    performance.method ||
+    "Frozen pre-event forecasts are compared with official FPL points.";
+  const collectionErrors = performance.collection_errors || [];
+  byId("performance-errors").innerHTML = collectionErrors
+    .map(
+      (error) =>
+        `<div class="limitation-note"><strong>Result collection issue</strong>${esc(error.message || error)}</div>`,
+    )
+    .join("");
+}
+function renderShadowModels() {
+  const shadowModels = performance.shadow_models || {};
+  const versions = Object.keys(shadowModels);
+  const statusEl = byId("shadow-models-status");
+  const format = (value) =>
+    value == null ? "Awaiting" : Number(value).toFixed(1);
+  if (!versions.length) {
+    statusEl.className = "status-wait";
+    statusEl.textContent = "No shadow models tracked yet";
+    byId("shadow-models-list").innerHTML =
+      '<p class="empty">No experimental models are currently running in shadow.</p>';
+    return;
+  }
+  statusEl.className = "status-good";
+  statusEl.textContent = `${versions.length} shadow model${versions.length === 1 ? "" : "s"} tracked`;
+  byId("shadow-models-list").innerHTML = versions
+    .map((version) => {
+      const model = shadowModels[version] || {};
+      const summary = model.summary || {};
+      const active = model.status === "active";
+      const completed = Number(model.comparisons?.length || 0);
+      const coverage =
+        summary.range_coverage == null
+          ? "Awaiting"
+          : `${(Number(summary.range_coverage) * 100).toFixed(0)}%`;
+      return `<div style="margin-top:12px"><div class="section-heading"><h3 style="font-size:14px;margin:0">${esc(version)}</h3><span class="${active ? "status-good" : "status-wait"}">${active ? `${completed} completed comparison${completed === 1 ? "" : "s"}` : "Awaiting completed Gameweeks"}</span></div><div class="performance-horizons"><div class="performance-card"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="performance-card"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div><div class="performance-card"><b>${coverage}</b><span>Uncertainty-range coverage</span></div></div></div>`;
+    })
+    .join("");
+}
+function renderTeamPerformance() {
+  const manager = state.manager || { connection_status: "not_configured" };
+  const teamPerformance = performance.team_performance || { comparisons: [] };
+  const comparisons = teamPerformance.comparisons || [];
+  const statusEl = byId("performance-team-status");
+  const summaryEl = byId("performance-team-summary");
+  const historyEl = byId("performance-team-history");
+  const methodEl = byId("performance-team-method");
+  if (manager.connection_status === "not_configured") {
+    statusEl.className = "status-wait";
+    statusEl.textContent = "FPL team not connected";
+    summaryEl.innerHTML = "";
+    historyEl.innerHTML =
+      '<tr><td colspan="5"><div class="empty">Enter your FPL team ID in the Manager profile form on the My Profile view, then save.</div></td></tr>';
+    methodEl.textContent = "";
+    return;
+  }
+  if (!comparisons.length) {
+    statusEl.className = "status-wait";
+    summaryEl.innerHTML = "";
+    if (!performance.actual_events_collected) {
+      statusEl.textContent = "Waiting for completed Gameweeks";
+      historyEl.innerHTML =
+        '<tr><td colspan="5"><div class="empty">No Gameweek has finished yet. Team comparisons appear after official results are collected.</div></td></tr>';
+    } else {
+      statusEl.textContent = "Waiting for a frozen pre-deadline forecast";
+      historyEl.innerHTML =
+        '<tr><td colspan="5"><div class="empty">No pre-deadline player forecast was frozen for a finished Gameweek yet, so no team comparison can be shown. Results are never backfilled with hindsight lineups.</div></td></tr>';
+    }
+    methodEl.textContent = teamPerformance.method || "";
+    return;
+  }
+  statusEl.className = "status-good";
+  statusEl.textContent = `${comparisons.length} completed Gameweek${comparisons.length === 1 ? "" : "s"}`;
+  const summary = teamPerformance.summary || {};
+  const format = (value) =>
+    value == null ? "Awaiting" : Number(value).toFixed(1);
+  summaryEl.innerHTML = `<div class="decision-metric"><b>${Number(summary.count || 0)}</b><span>Completed Gameweeks</span></div><div class="decision-metric"><b>${format(summary.mae)}</b><span>Mean absolute error</span></div><div class="decision-metric"><b>${format(summary.bias)}</b><span>Bias · actual minus modeled</span></div>`;
+  historyEl.innerHTML = comparisons
+    .slice()
+    .sort((a, b) => b.event - a.event)
+    .map((row) => {
+      const error = Number(row.error);
+      return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error > 0 ? "positive" : error < 0 ? "negative" : ""}">${error > 0 ? "+" : ""}${error.toFixed(1)}</td><td>${row.inside_range ? "Yes" : "No"}</td></tr>`;
+    })
+    .join("");
+  methodEl.textContent = teamPerformance.method || "";
+}
+function renderPlayerPerformance() {
+  const playerPerformance = performance.player_performance || {
+    comparisons: [],
+  };
+  const comparisons = playerPerformance.comparisons || [];
+  const playerById = {};
+  players.forEach((player) => {
+    playerById[player.id] = player;
+  });
+  const label = (id) => (playerById[id] ? playerById[id].name : `Player ${id}`);
+  const commentedIds = [...new Set(comparisons.map((row) => row.element_id))];
+  const squad = (state.manager && state.manager.squad) || [];
+  const squadIds = new Set(squad.map((player) => player.element_id));
+  const byName = (a, b) => label(a).localeCompare(label(b));
+  const squadForecastIds = commentedIds
+    .filter((id) => squadIds.has(id))
+    .sort(byName);
+  const otherForecastIds = commentedIds
+    .filter((id) => !squadIds.has(id))
+    .sort(byName);
+  const select = byId("performance-player-select");
+  const previousValue = select.value;
+  const optgroup = (title, ids) =>
+    ids.length
+      ? `<optgroup label="${esc(title)}">${ids.map((id) => `<option value="${id}">${esc(label(id))}</option>`).join("")}</optgroup>`
+      : "";
+  select.innerHTML =
+    optgroup("My squad", squadForecastIds) +
+    optgroup("All forecast players", otherForecastIds);
+  if (!commentedIds.length) {
+    byId("performance-player-history").innerHTML =
+      '<tr><td colspan="5"><div class="empty">No frozen per-player forecasts have been compared with results yet.</div></td></tr>';
+    byId("performance-player-summary").textContent = "";
+    return;
+  }
+  const defaultId = squadForecastIds.length
+    ? squadForecastIds[0]
+    : otherForecastIds[0];
+  let selected = Number(previousValue);
+  if (!commentedIds.includes(selected)) selected = defaultId;
+  select.value = String(selected);
+  const renderRows = () => {
+    const id = Number(select.value);
+    const rows = comparisons
+      .filter((row) => row.element_id === id)
+      .slice()
+      .sort((a, b) => b.event - a.event);
+    byId("performance-player-history").innerHTML = rows.length
+      ? rows
+          .map((row) => {
+            const error = Number(row.error);
+            return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${Number(row.modeled_points).toFixed(1)}</td><td>${Number(row.actual_points).toFixed(1)}</td><td class="${error > 0 ? "positive" : error < 0 ? "negative" : ""}">${error > 0 ? "+" : ""}${error.toFixed(1)}</td><td>${row.inside_range ? "Yes" : "No"}</td></tr>`;
+          })
+          .join("")
+      : '<tr><td colspan="5"><div class="empty">No completed comparison yet for this player.</div></td></tr>';
+    const count = rows.length;
+    const mae = count
+      ? rows.reduce((total, row) => total + Math.abs(row.error), 0) / count
+      : null;
+    const bias = count
+      ? rows.reduce((total, row) => total + row.error, 0) / count
+      : null;
+    byId("performance-player-summary").textContent = count
+      ? `${count} completed comparison${count === 1 ? "" : "s"} · MAE ${mae.toFixed(1)} · bias ${bias >= 0 ? "+" : ""}${bias.toFixed(1)}`
+      : "No completed comparison yet for this player.";
+  };
+  select.onchange = renderRows;
+  renderRows();
+}
+function renderModel() {
+  byId("model-readiness").innerHTML =
+    `<dt>User-facing state</dt><dd>${esc(seasonLabel())}</dd><dt>Raw status</dt><dd>${esc(state.fpl.season_status)}</dd><dt>Phase</dt><dd>${esc(state.fpl.season_phase || "feed_pending")}</dd><dt>Players</dt><dd>${state.fpl.player_count}</dd><dt>Clubs</dt><dd>${state.fpl.team_count}</dd><dt>Decision model</dt><dd class="${decision.status === "active_preliminary" ? "status-good" : "status-wait"}">${esc(decision.status)}</dd><dt>Projection version</dt><dd>${esc((decision.model || {}).version || "Not active")}</dd><dt>Generated</dt><dd>${esc(state.generated_at)}</dd>`;
+  const sources = state.sources || [];
+  byId("source-list").innerHTML = sources.length
+    ? sources
+        .map(
+          (source) =>
+            `<div class="source">${safeLink(source.url, source.name)}<span>Configured</span></div>`,
+        )
+        .join("")
+    : '<div class="empty">No sources are registered.</div>';
+}
+function captureWorkspaceContext() {
+  const activeView =
+    (document.querySelector(".view.active") || {}).id?.replace("view-", "") ||
+    "squad";
+  const activeProfile =
+    (document.querySelector('[data-profile][aria-selected="true"]') || {})
+      .dataset?.profile || null;
+  const controlIds = [
+    ...filterIds,
+    "player-search",
+    "player-club-filter",
+    "player-position-filter",
+    "player-sort",
+    "fixture-gameweek",
+    "fixture-club-filter",
+  ];
+  const controls = Object.fromEntries(
+    controlIds
+      .map((id) => [id, byId(id)?.value])
+      .filter(([, value]) => value !== void 0),
+  );
+  sessionStorage.setItem(
+    "fpl-workspace-context",
+    JSON.stringify({ view: activeView, profile: activeProfile, controls }),
+  );
+}
+function restoreWorkspaceContext() {
+  let context = {};
+  try {
+    context = JSON.parse(
+      sessionStorage.getItem("fpl-workspace-context") || "{}",
+    );
+  } catch (error) {
+    sessionStorage.removeItem("fpl-workspace-context");
+  }
+  Object.entries(context.controls || {}).forEach(([id, value]) => {
+    const control = byId(id);
+    if (
+      (control &&
+        [...(control.options || [])].some(
+          (option) => option.value === value,
+        )) ||
+      control?.type === "search"
+    )
+      control.value = value;
+  });
+  if (context.profile) {
+    renderDecision(context.profile);
+    renderWeeklyDecision(context.profile);
+  }
+  renderPlayers();
+  renderFixtures();
+  applyFilters();
+  showView(titles[context.view] ? context.view : "squad");
+}
+function sourceSummary(payload) {
+  const sources = payload.source_statuses || {};
+  const mark = (value) =>
+    value === "ok" ? "✓" : value === "error" ? "✕" : "not active";
+  return `FPL ${mark(sources.fpl)} · My Team ${mark(sources.manager)} · Transfers ${mark(sources.transfers)} · Fixtures ${mark(sources.fixtures)}`;
+}
 // Issue #27: refreshing is an operator-only action (curl/a script using an env-var token) --
 // no token is ever shipped to the browser, and there is no in-page "Refresh now" control
 // anymore. `servedLive()` still distinguishes "opened as a static file" (file://, or the
 // standalone dashboard.html) from "served over http(s) by the dashboard service", which the
 // profile/draft-squad/reminder forms below use to decide whether their save requests can
 // plausibly succeed.
-function servedLive(){return location.protocol.startsWith('http');}
-function setupRefresh(){const message=byId('refresh-message');const sourceStatus=byId('refresh-source-status');const saved=sessionStorage.getItem('fpl-refresh-result');if(saved){try{const result=JSON.parse(saved);message.textContent=`Updated ${fmtDate(result.generated_at,true)}`;sourceStatus.textContent=sourceSummary(result);}catch(error){sessionStorage.removeItem('fpl-refresh-result');}return;}message.textContent=`Last refreshed ${fmtDate(state.generated_at,true)}`;}
-const curatedTimezones=['UTC','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Sao_Paulo','America/Mexico_City','America/Toronto','Europe/London','Europe/Dublin','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Rome','Europe/Amsterdam','Europe/Moscow','Africa/Cairo','Africa/Johannesburg','Africa/Lagos','Asia/Dubai','Asia/Kolkata','Asia/Shanghai','Asia/Tokyo','Asia/Singapore','Australia/Sydney','Pacific/Auckland'];
+function servedLive() {
+  return location.protocol.startsWith("http");
+}
+function setupRefresh() {
+  const message = byId("refresh-message");
+  const sourceStatus = byId("refresh-source-status");
+  const saved = sessionStorage.getItem("fpl-refresh-result");
+  if (saved) {
+    try {
+      const result = JSON.parse(saved);
+      message.textContent = `Updated ${fmtDate(result.generated_at, true)}`;
+      sourceStatus.textContent = sourceSummary(result);
+    } catch (error) {
+      sessionStorage.removeItem("fpl-refresh-result");
+    }
+    return;
+  }
+  message.textContent = `Last refreshed ${fmtDate(state.generated_at, true)}`;
+}
+const curatedTimezones = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "America/Mexico_City",
+  "America/Toronto",
+  "Europe/London",
+  "Europe/Dublin",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Europe/Rome",
+  "Europe/Amsterdam",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "Africa/Lagos",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Singapore",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
 // Issue-driven removal: the "Confirmed free transfers"/"Free transfers gameweek" override let a
 // visitor correct the app's own estimate of their free-transfer balance (derive_free_transfers in
 // transfer_decisions.py can be wrong for an unpublished in-Gameweek transfer FPL's public API
@@ -211,107 +1995,705 @@ const curatedTimezones=['UTC','America/New_York','America/Chicago','America/Denv
 // nullable and untouched (profiles.py, server.py's /api/profile, transfer_decisions.py's fallback
 // to the derived estimate when unset) -- this is a UI-only removal, not a schema change; simply
 // never sending these two keys is already handled the same as an explicit null server-side.
-function setupProfileForm(){const teamIdInput=byId('profile-team-id');const timezoneSelect=byId('profile-timezone');const riskSelect=byId('profile-risk');const saveButton=byId('profile-save');const message=byId('profile-message');const profile=state.profile||{};const currentTimezone=profile.timezone||state.timezone||'America/New_York';const timezoneOptions=curatedTimezones.includes(currentTimezone)?curatedTimezones:[...curatedTimezones,currentTimezone];timezoneSelect.innerHTML=timezoneOptions.map(zone=>`<option value="${esc(zone)}">${esc(zone)}</option>`).join('');teamIdInput.value=profile.team_id??'';timezoneSelect.value=currentTimezone;riskSelect.value=profile.risk_profile||'balanced';const controls=[teamIdInput,timezoneSelect,riskSelect,saveButton];if(!servedLive()){controls.forEach(control=>control.disabled=true);message.textContent='Start the local dashboard service to edit your profile.';return;}byId('profile-form').addEventListener('submit',async event=>{event.preventDefault();message.textContent='';const rawTeamId=teamIdInput.value.trim();if(!rawTeamId){message.textContent='Enter your FPL team ID to save settings.';return;}if(!/^[0-9]+$/.test(rawTeamId)||Number(rawTeamId)<1||Number(rawTeamId)>99999999){message.textContent='Enter a valid FPL team ID (a positive whole number).';return;}const payload={team_id:Number(rawTeamId),timezone:timezoneSelect.value,risk_profile:riskSelect.value};saveButton.disabled=true;message.textContent='Saving…';try{const response=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const responsePayload=await response.json().catch(()=>({message:'Profile save returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Profile save failed with status ${response.status}`);message.textContent='Profile saved. Reloading…';window.setTimeout(()=>window.location.reload(),400);}catch(error){saveButton.disabled=false;message.textContent=`Save failed: ${error.message}`;}});}
-function setupReminderForm(){
-const panel=byId('reminder-content');
-let showForm=false;
-function postReminder(payload){return fetch('/api/reminder-opt-in',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(async response=>{const responsePayload=await response.json().catch(()=>({message:'Reminder update returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Reminder update failed with status ${response.status}`);return responsePayload;});}
-function render(){
-const profile=state.profile||{};
-const status=profile.reminder_status||null;
-const teamId=profile.team_id;
-if(!teamId){panel.innerHTML='<div class="empty">Connect your FPL team ID above to set up deadline reminders.</div>';return;}
-if(status==='pending'&&!showForm){
-panel.innerHTML=`<div class="empty">Check your inbox at <strong>${esc(profile.reminder_pending_email||'the address you entered')}</strong> to confirm.</div><div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap"><button id="reminder-resend" class="reset-filters" type="button">Resend or change</button><button id="reminder-cancel" class="reset-filters" type="button">Cancel</button></div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div>`;
-byId('reminder-resend').addEventListener('click',()=>{showForm=true;render();});
-byId('reminder-cancel').addEventListener('click',async()=>{const message=byId('reminder-message');message.textContent='Cancelling…';try{await postReminder({team_id:teamId,action:'decline'});message.textContent='Cancelled. Reloading…';window.setTimeout(()=>window.location.reload(),400);}catch(error){message.textContent=`Cancel failed: ${error.message}`;}});
-return;
+function setupProfileForm() {
+  const teamIdInput = byId("profile-team-id");
+  const timezoneSelect = byId("profile-timezone");
+  const riskSelect = byId("profile-risk");
+  const saveButton = byId("profile-save");
+  const message = byId("profile-message");
+  const profile = state.profile || {};
+  const currentTimezone =
+    profile.timezone || state.timezone || "America/New_York";
+  const timezoneOptions = curatedTimezones.includes(currentTimezone)
+    ? curatedTimezones
+    : [...curatedTimezones, currentTimezone];
+  timezoneSelect.innerHTML = timezoneOptions
+    .map((zone) => `<option value="${esc(zone)}">${esc(zone)}</option>`)
+    .join("");
+  teamIdInput.value = profile.team_id ?? "";
+  timezoneSelect.value = currentTimezone;
+  riskSelect.value = profile.risk_profile || "balanced";
+  const controls = [teamIdInput, timezoneSelect, riskSelect, saveButton];
+  if (!servedLive()) {
+    controls.forEach((control) => (control.disabled = true));
+    message.textContent =
+      "Start the local dashboard service to edit your profile.";
+    return;
+  }
+  byId("profile-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    message.textContent = "";
+    const rawTeamId = teamIdInput.value.trim();
+    if (!rawTeamId) {
+      message.textContent = "Enter your FPL team ID to save settings.";
+      return;
+    }
+    if (
+      !/^[0-9]+$/.test(rawTeamId) ||
+      Number(rawTeamId) < 1 ||
+      Number(rawTeamId) > 99999999
+    ) {
+      message.textContent =
+        "Enter a valid FPL team ID (a positive whole number).";
+      return;
+    }
+    const payload = {
+      team_id: Number(rawTeamId),
+      timezone: timezoneSelect.value,
+      risk_profile: riskSelect.value,
+    };
+    saveButton.disabled = true;
+    message.textContent = "Saving…";
+    try {
+      const response = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await response
+        .json()
+        .catch(() => ({
+          message: "Profile save returned an unreadable response.",
+        }));
+      if (!response.ok)
+        throw new Error(
+          responsePayload.message ||
+            `Profile save failed with status ${response.status}`,
+        );
+      message.textContent = "Profile saved. Reloading…";
+      window.setTimeout(() => window.location.reload(), 400);
+    } catch (error) {
+      saveButton.disabled = false;
+      message.textContent = `Save failed: ${error.message}`;
+    }
+  });
 }
-if(status==='enabled'&&!showForm){
-panel.innerHTML=`<div class="empty">Reminders are on for <strong>${esc(profile.email||'')}</strong>, T-${esc(String(profile.reminder_lead_hours||3))}h before each deadline.</div><div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap"><button id="reminder-change" class="reset-filters" type="button">Change email or lead time</button><button id="reminder-disable" class="reset-filters" type="button">Disable</button></div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div>`;
-byId('reminder-change').addEventListener('click',()=>{showForm=true;render();});
-byId('reminder-disable').addEventListener('click',async()=>{const message=byId('reminder-message');message.textContent='Disabling…';try{await postReminder({team_id:teamId,action:'disable'});message.textContent='Disabled. Reloading…';window.setTimeout(()=>window.location.reload(),400);}catch(error){message.textContent=`Disable failed: ${error.message}`;}});
-return;
+function setupReminderForm() {
+  const panel = byId("reminder-content");
+  let showForm = false;
+  function postReminder(payload) {
+    return fetch("/api/reminder-opt-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(async (response) => {
+      const responsePayload = await response
+        .json()
+        .catch(() => ({
+          message: "Reminder update returned an unreadable response.",
+        }));
+      if (!response.ok)
+        throw new Error(
+          responsePayload.message ||
+            `Reminder update failed with status ${response.status}`,
+        );
+      return responsePayload;
+    });
+  }
+  function render() {
+    const profile = state.profile || {};
+    const status = profile.reminder_status || null;
+    const teamId = profile.team_id;
+    if (!teamId) {
+      panel.innerHTML =
+        '<div class="empty">Connect your FPL team ID above to set up deadline reminders.</div>';
+      return;
+    }
+    if (status === "pending" && !showForm) {
+      panel.innerHTML = `<div class="empty">Check your inbox at <strong>${esc(profile.reminder_pending_email || "the address you entered")}</strong> to confirm.</div><div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap"><button id="reminder-resend" class="reset-filters" type="button">Resend or change</button><button id="reminder-cancel" class="reset-filters" type="button">Cancel</button></div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div>`;
+      byId("reminder-resend").addEventListener("click", () => {
+        showForm = true;
+        render();
+      });
+      byId("reminder-cancel").addEventListener("click", async () => {
+        const message = byId("reminder-message");
+        message.textContent = "Cancelling…";
+        try {
+          await postReminder({ team_id: teamId, action: "decline" });
+          message.textContent = "Cancelled. Reloading…";
+          window.setTimeout(() => window.location.reload(), 400);
+        } catch (error) {
+          message.textContent = `Cancel failed: ${error.message}`;
+        }
+      });
+      return;
+    }
+    if (status === "enabled" && !showForm) {
+      panel.innerHTML = `<div class="empty">Reminders are on for <strong>${esc(profile.email || "")}</strong>, T-${esc(String(profile.reminder_lead_hours || 3))}h before each deadline.</div><div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap"><button id="reminder-change" class="reset-filters" type="button">Change email or lead time</button><button id="reminder-disable" class="reset-filters" type="button">Disable</button></div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div>`;
+      byId("reminder-change").addEventListener("click", () => {
+        showForm = true;
+        render();
+      });
+      byId("reminder-disable").addEventListener("click", async () => {
+        const message = byId("reminder-message");
+        message.textContent = "Disabling…";
+        try {
+          await postReminder({ team_id: teamId, action: "disable" });
+          message.textContent = "Disabled. Reloading…";
+          window.setTimeout(() => window.location.reload(), 400);
+        } catch (error) {
+          message.textContent = `Disable failed: ${error.message}`;
+        }
+      });
+      return;
+    }
+    if (status === "declined" && !showForm) {
+      panel.innerHTML =
+        '<div class="empty">You have opted out of deadline reminders.</div><div style="margin-top:10px"><button id="reminder-reconsider" class="refresh-button" type="button">Reconsider</button></div>';
+      byId("reminder-reconsider").addEventListener("click", () => {
+        showForm = true;
+        render();
+      });
+      return;
+    }
+    const currentEmail = profile.email || profile.reminder_pending_email || "";
+    const currentLead = profile.reminder_lead_hours || 3;
+    const cancelButtonHtml = status
+      ? '<button id="reminder-back" class="reset-filters" type="button">Back</button>'
+      : '<button id="reminder-no-thanks" class="reset-filters" type="button">No thanks</button>';
+    let selectedLead = currentLead;
+    panel.innerHTML = `<form id="reminder-form"><div class="profile-form-grid"><div class="field"><label for="reminder-email">Email</label><input id="reminder-email" type="email" placeholder="you@example.com" value="${esc(currentEmail)}"></div><div class="field"><label>Lead time</label><div id="reminder-lead-options" class="profile-options" style="margin-top:6px" role="radiogroup" aria-label="Reminder lead time">${[3, 12, 24].map((hours) => `<button id="reminder-lead-tab-${hours}" type="button" class="profile-option ${hours === currentLead ? "active" : ""}" role="radio" aria-checked="${hours === currentLead}" data-lead-hours="${hours}"><strong>T-${hours}h</strong><span>before deadline</span></button>`).join("")}</div></div></div><div style="display:flex;gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap"><button id="reminder-save" class="refresh-button" type="submit">Get reminders</button>${cancelButtonHtml}</div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div></form>`;
+    bindTabs("reminder-lead-options", "[data-lead-hours]", (button) => {
+      selectedLead = Number(button.dataset.leadHours);
+      byId("reminder-lead-options")
+        .querySelectorAll("[data-lead-hours]")
+        .forEach((option) => {
+          const active = option === button;
+          option.classList.toggle("active", active);
+          option.setAttribute("aria-checked", String(active));
+        });
+    });
+    const backButton = byId("reminder-back");
+    if (backButton)
+      backButton.addEventListener("click", () => {
+        showForm = false;
+        render();
+      });
+    const noThanksButton = byId("reminder-no-thanks");
+    if (noThanksButton)
+      noThanksButton.addEventListener("click", async () => {
+        const message = byId("reminder-message");
+        message.textContent = "Saving…";
+        try {
+          await postReminder({ team_id: teamId, action: "decline" });
+          message.textContent = "Got it. Reloading…";
+          window.setTimeout(() => window.location.reload(), 400);
+        } catch (error) {
+          message.textContent = `Save failed: ${error.message}`;
+        }
+      });
+    if (!servedLive()) {
+      byId("reminder-form")
+        .querySelectorAll("button,input")
+        .forEach((control) => (control.disabled = true));
+      byId("reminder-message").textContent =
+        "Start the local dashboard service to set up reminders.";
+      return;
+    }
+    byId("reminder-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = byId("reminder-message");
+      const email = byId("reminder-email").value.trim();
+      if (!email || !email.includes("@")) {
+        message.textContent = "Enter a valid email address.";
+        return;
+      }
+      const leadHours = selectedLead;
+      const saveButton = byId("reminder-save");
+      saveButton.disabled = true;
+      message.textContent = "Sending confirmation email…";
+      try {
+        await postReminder({
+          team_id: teamId,
+          action: "enable",
+          email,
+          lead_hours: leadHours,
+        });
+        message.textContent = "Check your inbox to confirm. Reloading…";
+        window.setTimeout(() => window.location.reload(), 600);
+      } catch (error) {
+        saveButton.disabled = false;
+        message.textContent = `Request failed: ${error.message}`;
+      }
+    });
+  }
+  render();
 }
-if(status==='declined'&&!showForm){
-panel.innerHTML='<div class="empty">You have opted out of deadline reminders.</div><div style="margin-top:10px"><button id="reminder-reconsider" class="refresh-button" type="button">Reconsider</button></div>';
-byId('reminder-reconsider').addEventListener('click',()=>{showForm=true;render();});
-return;
+function setupContactForm() {
+  const categorySelect = byId("contact-category");
+  const emailInput = byId("contact-email");
+  const messageInput = byId("contact-message");
+  const saveButton = byId("contact-save");
+  const message = byId("contact-message-status");
+  const form = byId("contact-form");
+  if (!servedLive()) {
+    [categorySelect, emailInput, messageInput, saveButton].forEach(
+      (control) => (control.disabled = true),
+    );
+    message.textContent =
+      "Start the local dashboard service to send a message.";
+    return;
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    message.textContent = "";
+    const category = categorySelect.value;
+    const text = messageInput.value.trim();
+    const email = emailInput.value.trim();
+    if (!text) {
+      message.textContent = "Enter a message before sending.";
+      return;
+    }
+    if (email && !email.includes("@")) {
+      message.textContent = "Enter a valid email address, or leave it blank.";
+      return;
+    }
+    const payload = { category, message: text };
+    if (email) payload.reply_to = email;
+    saveButton.disabled = true;
+    message.textContent = "Sending…";
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await response
+        .json()
+        .catch(() => ({
+          message: "Message send returned an unreadable response.",
+        }));
+      if (!response.ok)
+        throw new Error(
+          responsePayload.message ||
+            `Message send failed with status ${response.status}`,
+        );
+      message.textContent =
+        responsePayload.message || "Thanks -- your message has been received.";
+      form.reset();
+      categorySelect.value = "bug";
+    } catch (error) {
+      message.textContent = `Send failed: ${error.message}`;
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
 }
-const currentEmail=profile.email||profile.reminder_pending_email||'';
-const currentLead=profile.reminder_lead_hours||3;
-const cancelButtonHtml=status?'<button id="reminder-back" class="reset-filters" type="button">Back</button>':'<button id="reminder-no-thanks" class="reset-filters" type="button">No thanks</button>';
-let selectedLead=currentLead;
-panel.innerHTML=`<form id="reminder-form"><div class="profile-form-grid"><div class="field"><label for="reminder-email">Email</label><input id="reminder-email" type="email" placeholder="you@example.com" value="${esc(currentEmail)}"></div><div class="field"><label>Lead time</label><div id="reminder-lead-options" class="profile-options" style="margin-top:6px" role="radiogroup" aria-label="Reminder lead time">${[3,12,24].map(hours=>`<button id="reminder-lead-tab-${hours}" type="button" class="profile-option ${hours===currentLead?'active':''}" role="radio" aria-checked="${hours===currentLead}" data-lead-hours="${hours}"><strong>T-${hours}h</strong><span>before deadline</span></button>`).join('')}</div></div></div><div style="display:flex;gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap"><button id="reminder-save" class="refresh-button" type="submit">Get reminders</button>${cancelButtonHtml}</div><div id="reminder-message" class="refresh-message" role="status" aria-live="polite"></div></form>`;
-bindTabs('reminder-lead-options','[data-lead-hours]',button=>{selectedLead=Number(button.dataset.leadHours);byId('reminder-lead-options').querySelectorAll('[data-lead-hours]').forEach(option=>{const active=option===button;option.classList.toggle('active',active);option.setAttribute('aria-checked',String(active));});});
-const backButton=byId('reminder-back');
-if(backButton)backButton.addEventListener('click',()=>{showForm=false;render();});
-const noThanksButton=byId('reminder-no-thanks');
-if(noThanksButton)noThanksButton.addEventListener('click',async()=>{const message=byId('reminder-message');message.textContent='Saving…';try{await postReminder({team_id:teamId,action:'decline'});message.textContent='Got it. Reloading…';window.setTimeout(()=>window.location.reload(),400);}catch(error){message.textContent=`Save failed: ${error.message}`;}});
-if(!servedLive()){byId('reminder-form').querySelectorAll('button,input').forEach(control=>control.disabled=true);byId('reminder-message').textContent='Start the local dashboard service to set up reminders.';return;}
-byId('reminder-form').addEventListener('submit',async event=>{
-event.preventDefault();
-const message=byId('reminder-message');
-const email=byId('reminder-email').value.trim();
-if(!email||!email.includes('@')){message.textContent='Enter a valid email address.';return;}
-const leadHours=selectedLead;
-const saveButton=byId('reminder-save');
-saveButton.disabled=true;
-message.textContent='Sending confirmation email…';
-try{
-await postReminder({team_id:teamId,action:'enable',email,lead_hours:leadHours});
-message.textContent='Check your inbox to confirm. Reloading…';
-window.setTimeout(()=>window.location.reload(),600);
-}catch(error){
-saveButton.disabled=false;
-message.textContent=`Request failed: ${error.message}`;
+function renderLookupBanner() {
+  const banner = byId("lookup-banner");
+  const lookup = state.lookup;
+  if (!lookup || !lookup.active) {
+    banner.hidden = true;
+    banner.innerHTML = "";
+    return;
+  }
+  banner.hidden = false;
+  const manager = state.manager || {};
+  const teamLabel =
+    lookup.status === "ok" && manager.team_name
+      ? `${esc(manager.team_name)} (team ID ${esc(lookup.team_id)})`
+      : `team ID ${esc(lookup.team_id)}`;
+  if (lookup.status === "ok") {
+    banner.innerHTML = `<strong>Viewing ${teamLabel} · one-off lookup</strong><a href="/">Back to your own team</a>`;
+  } else if (lookup.status === "opted_out") {
+    banner.innerHTML = `<strong>This manager has opted out of lookup recommendations.</strong><a href="/">Back to your own team</a>`;
+  } else {
+    banner.innerHTML = `<strong>Couldn't look up team ID ${esc(lookup.team_id)}</strong>Team not found, or the official FPL API is temporarily unavailable. <a href="/">Back to your own team</a>`;
+  }
 }
-});
+function setupTeamLookup() {
+  const form = byId("team-lookup-form");
+  const input = byId("team-lookup-input");
+  const message = byId("team-lookup-message");
+  const params = new URLSearchParams(window.location.search);
+  const currentTeamId = params.get("team_id");
+  if (currentTeamId) input.value = currentTeamId;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    message.textContent = "";
+    const raw = input.value.trim();
+    if (
+      !/^[0-9]{1,8}$/.test(raw) ||
+      Number(raw) < 1 ||
+      Number(raw) > 99999999
+    ) {
+      message.textContent =
+        "Enter a valid FPL team ID (a positive whole number).";
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("team_id", raw);
+    window.location.href = url.toString();
+  });
 }
-render();
+function setupThemeToggle() {
+  const button = byId("theme-toggle");
+  const applyState = (theme) => {
+    button.setAttribute("aria-checked", String(theme === "dark"));
+    button.setAttribute(
+      "aria-label",
+      theme === "dark" ? "Dark theme" : "Light theme",
+    );
+  };
+  applyState(document.documentElement.getAttribute("data-theme") || "dark");
+  button.addEventListener("click", () => {
+    const next =
+      document.documentElement.getAttribute("data-theme") === "light"
+        ? "dark"
+        : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem("fpl-theme", next);
+    } catch (error) {}
+    applyState(next);
+  });
 }
-function setupContactForm(){const categorySelect=byId('contact-category');const emailInput=byId('contact-email');const messageInput=byId('contact-message');const saveButton=byId('contact-save');const message=byId('contact-message-status');const form=byId('contact-form');if(!servedLive()){[categorySelect,emailInput,messageInput,saveButton].forEach(control=>control.disabled=true);message.textContent='Start the local dashboard service to send a message.';return;}form.addEventListener('submit',async event=>{event.preventDefault();message.textContent='';const category=categorySelect.value;const text=messageInput.value.trim();const email=emailInput.value.trim();if(!text){message.textContent='Enter a message before sending.';return;}if(email&&!email.includes('@')){message.textContent='Enter a valid email address, or leave it blank.';return;}const payload={category,message:text};if(email)payload.reply_to=email;saveButton.disabled=true;message.textContent='Sending…';try{const response=await fetch('/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const responsePayload=await response.json().catch(()=>({message:'Message send returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Message send failed with status ${response.status}`);message.textContent=responsePayload.message||'Thanks -- your message has been received.';form.reset();categorySelect.value='bug';}catch(error){message.textContent=`Send failed: ${error.message}`;}finally{saveButton.disabled=false;}});}
-function renderLookupBanner(){const banner=byId('lookup-banner');const lookup=state.lookup;if(!lookup||!lookup.active){banner.hidden=true;banner.innerHTML='';return;}banner.hidden=false;const manager=state.manager||{};const teamLabel=lookup.status==='ok'&&manager.team_name?`${esc(manager.team_name)} (team ID ${esc(lookup.team_id)})`:`team ID ${esc(lookup.team_id)}`;if(lookup.status==='ok'){banner.innerHTML=`<strong>Viewing ${teamLabel} · one-off lookup</strong><a href="/">Back to your own team</a>`;}else if(lookup.status==='opted_out'){banner.innerHTML=`<strong>This manager has opted out of lookup recommendations.</strong><a href="/">Back to your own team</a>`;}else{banner.innerHTML=`<strong>Couldn't look up team ID ${esc(lookup.team_id)}</strong>Team not found, or the official FPL API is temporarily unavailable. <a href="/">Back to your own team</a>`;}}
-function setupTeamLookup(){const form=byId('team-lookup-form');const input=byId('team-lookup-input');const message=byId('team-lookup-message');const params=new URLSearchParams(window.location.search);const currentTeamId=params.get('team_id');if(currentTeamId)input.value=currentTeamId;form.addEventListener('submit',event=>{event.preventDefault();message.textContent='';const raw=input.value.trim();if(!/^[0-9]{1,8}$/.test(raw)||Number(raw)<1||Number(raw)>99999999){message.textContent='Enter a valid FPL team ID (a positive whole number).';return;}const url=new URL(window.location.href);url.search='';url.searchParams.set('team_id',raw);window.location.href=url.toString();});}
-function setupThemeToggle(){const button=byId('theme-toggle');const applyState=theme=>{button.setAttribute('aria-checked',String(theme==='dark'));button.setAttribute('aria-label',theme==='dark'?'Dark theme':'Light theme')};applyState(document.documentElement.getAttribute('data-theme')||'dark');button.addEventListener('click',()=>{const next=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';document.documentElement.setAttribute('data-theme',next);try{localStorage.setItem('fpl-theme',next)}catch(error){}applyState(next)});}
-const draftQuotas={GKP:2,DEF:5,MID:5,FWD:3};const draftSize=Object.values(draftQuotas).reduce((sum,count)=>sum+count,0);const draftBudget=100.0;const draftClubLimit=3;
-let draftSelection=(state.profile&&Array.isArray(state.profile.draft_squad))?state.profile.draft_squad.slice():[];
-function draftPlayerById(id){return players.find(player=>player.id===id);}
-function draftTotals(){const squad=draftSelection.map(draftPlayerById).filter(Boolean);const spend=squad.reduce((sum,player)=>sum+Number(player.price),0);const positions={};squad.forEach(player=>{positions[player.position_short]=(positions[player.position_short]||0)+1;});const clubs={};squad.forEach(player=>{clubs[player.club]=(clubs[player.club]||0)+1;});return{squad,spend,positions,clubs};}
+const draftQuotas = { GKP: 2, DEF: 5, MID: 5, FWD: 3 };
+const draftSize = Object.values(draftQuotas).reduce(
+  (sum, count) => sum + count,
+  0,
+);
+const draftBudget = 100.0;
+const draftClubLimit = 3;
+let draftSelection =
+  state.profile && Array.isArray(state.profile.draft_squad)
+    ? state.profile.draft_squad.slice()
+    : [];
+function draftPlayerById(id) {
+  return players.find((player) => player.id === id);
+}
+function draftTotals() {
+  const squad = draftSelection.map(draftPlayerById).filter(Boolean);
+  const spend = squad.reduce((sum, player) => sum + Number(player.price), 0);
+  const positions = {};
+  squad.forEach((player) => {
+    positions[player.position_short] =
+      (positions[player.position_short] || 0) + 1;
+  });
+  const clubs = {};
+  squad.forEach((player) => {
+    clubs[player.club] = (clubs[player.club] || 0) + 1;
+  });
+  return { squad, spend, positions, clubs };
+}
 
 // Issue #152 follow-up: adding a player used to append it to a separate flat "selected squad"
 // list, entirely disconnected from the pitch view below it -- redundant, per direct user
 // feedback ("seems redundant" to declare on top and see it again in the pitch). A newly added
 // player now lands straight on the pitch (starting XI if there's legal room, else bench) or
 // straight on the bench when removed from the XI, with no intermediate flat list at all.
-function addDraftPlayer(id){if(draftSelection.includes(id)||draftSelection.length>=draftSize)return;draftSelection=[...draftSelection,id];const player=draftPlayerById(id);const startingSquadById=Object.fromEntries(draftStartingIds.map(startId=>[startId,draftPlayerById(startId)]));const counts=draftXiPositionCounts(draftStartingIds,startingSquadById);if(draftXiCanAdd(player.position_short,counts))draftStartingIds=[...draftStartingIds,id];renderDraftBuilder();}
-function removeDraftPlayer(id){draftSelection=draftSelection.filter(existing=>existing!==id);draftStartingIds=draftStartingIds.filter(existing=>existing!==id);if(draftPendingSwapId===id)draftPendingSwapId=null;if(draftCaptainId===id)draftCaptainId=draftStartingIds[0]||null;if(draftViceId===id||(draftCaptainId!==null&&draftViceId===draftCaptainId))draftViceId=draftStartingIds.find(existing=>existing!==draftCaptainId)||null;renderDraftBuilder();}
+function addDraftPlayer(id) {
+  if (draftSelection.includes(id) || draftSelection.length >= draftSize) return;
+  draftSelection = [...draftSelection, id];
+  const player = draftPlayerById(id);
+  const startingSquadById = Object.fromEntries(
+    draftStartingIds.map((startId) => [startId, draftPlayerById(startId)]),
+  );
+  const counts = draftXiPositionCounts(draftStartingIds, startingSquadById);
+  if (draftXiCanAdd(player.position_short, counts))
+    draftStartingIds = [...draftStartingIds, id];
+  renderDraftBuilder();
+}
+function removeDraftPlayer(id) {
+  draftSelection = draftSelection.filter((existing) => existing !== id);
+  draftStartingIds = draftStartingIds.filter((existing) => existing !== id);
+  if (draftPendingSwapId === id) draftPendingSwapId = null;
+  if (draftCaptainId === id) draftCaptainId = draftStartingIds[0] || null;
+  if (
+    draftViceId === id ||
+    (draftCaptainId !== null && draftViceId === draftCaptainId)
+  )
+    draftViceId =
+      draftStartingIds.find((existing) => existing !== draftCaptainId) || null;
+  renderDraftBuilder();
+}
 
-const draftResultsPageSize=10;let draftResultsPage=1;
-function draftResultRows(){const query=foldDiacritics(byId('draft-search').value.trim().toLocaleLowerCase());const club=byId('draft-club-filter').value;const position=byId('draft-position-filter').value;const sort=byId('draft-sort').value;const rows=players.filter(player=>(!query||foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase()).includes(query))&&(club==='all'||player.club===club)&&(position==='all'||player.position===position));const comparisons={name:(a,b)=>(a.name||'').localeCompare(b.name||''),'price-desc':(a,b)=>b.price-a.price||(a.name||'').localeCompare(b.name||''),'price-asc':(a,b)=>a.price-b.price||(a.name||'').localeCompare(b.name||'')};rows.sort(comparisons[sort]||comparisons['price-desc']);return rows;}
+const draftResultsPageSize = 10;
+let draftResultsPage = 1;
+function draftResultRows() {
+  const query = foldDiacritics(
+    byId("draft-search").value.trim().toLocaleLowerCase(),
+  );
+  const club = byId("draft-club-filter").value;
+  const position = byId("draft-position-filter").value;
+  const sort = byId("draft-sort").value;
+  const rows = players.filter(
+    (player) =>
+      (!query ||
+        foldDiacritics(
+          `${player.name} ${player.full_name || ""}`.toLocaleLowerCase(),
+        ).includes(query)) &&
+      (club === "all" || player.club === club) &&
+      (position === "all" || player.position === position),
+  );
+  const comparisons = {
+    name: (a, b) => (a.name || "").localeCompare(b.name || ""),
+    "price-desc": (a, b) =>
+      b.price - a.price || (a.name || "").localeCompare(b.name || ""),
+    "price-asc": (a, b) =>
+      a.price - b.price || (a.name || "").localeCompare(b.name || ""),
+  };
+  rows.sort(comparisons[sort] || comparisons["price-desc"]);
+  return rows;
+}
 // The "Add players" list sits beside the pitch instead of below a separate flat squad list, and
 // is now genuinely paginated (10 per page) with a price sort, rather than silently truncating to
 // the first 30 matches with no way to see the rest.
-function renderDraftResultsList(){const rows=draftResultRows();const pages=Math.max(1,Math.ceil(rows.length/draftResultsPageSize));draftResultsPage=Math.min(Math.max(1,draftResultsPage),pages);const visible=rows.slice((draftResultsPage-1)*draftResultsPageSize,draftResultsPage*draftResultsPageSize);byId('draft-results-count').textContent=`${rows.length} player${rows.length===1?'':'s'}`;byId('draft-results-page').textContent=`Page ${draftResultsPage} of ${pages}`;byId('draft-results-prev').disabled=draftResultsPage<=1;byId('draft-results-next').disabled=draftResultsPage>=pages;const statuses={a:'Available',d:'Doubtful',i:'Injured',s:'Suspended',u:'Unavailable',n:'Not available'};byId('draft-results-list').innerHTML=visible.length?visible.map(player=>{const picked=draftSelection.includes(player.id);const full=draftSelection.length>=draftSize&&!picked;return `<div class="decision-note draft-result-row"><div><strong>${esc(player.name)}</strong><span>${esc(player.position_short)} &middot; ${esc(player.club)} &middot; £${Number(player.price).toFixed(1)}m &middot; ${esc(statuses[player.status]||player.status||'Unknown')}</span></div><button type="button" class="reset-filters" data-add-id="${player.id}" ${picked||full?'disabled':''}>${picked?'Added':'Add'}</button></div>`;}).join(''):'<div class="empty">No players match these filters.</div>';document.querySelectorAll('[data-add-id]').forEach(button=>button.addEventListener('click',()=>addDraftPlayer(Number(button.dataset.addId))));}
+function renderDraftResultsList() {
+  const rows = draftResultRows();
+  const pages = Math.max(1, Math.ceil(rows.length / draftResultsPageSize));
+  draftResultsPage = Math.min(Math.max(1, draftResultsPage), pages);
+  const visible = rows.slice(
+    (draftResultsPage - 1) * draftResultsPageSize,
+    draftResultsPage * draftResultsPageSize,
+  );
+  byId("draft-results-count").textContent =
+    `${rows.length} player${rows.length === 1 ? "" : "s"}`;
+  byId("draft-results-page").textContent =
+    `Page ${draftResultsPage} of ${pages}`;
+  byId("draft-results-prev").disabled = draftResultsPage <= 1;
+  byId("draft-results-next").disabled = draftResultsPage >= pages;
+  const statuses = {
+    a: "Available",
+    d: "Doubtful",
+    i: "Injured",
+    s: "Suspended",
+    u: "Unavailable",
+    n: "Not available",
+  };
+  byId("draft-results-list").innerHTML = visible.length
+    ? visible
+        .map((player) => {
+          const picked = draftSelection.includes(player.id);
+          const full = draftSelection.length >= draftSize && !picked;
+          return `<div class="decision-note draft-result-row"><div><strong>${esc(player.name)}</strong><span>${esc(player.position_short)} &middot; ${esc(player.club)} &middot; £${Number(player.price).toFixed(1)}m &middot; ${esc(statuses[player.status] || player.status || "Unknown")}</span></div><button type="button" class="reset-filters" data-add-id="${player.id}" ${picked || full ? "disabled" : ""}>${picked ? "Added" : "Add"}</button></div>`;
+        })
+        .join("")
+    : '<div class="empty">No players match these filters.</div>';
+  document
+    .querySelectorAll("[data-add-id]")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        addDraftPlayer(Number(button.dataset.addId)),
+      ),
+    );
+}
 
-function renderDraftBuilder(){const{squad,spend,positions,clubs}=draftTotals();const remaining=draftBudget-spend;byId('draft-count').textContent=`${squad.length} / ${draftSize} selected`;byId('draft-budget').textContent=`£${spend.toFixed(1)}m spent · £${remaining.toFixed(1)}m remaining`;byId('draft-quota').textContent=Object.entries(draftQuotas).map(([position,count])=>`${positions[position]||0}/${count} ${position}`).join(' · ');const overClub=Object.entries(clubs).filter(([,count])=>count>draftClubLimit).map(([club])=>club);const warnings=byId('draft-warnings');if(overClub.length){warnings.hidden=false;warnings.innerHTML=`<strong>Too many players from one club</strong>Max ${draftClubLimit} per club: ${esc(overClub.join(', '))}.`;}else if(remaining<-1e-9){warnings.hidden=false;warnings.innerHTML=`<strong>Over budget</strong>Your selection costs £${spend.toFixed(1)}m, over the £${draftBudget.toFixed(1)}m budget.`;}else{warnings.hidden=true;warnings.innerHTML='';}renderDraftResultsList();renderDraftPitch();const ready=squad.length===draftSize&&Object.entries(draftQuotas).every(([position,count])=>(positions[position]||0)===count)&&!overClub.length&&remaining>=-1e-9;byId('draft-save').disabled=!ready||!servedLive();byId('draft-clear').disabled=!draftSelection.length&&!(state.profile&&state.profile.draft_squad)||!servedLive();}
-async function clearDraftSquad(){draftSelection=[];draftStartingIds=[];draftCaptainId=null;draftViceId=null;renderDraftBuilder();const message=byId('draft-message');const rawTeamId=byId('draft-team-id').value.trim()||String((state.profile&&state.profile.team_id)||'');if(!state.profile||!state.profile.draft_squad||!rawTeamId){message.textContent='';return;}byId('draft-clear').disabled=true;message.textContent='Clearing saved draft…';try{const response=await fetch('/api/draft-squad',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({team_id:Number(rawTeamId),player_ids:null})});const responsePayload=await response.json().catch(()=>({message:'Clear returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Clear failed with status ${response.status}`);message.textContent='Draft cleared. Reloading…';window.setTimeout(()=>window.location.reload(),400);}catch(error){byId('draft-clear').disabled=false;message.textContent=`Clear failed: ${error.message}`;}}
-function setupDraftSquad(){const clubs=[...new Set(players.map(player=>player.club).filter(Boolean))].sort((a,b)=>a.localeCompare(b));const positions=[...new Set(players.map(player=>player.position).filter(Boolean))].sort((a,b)=>a.localeCompare(b));byId('draft-club-filter').insertAdjacentHTML('beforeend',clubs.map(club=>`<option value="${esc(club)}">${esc(club)}</option>`).join(''));byId('draft-position-filter').insertAdjacentHTML('beforeend',positions.map(position=>`<option value="${esc(position)}">${esc(position)}</option>`).join(''));byId('draft-team-id').value=(state.profile&&state.profile.team_id)||'';['draft-search','draft-club-filter','draft-position-filter','draft-sort'].forEach(id=>byId(id).addEventListener(id==='draft-search'?'input':'change',()=>{draftResultsPage=1;renderDraftResultsList();}));byId('draft-results-prev').addEventListener('click',()=>{draftResultsPage=Math.max(1,draftResultsPage-1);renderDraftResultsList();});byId('draft-results-next').addEventListener('click',()=>{draftResultsPage+=1;renderDraftResultsList();});byId('draft-clear').addEventListener('click',clearDraftSquad);const controls=[byId('draft-team-id'),byId('draft-save')];if(!servedLive()){controls.forEach(control=>control.disabled=true);byId('draft-message').textContent='Start the local dashboard service to save a draft squad.';}byId('draft-save-form').addEventListener('submit',async event=>{event.preventDefault();const message=byId('draft-message');const rawTeamId=byId('draft-team-id').value.trim();if(!/^[0-9]+$/.test(rawTeamId)||Number(rawTeamId)<1||Number(rawTeamId)>99999999){message.textContent='Enter a valid FPL team ID to save your draft squad.';return;}if(draftSelection.length!==draftSize){message.textContent=`Select exactly ${draftSize} players before saving.`;return;}const saveButton=byId('draft-save');saveButton.disabled=true;message.textContent='Saving…';const teamId=Number(rawTeamId);try{const response=await fetch('/api/draft-squad',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({team_id:teamId,player_ids:draftSelection})});const responsePayload=await response.json().catch(()=>({message:'Draft squad save returned an unreadable response.'}));if(!response.ok)throw new Error(responsePayload.message||`Draft squad save failed with status ${response.status}`);
-// Issue #152 follow-up: per live feedback, stay on this tab instead of reloading the whole
-// page -- the tab already shows draft health and the pitch itself, and there's already a link
-// into Decision Center for anyone who wants the full view. `/api/manager-view` (issue #125)
-// returns exactly the same `weekly_decisions`/`manager` the old full-page reload would have
-// picked up, as JSON, so the draft health/pitch panels can refresh in place.
-//
-// Issue #220 fix: this used to also force `draftPitchSeededFor=null` here, on every successful
-// save. That made `seedDraftPitch()` (below) reseed `draftStartingIds`/`draftCaptainId`/
-// `draftViceId` from the model's own recommendation unconditionally, discarding whatever
-// starting-XI/bench arrangement or captain/vice-captain the user had just set locally --
-// reported live as a vice-captain pick silently reverting the instant "Draft squad saved."
-// appeared, with no reload involved. `seedDraftPitch`'s own key (the saved squad's sorted
-// player-id set) already reseeds correctly on its own whenever the squad's membership actually
-// changes; forcing it open here on every save, even when membership didn't change, was the bug.
-try{const refreshResponse=await fetch(`/api/manager-view?team_id=${teamId}`);const refreshPayload=await refreshResponse.json();if(refreshResponse.ok&&refreshPayload.status==='ok'){decision.weekly_decisions=refreshPayload.weekly_decisions;state.manager=refreshPayload.manager;state.profile=state.profile||{};state.profile.team_id=teamId;state.profile.draft_squad=draftSelection.slice();message.textContent='Draft squad saved.';renderDraftBuilder();renderDraftHealth();renderManager();renderWeeklyDecision();renderDecision();}else{message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(refreshError){message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(error){message.textContent=`Save failed: ${error.message}`;}finally{saveButton.disabled=false;}});renderDraftBuilder();}
+function renderDraftBuilder() {
+  const { squad, spend, positions, clubs } = draftTotals();
+  const remaining = draftBudget - spend;
+  byId("draft-count").textContent = `${squad.length} / ${draftSize} selected`;
+  byId("draft-budget").textContent =
+    `£${spend.toFixed(1)}m spent · £${remaining.toFixed(1)}m remaining`;
+  byId("draft-quota").textContent = Object.entries(draftQuotas)
+    .map(
+      ([position, count]) => `${positions[position] || 0}/${count} ${position}`,
+    )
+    .join(" · ");
+  const overClub = Object.entries(clubs)
+    .filter(([, count]) => count > draftClubLimit)
+    .map(([club]) => club);
+  const warnings = byId("draft-warnings");
+  if (overClub.length) {
+    warnings.hidden = false;
+    warnings.innerHTML = `<strong>Too many players from one club</strong>Max ${draftClubLimit} per club: ${esc(overClub.join(", "))}.`;
+  } else if (remaining < -1e-9) {
+    warnings.hidden = false;
+    warnings.innerHTML = `<strong>Over budget</strong>Your selection costs £${spend.toFixed(1)}m, over the £${draftBudget.toFixed(1)}m budget.`;
+  } else {
+    warnings.hidden = true;
+    warnings.innerHTML = "";
+  }
+  renderDraftResultsList();
+  renderDraftPitch();
+  const ready =
+    squad.length === draftSize &&
+    Object.entries(draftQuotas).every(
+      ([position, count]) => (positions[position] || 0) === count,
+    ) &&
+    !overClub.length &&
+    remaining >= -1e-9;
+  byId("draft-save").disabled = !ready || !servedLive();
+  byId("draft-clear").disabled =
+    (!draftSelection.length && !(state.profile && state.profile.draft_squad)) ||
+    !servedLive();
+}
+async function clearDraftSquad() {
+  draftSelection = [];
+  draftStartingIds = [];
+  draftCaptainId = null;
+  draftViceId = null;
+  renderDraftBuilder();
+  const message = byId("draft-message");
+  const rawTeamId =
+    byId("draft-team-id").value.trim() ||
+    String((state.profile && state.profile.team_id) || "");
+  if (!state.profile || !state.profile.draft_squad || !rawTeamId) {
+    message.textContent = "";
+    return;
+  }
+  byId("draft-clear").disabled = true;
+  message.textContent = "Clearing saved draft…";
+  try {
+    const response = await fetch("/api/draft-squad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team_id: Number(rawTeamId), player_ids: null }),
+    });
+    const responsePayload = await response
+      .json()
+      .catch(() => ({ message: "Clear returned an unreadable response." }));
+    if (!response.ok)
+      throw new Error(
+        responsePayload.message ||
+          `Clear failed with status ${response.status}`,
+      );
+    message.textContent = "Draft cleared. Reloading…";
+    window.setTimeout(() => window.location.reload(), 400);
+  } catch (error) {
+    byId("draft-clear").disabled = false;
+    message.textContent = `Clear failed: ${error.message}`;
+  }
+}
+function setupDraftSquad() {
+  const clubs = [
+    ...new Set(players.map((player) => player.club).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  const positions = [
+    ...new Set(players.map((player) => player.position).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  byId("draft-club-filter").insertAdjacentHTML(
+    "beforeend",
+    clubs
+      .map((club) => `<option value="${esc(club)}">${esc(club)}</option>`)
+      .join(""),
+  );
+  byId("draft-position-filter").insertAdjacentHTML(
+    "beforeend",
+    positions
+      .map(
+        (position) =>
+          `<option value="${esc(position)}">${esc(position)}</option>`,
+      )
+      .join(""),
+  );
+  byId("draft-team-id").value = (state.profile && state.profile.team_id) || "";
+  [
+    "draft-search",
+    "draft-club-filter",
+    "draft-position-filter",
+    "draft-sort",
+  ].forEach((id) =>
+    byId(id).addEventListener(
+      id === "draft-search" ? "input" : "change",
+      () => {
+        draftResultsPage = 1;
+        renderDraftResultsList();
+      },
+    ),
+  );
+  byId("draft-results-prev").addEventListener("click", () => {
+    draftResultsPage = Math.max(1, draftResultsPage - 1);
+    renderDraftResultsList();
+  });
+  byId("draft-results-next").addEventListener("click", () => {
+    draftResultsPage += 1;
+    renderDraftResultsList();
+  });
+  byId("draft-clear").addEventListener("click", clearDraftSquad);
+  const controls = [byId("draft-team-id"), byId("draft-save")];
+  if (!servedLive()) {
+    controls.forEach((control) => (control.disabled = true));
+    byId("draft-message").textContent =
+      "Start the local dashboard service to save a draft squad.";
+  }
+  byId("draft-save-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const message = byId("draft-message");
+    const rawTeamId = byId("draft-team-id").value.trim();
+    if (
+      !/^[0-9]+$/.test(rawTeamId) ||
+      Number(rawTeamId) < 1 ||
+      Number(rawTeamId) > 99999999
+    ) {
+      message.textContent =
+        "Enter a valid FPL team ID to save your draft squad.";
+      return;
+    }
+    if (draftSelection.length !== draftSize) {
+      message.textContent = `Select exactly ${draftSize} players before saving.`;
+      return;
+    }
+    const saveButton = byId("draft-save");
+    saveButton.disabled = true;
+    message.textContent = "Saving…";
+    const teamId = Number(rawTeamId);
+    try {
+      const response = await fetch("/api/draft-squad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ team_id: teamId, player_ids: draftSelection }),
+      });
+      const responsePayload = await response
+        .json()
+        .catch(() => ({
+          message: "Draft squad save returned an unreadable response.",
+        }));
+      if (!response.ok)
+        throw new Error(
+          responsePayload.message ||
+            `Draft squad save failed with status ${response.status}`,
+        );
+      // Issue #152 follow-up: per live feedback, stay on this tab instead of reloading the whole
+      // page -- the tab already shows draft health and the pitch itself, and there's already a link
+      // into Decision Center for anyone who wants the full view. `/api/manager-view` (issue #125)
+      // returns exactly the same `weekly_decisions`/`manager` the old full-page reload would have
+      // picked up, as JSON, so the draft health/pitch panels can refresh in place.
+      //
+      // Issue #220 fix: this used to also force `draftPitchSeededFor=null` here, on every successful
+      // save. That made `seedDraftPitch()` (below) reseed `draftStartingIds`/`draftCaptainId`/
+      // `draftViceId` from the model's own recommendation unconditionally, discarding whatever
+      // starting-XI/bench arrangement or captain/vice-captain the user had just set locally --
+      // reported live as a vice-captain pick silently reverting the instant "Draft squad saved."
+      // appeared, with no reload involved. `seedDraftPitch`'s own key (the saved squad's sorted
+      // player-id set) already reseeds correctly on its own whenever the squad's membership actually
+      // changes; forcing it open here on every save, even when membership didn't change, was the bug.
+      try {
+        const refreshResponse = await fetch(
+          `/api/manager-view?team_id=${teamId}`,
+        );
+        const refreshPayload = await refreshResponse.json();
+        if (refreshResponse.ok && refreshPayload.status === "ok") {
+          decision.weekly_decisions = refreshPayload.weekly_decisions;
+          state.manager = refreshPayload.manager;
+          state.profile = state.profile || {};
+          state.profile.team_id = teamId;
+          state.profile.draft_squad = draftSelection.slice();
+          message.textContent = "Draft squad saved.";
+          renderDraftBuilder();
+          renderDraftHealth();
+          renderManager();
+          renderWeeklyDecision();
+          renderDecision();
+        } else {
+          message.textContent =
+            "Draft squad saved. Reloading to refresh Decision Center…";
+          window.setTimeout(() => window.location.reload(), 400);
+        }
+      } catch (refreshError) {
+        message.textContent =
+          "Draft squad saved. Reloading to refresh Decision Center…";
+        window.setTimeout(() => window.location.reload(), 400);
+      }
+    } catch (error) {
+      message.textContent = `Save failed: ${error.message}`;
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+  renderDraftBuilder();
+}
 
 // Issue #152: the draft tab's "draft health" summary reuses `build_draft_decisions`'s existing
 // output (already computed server-side pre-GW1, see `refresh.py`'s `compute_manager_view`)
@@ -322,7 +2704,19 @@ try{const refreshResponse=await fetch(`/api/manager-view?team_id=${teamId}`);con
 // (`weekly.draft && weekly.status==='active'`), since `build_draft_decisions` itself only
 // computes anything once `validate_draft_squad` passes -- see
 // plans/issue-152-preseason-draft-ui.md's "Structural constraint" section.
-function draftRollScenario(){const weekly=decision.weekly_decisions||{};if(!weekly.draft||weekly.status!=='active')return null;const profiles=weekly.profiles||[];const selected=profiles.find(row=>row.id===(weekly.default_profile||'balanced'))||profiles[0];if(!selected)return null;return(selected.scenarios||[]).find(scenario=>scenario.action==='roll')||null;}
+function draftRollScenario() {
+  const weekly = decision.weekly_decisions || {};
+  if (!weekly.draft || weekly.status !== "active") return null;
+  const profiles = weekly.profiles || [];
+  const selected =
+    profiles.find((row) => row.id === (weekly.default_profile || "balanced")) ||
+    profiles[0];
+  if (!selected) return null;
+  return (
+    (selected.scenarios || []).find((scenario) => scenario.action === "roll") ||
+    null
+  );
+}
 
 // Bug fix: renderDraftPitchSaved can only render players present in `roll.squad` -- the
 // server-computed projections for whatever 15 was saved *last*. A player added (or removed) from
@@ -331,16 +2725,75 @@ function draftRollScenario(){const weekly=decision.weekly_decisions||{};if(!week
 // means any local edit that diverges from the saved squad falls back to the no-projections
 // builder view (which reads live off draftSelection/draftPlayerById and already handles
 // add/remove/bench/start correctly) until the next save brings the two back in sync.
-function draftSquadMatchesSaved(roll){if(!roll)return false;const savedIds=new Set((roll.squad||[]).map(player=>player.id));if(savedIds.size!==draftSelection.length)return false;return draftSelection.every(id=>savedIds.has(id));}
+function draftSquadMatchesSaved(roll) {
+  if (!roll) return false;
+  const savedIds = new Set((roll.squad || []).map((player) => player.id));
+  if (savedIds.size !== draftSelection.length) return false;
+  return draftSelection.every((id) => savedIds.has(id));
+}
 
-function renderDraftHealth(){const roll=draftRollScenario();const empty=byId('draft-health-empty');const content=byId('draft-health-content');if(!roll){empty.hidden=false;content.hidden=true;return;}empty.hidden=true;content.hidden=false;const squad=roll.squad||[];const totals=squad.reduce((sum,player)=>({xp1:sum.xp1+Number(player.xp_1||0),xp3:sum.xp3+Number(player.xp_3||0),xp5:sum.xp5+Number(player.xp_5||0)}),{xp1:0,xp3:0,xp5:0});byId('draft-health-progression').innerHTML=`<div class="decision-metric"><b>${totals.xp1.toFixed(1)}</b><span>Modeled points, next GW</span></div><div class="decision-metric"><b>${totals.xp3.toFixed(1)}</b><span>Modeled points, 3-GW horizon</span></div><div class="decision-metric"><b>${totals.xp5.toFixed(1)}</b><span>Modeled points, 5-GW horizon</span></div>`;const statuses={d:'Doubtful',i:'Injured',s:'Suspended',u:'Unavailable',n:'Not available'};const risky=squad.filter(player=>(player.status&&player.status!=='a')||player.confidence==='low');byId('draft-health-risks').innerHTML=risky.length?risky.map(player=>`<div class="decision-note"><strong>${esc(player.name)}</strong><br>${esc(statuses[player.status]||'Low-confidence projection')} &middot; ${esc(player.club)}</div>`).join(''):'<div class="empty">No availability or confidence concerns flagged in your declared draft.</div>';const weekly=decision.weekly_decisions||{};const profiles=weekly.profiles||[];byId('draft-health-profiles').innerHTML=profiles.map(profile=>{const recommendation=profile.recommendation||{};return `<div class="decision-note"><strong>${esc(profile.label)} &middot; ${Number(recommendation.net_gain_5gw||0).toFixed(1)} 5-GW edge</strong><br>${esc(recommendation.reason||'')}</div>`;}).join('');}
+function renderDraftHealth() {
+  const roll = draftRollScenario();
+  const empty = byId("draft-health-empty");
+  const content = byId("draft-health-content");
+  if (!roll) {
+    empty.hidden = false;
+    content.hidden = true;
+    return;
+  }
+  empty.hidden = true;
+  content.hidden = false;
+  const squad = roll.squad || [];
+  const totals = squad.reduce(
+    (sum, player) => ({
+      xp1: sum.xp1 + Number(player.xp_1 || 0),
+      xp3: sum.xp3 + Number(player.xp_3 || 0),
+      xp5: sum.xp5 + Number(player.xp_5 || 0),
+    }),
+    { xp1: 0, xp3: 0, xp5: 0 },
+  );
+  byId("draft-health-progression").innerHTML =
+    `<div class="decision-metric"><b>${totals.xp1.toFixed(1)}</b><span>Modeled points, next GW</span></div><div class="decision-metric"><b>${totals.xp3.toFixed(1)}</b><span>Modeled points, 3-GW horizon</span></div><div class="decision-metric"><b>${totals.xp5.toFixed(1)}</b><span>Modeled points, 5-GW horizon</span></div>`;
+  const statuses = {
+    d: "Doubtful",
+    i: "Injured",
+    s: "Suspended",
+    u: "Unavailable",
+    n: "Not available",
+  };
+  const risky = squad.filter(
+    (player) =>
+      (player.status && player.status !== "a") || player.confidence === "low",
+  );
+  byId("draft-health-risks").innerHTML = risky.length
+    ? risky
+        .map(
+          (player) =>
+            `<div class="decision-note"><strong>${esc(player.name)}</strong><br>${esc(statuses[player.status] || "Low-confidence projection")} &middot; ${esc(player.club)}</div>`,
+        )
+        .join("")
+    : '<div class="empty">No availability or confidence concerns flagged in your declared draft.</div>';
+  const weekly = decision.weekly_decisions || {};
+  const profiles = weekly.profiles || [];
+  byId("draft-health-profiles").innerHTML = profiles
+    .map((profile) => {
+      const recommendation = profile.recommendation || {};
+      return `<div class="decision-note"><strong>${esc(profile.label)} &middot; ${Number(recommendation.net_gain_5gw || 0).toFixed(1)} 5-GW edge</strong><br>${esc(recommendation.reason || "")}</div>`;
+    })
+    .join("");
+}
 
 // The formation/quota rules a starting XI must satisfy -- distinct from `draftQuotas` above,
 // which is the 15-player *squad's* composition, not the 11-player XI's (plans/issue-152... :
 // "a genuinely different rule set from validate_draft_squad's 15-player squad-composition
 // check"). Enforced purely client-side (session-only, see the plan's Candidate 1 decision).
-const draftXiMin={GKP:1,DEF:3,MID:2,FWD:1};const draftXiMax={GKP:1,DEF:5,MID:5,FWD:3};
-let draftStartingIds=[];let draftCaptainId=null;let draftViceId=null;let draftPendingSwapId=null;let draftPitchSeededFor=null;
+const draftXiMin = { GKP: 1, DEF: 3, MID: 2, FWD: 1 };
+const draftXiMax = { GKP: 1, DEF: 5, MID: 5, FWD: 3 };
+let draftStartingIds = [];
+let draftCaptainId = null;
+let draftViceId = null;
+let draftPendingSwapId = null;
+let draftPitchSeededFor = null;
 
 // Build-phase guard, per live feedback: capping only GKP-at-1 and total-at-11 let the XI reach
 // an illegal shape like 5 DEF/5 MID/0 FWD -- 11 players, both individually under their own max,
@@ -348,16 +2801,30 @@ let draftStartingIds=[];let draftCaptainId=null;let draftViceId=null;let draftPe
 // left for one. This checks not just "does this stay under max" but "would filling this slot
 // make it structurally impossible to still reach every position's minimum" -- i.e. it reserves
 // capacity for whatever's still required elsewhere before letting a slot go to something else.
-function draftXiCanAdd(position,counts){
-  if((counts[position]||0)>=draftXiMax[position])return false;
-  const nextCounts={...counts,[position]:(counts[position]||0)+1};
-  const nextTotal=Object.values(nextCounts).reduce((sum,count)=>sum+count,0);
-  if(nextTotal>11)return false;
-  const stillNeeded=Object.keys(draftXiMin).reduce((sum,pos)=>sum+Math.max(0,draftXiMin[pos]-(nextCounts[pos]||0)),0);
-  return nextTotal+stillNeeded<=11;
+function draftXiCanAdd(position, counts) {
+  if ((counts[position] || 0) >= draftXiMax[position]) return false;
+  const nextCounts = { ...counts, [position]: (counts[position] || 0) + 1 };
+  const nextTotal = Object.values(nextCounts).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  if (nextTotal > 11) return false;
+  const stillNeeded = Object.keys(draftXiMin).reduce(
+    (sum, pos) => sum + Math.max(0, draftXiMin[pos] - (nextCounts[pos] || 0)),
+    0,
+  );
+  return nextTotal + stillNeeded <= 11;
 }
 
-function draftXiPositionCounts(ids,squadById){const counts={GKP:0,DEF:0,MID:0,FWD:0};ids.forEach(id=>{const player=squadById[id];if(player)counts[player.position_short]=(counts[player.position_short]||0)+1;});return counts;}
+function draftXiPositionCounts(ids, squadById) {
+  const counts = { GKP: 0, DEF: 0, MID: 0, FWD: 0 };
+  ids.forEach((id) => {
+    const player = squadById[id];
+    if (player)
+      counts[player.position_short] = (counts[player.position_short] || 0) + 1;
+  });
+  return counts;
+}
 
 // Per live feedback: benching the only starting GKP left the XI with zero goalkeepers even
 // though the squad always carries a second one on the bench -- the user had to separately find
@@ -366,7 +2833,16 @@ function draftXiPositionCounts(ids,squadById){const counts={GKP:0,DEF:0,MID:0,FW
 // caps the XI at 1, so there's never more than one benched GKP to choose between). Positions with
 // more than one candidate on the bench are deliberately left alone -- picking among several DEF/
 // MID/FWD options is a real choice the user should make, not one to guess on their behalf.
-function draftAutoFillAfterBench(benchedPosition,benchedId,squadById){const counts=draftXiPositionCounts(draftStartingIds,squadById);if((counts[benchedPosition]||0)>=draftXiMin[benchedPosition])return;const candidates=draftSelection.filter(id=>id!==benchedId&&!draftStartingIds.includes(id)).map(id=>squadById[id]).filter(player=>player&&player.position_short===benchedPosition);if(candidates.length===1&&draftXiCanAdd(benchedPosition,counts))draftStartingIds=[...draftStartingIds,candidates[0].id];}
+function draftAutoFillAfterBench(benchedPosition, benchedId, squadById) {
+  const counts = draftXiPositionCounts(draftStartingIds, squadById);
+  if ((counts[benchedPosition] || 0) >= draftXiMin[benchedPosition]) return;
+  const candidates = draftSelection
+    .filter((id) => id !== benchedId && !draftStartingIds.includes(id))
+    .map((id) => squadById[id])
+    .filter((player) => player && player.position_short === benchedPosition);
+  if (candidates.length === 1 && draftXiCanAdd(benchedPosition, counts))
+    draftStartingIds = [...draftStartingIds, candidates[0].id];
+}
 
 // Seeds the session-only starting XI/captain/vice from the model's own already-computed best XI
 // for the roll scenario (`_lineup_view`'s `starting_xi`/`captain`/`vice_captain`) -- a better
@@ -378,15 +2854,54 @@ function draftAutoFillAfterBench(benchedPosition,benchedId,squadById){const coun
 // every subsequent save for the *same* squad -- see the issue #220 fix note above, in
 // `setupDraftSquad`'s save handler -- or a user's post-first-save C/VC/XI edits get silently
 // reseeded back to the model's recommendation on every re-save.
-function seedDraftPitch(roll){const key=(roll.squad||[]).map(player=>player.id).slice().sort((a,b)=>a-b).join(',');if(draftPitchSeededFor===key)return;draftStartingIds=(roll.starting_xi||[]).map(player=>player.id);draftCaptainId=roll.captain&&roll.captain.id;draftViceId=roll.vice_captain&&roll.vice_captain.id;draftPendingSwapId=null;draftPitchSeededFor=key;}
+function seedDraftPitch(roll) {
+  const key = (roll.squad || [])
+    .map((player) => player.id)
+    .slice()
+    .sort((a, b) => a - b)
+    .join(",");
+  if (draftPitchSeededFor === key) return;
+  draftStartingIds = (roll.starting_xi || []).map((player) => player.id);
+  draftCaptainId = roll.captain && roll.captain.id;
+  draftViceId = roll.vice_captain && roll.vice_captain.id;
+  draftPendingSwapId = null;
+  draftPitchSeededFor = key;
+}
 
-function draftPitchCardHtml(player){const isCaptain=player.id===draftCaptainId;const isVice=player.id===draftViceId;const role=isCaptain?'C':isVice?'VC':'';return `<div class="pitch-player ${isCaptain?'captain':''}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role?` (${role})`:''}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span><div class="pitch-player-actions"><button type="button" data-draft-swap-out="${player.id}" ${draftPendingSwapId==null?'disabled':''} title="Swap in the selected bench player">${draftPendingSwapId==null?'Bench':'Swap in'}</button><button type="button" data-draft-captain="${player.id}" ${isCaptain?'disabled':''}>C</button><button type="button" data-draft-vice="${player.id}" ${isVice||isCaptain?'disabled':''}>VC</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;}
+function draftPitchCardHtml(player) {
+  const isCaptain = player.id === draftCaptainId;
+  const isVice = player.id === draftViceId;
+  const role = isCaptain ? "C" : isVice ? "VC" : "";
+  return `<div class="pitch-player ${isCaptain ? "captain" : ""}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span><div class="pitch-player-actions"><button type="button" data-draft-swap-out="${player.id}" ${draftPendingSwapId == null ? "disabled" : ""} title="Swap in the selected bench player">${draftPendingSwapId == null ? "Bench" : "Swap in"}</button><button type="button" data-draft-captain="${player.id}" ${isCaptain ? "disabled" : ""}>C</button><button type="button" data-draft-vice="${player.id}" ${isVice || isCaptain ? "disabled" : ""}>VC</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;
+}
 
-function draftBenchCardHtml(player,index){const pending=player.id===draftPendingSwapId;return `<div class="weekly-bench-card ${pending?'draft-bench-pending':''}"><strong>${index+1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span><div class="pitch-player-actions"><button type="button" data-draft-swap-in="${player.id}">${pending?'Cancel swap':'Move to starting XI'}</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;}
+function draftBenchCardHtml(player, index) {
+  const pending = player.id === draftPendingSwapId;
+  return `<div class="weekly-bench-card ${pending ? "draft-bench-pending" : ""}"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span><div class="pitch-player-actions"><button type="button" data-draft-swap-in="${player.id}">${pending ? "Cancel swap" : "Move to starting XI"}</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;
+}
 
-function draftSwapLegal(squadById,outgoingId,incomingId){const outgoing=squadById[outgoingId];const incoming=squadById[incomingId];if(!outgoing||!incoming)return false;if(outgoing.position_short===incoming.position_short)return true;const counts=draftXiPositionCounts(draftStartingIds,squadById);const afterOut=(counts[outgoing.position_short]||0)-1;const afterIn=(counts[incoming.position_short]||0)+1;return afterOut>=draftXiMin[outgoing.position_short]&&afterIn<=draftXiMax[incoming.position_short];}
+function draftSwapLegal(squadById, outgoingId, incomingId) {
+  const outgoing = squadById[outgoingId];
+  const incoming = squadById[incomingId];
+  if (!outgoing || !incoming) return false;
+  if (outgoing.position_short === incoming.position_short) return true;
+  const counts = draftXiPositionCounts(draftStartingIds, squadById);
+  const afterOut = (counts[outgoing.position_short] || 0) - 1;
+  const afterIn = (counts[incoming.position_short] || 0) + 1;
+  return (
+    afterOut >= draftXiMin[outgoing.position_short] &&
+    afterIn <= draftXiMax[incoming.position_short]
+  );
+}
 
-function draftFormationLabel(startingPlayers){const counts={DEF:0,MID:0,FWD:0};startingPlayers.forEach(player=>{const key=player.position_short;if(key==='DEF'||key==='MID'||key==='FWD')counts[key]+=1;});return `${counts.DEF}-${counts.MID}-${counts.FWD}`;}
+function draftFormationLabel(startingPlayers) {
+  const counts = { DEF: 0, MID: 0, FWD: 0 };
+  startingPlayers.forEach((player) => {
+    const key = player.position_short;
+    if (key === "DEF" || key === "MID" || key === "FWD") counts[key] += 1;
+  });
+  return `${counts.DEF}-${counts.MID}-${counts.FWD}`;
+}
 
 // Once a complete, legal draft is saved, `renderDraftPitchSaved` takes over with real model
 // projections and the swap-pending interaction (real FPL formation legality enforced on every
@@ -398,32 +2913,228 @@ function draftFormationLabel(startingPlayers){const counts={DEF:0,MID:0,FWD:0};s
 // doesn't require an immediate re-save) -- filtering both starters and bench down to players
 // still in `draftSelection` means a removal disappears from the pitch right away, using the
 // same cached projections, rather than staying stale until the next save+reload.
-function renderDraftPitchSaved(roll){seedDraftPitch(roll);const squadById={};(roll.squad||[]).forEach(player=>{squadById[player.id]=player;});const currentIds=new Set(draftSelection);const startingPlayers=draftStartingIds.filter(id=>currentIds.has(id)).map(id=>squadById[id]).filter(Boolean);const benchPlayers=(roll.squad||[]).filter(player=>currentIds.has(player.id)&&!draftStartingIds.includes(player.id));byId('draft-pitch-formation').textContent=`${draftFormationLabel(startingPlayers)} · xPts shown for 1 / 3 / 5 GWs`;byId('draft-pitch').setAttribute('aria-label',`${draftFormationLabel(startingPlayers)} draft formation: ${startingPlayers.map(player=>`${player.name}${player.id===draftCaptainId?' captain':player.id===draftViceId?' vice-captain':''}`).join(', ')}`);byId('draft-pitch').innerHTML=['FWD','MID','DEF','GKP'].map(position=>`<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers.filter(player=>player.position_short===position).map(draftPitchCardHtml).join('')}</div>`).join('');byId('draft-bench').innerHTML=benchPlayers.map(draftBenchCardHtml).join('');
-document.querySelectorAll('[data-draft-swap-in]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftSwapIn);draftPendingSwapId=draftPendingSwapId===id?null:id;renderDraftPitch();}));
-document.querySelectorAll('[data-draft-swap-out]').forEach(button=>{if(button.disabled)return;const outId=Number(button.dataset.draftSwapOut);if(!draftSwapLegal(squadById,outId,draftPendingSwapId)){button.disabled=true;button.title='Swapping this player out would leave an illegal formation';return;}button.addEventListener('click',()=>{const inId=draftPendingSwapId;draftStartingIds=draftStartingIds.map(id=>id===outId?inId:id);if(draftCaptainId===outId)draftCaptainId=(draftViceId&&draftStartingIds.includes(draftViceId))?draftViceId:draftStartingIds[0];if(draftViceId===outId||(draftCaptainId!==null&&draftViceId===draftCaptainId))draftViceId=draftStartingIds.find(id=>id!==draftCaptainId)||null;draftPendingSwapId=null;renderDraftPitch();});});
-document.querySelectorAll('[data-draft-captain]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftCaptain);if(draftViceId===id)draftViceId=draftCaptainId;draftCaptainId=id;renderDraftPitch();}));
-document.querySelectorAll('[data-draft-vice]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftVice);if(id===draftCaptainId)return;draftViceId=id;renderDraftPitch();}));
-document.querySelectorAll('[data-draft-remove]').forEach(button=>button.addEventListener('click',()=>removeDraftPlayer(Number(button.dataset.draftRemove))));
+function renderDraftPitchSaved(roll) {
+  seedDraftPitch(roll);
+  const squadById = {};
+  (roll.squad || []).forEach((player) => {
+    squadById[player.id] = player;
+  });
+  const currentIds = new Set(draftSelection);
+  const startingPlayers = draftStartingIds
+    .filter((id) => currentIds.has(id))
+    .map((id) => squadById[id])
+    .filter(Boolean);
+  const benchPlayers = (roll.squad || []).filter(
+    (player) =>
+      currentIds.has(player.id) && !draftStartingIds.includes(player.id),
+  );
+  byId("draft-pitch-formation").textContent =
+    `${draftFormationLabel(startingPlayers)} · xPts shown for 1 / 3 / 5 GWs`;
+  byId("draft-pitch").setAttribute(
+    "aria-label",
+    `${draftFormationLabel(startingPlayers)} draft formation: ${startingPlayers.map((player) => `${player.name}${player.id === draftCaptainId ? " captain" : player.id === draftViceId ? " vice-captain" : ""}`).join(", ")}`,
+  );
+  byId("draft-pitch").innerHTML = ["FWD", "MID", "DEF", "GKP"]
+    .map(
+      (position) =>
+        `<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers
+          .filter((player) => player.position_short === position)
+          .map(draftPitchCardHtml)
+          .join("")}</div>`,
+    )
+    .join("");
+  byId("draft-bench").innerHTML = benchPlayers.map(draftBenchCardHtml).join("");
+  document.querySelectorAll("[data-draft-swap-in]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftSwapIn);
+      draftPendingSwapId = draftPendingSwapId === id ? null : id;
+      renderDraftPitch();
+    }),
+  );
+  document.querySelectorAll("[data-draft-swap-out]").forEach((button) => {
+    if (button.disabled) return;
+    const outId = Number(button.dataset.draftSwapOut);
+    if (!draftSwapLegal(squadById, outId, draftPendingSwapId)) {
+      button.disabled = true;
+      button.title =
+        "Swapping this player out would leave an illegal formation";
+      return;
+    }
+    button.addEventListener("click", () => {
+      const inId = draftPendingSwapId;
+      draftStartingIds = draftStartingIds.map((id) =>
+        id === outId ? inId : id,
+      );
+      if (draftCaptainId === outId)
+        draftCaptainId =
+          draftViceId && draftStartingIds.includes(draftViceId)
+            ? draftViceId
+            : draftStartingIds[0];
+      if (
+        draftViceId === outId ||
+        (draftCaptainId !== null && draftViceId === draftCaptainId)
+      )
+        draftViceId =
+          draftStartingIds.find((id) => id !== draftCaptainId) || null;
+      draftPendingSwapId = null;
+      renderDraftPitch();
+    });
+  });
+  document.querySelectorAll("[data-draft-captain]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftCaptain);
+      if (draftViceId === id) draftViceId = draftCaptainId;
+      draftCaptainId = id;
+      renderDraftPitch();
+    }),
+  );
+  document.querySelectorAll("[data-draft-vice]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftVice);
+      if (id === draftCaptainId) return;
+      draftViceId = id;
+      renderDraftPitch();
+    }),
+  );
+  document
+    .querySelectorAll("[data-draft-remove]")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        removeDraftPlayer(Number(button.dataset.draftRemove)),
+      ),
+    );
 }
 
-function draftPitchCardHtmlBuilding(player){const isCaptain=player.id===draftCaptainId;const isVice=player.id===draftViceId;const role=isCaptain?'C':isVice?'VC':'';return `<div class="pitch-player ${isCaptain?'captain':''}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role?` (${role})`:''}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><div class="pitch-player-actions"><button type="button" data-draft-bench="${player.id}">Bench</button><button type="button" data-draft-captain="${player.id}" ${isCaptain?'disabled':''}>C</button><button type="button" data-draft-vice="${player.id}" ${isVice||isCaptain?'disabled':''}>VC</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;}
-
-function draftBenchCardHtmlBuilding(player,index){const startingSquadById=Object.fromEntries(draftStartingIds.map(startId=>[startId,draftPlayerById(startId)]));const counts=draftXiPositionCounts(draftStartingIds,startingSquadById);const canAdd=draftXiCanAdd(player.position_short,counts);const blocked=!canAdd;const reason=draftStartingIds.length>=11?'Bench a starter first -- the starting XI already has 11 players':(counts[player.position_short]||0)>=draftXiMax[player.position_short]?`Only ${draftXiMax[player.position_short]} ${player.position_short} can start`:'Starting this player would leave no room for a required position -- bench someone from a position already at its minimum first';return `<div class="weekly-bench-card"><strong>${index+1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><div class="pitch-player-actions"><button type="button" data-draft-start="${player.id}" ${blocked?'disabled':''} title="${blocked?reason:''}">Move to starting XI</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;}
-
-function renderDraftPitchBuilding(){const squadPlayers=draftSelection.map(draftPlayerById).filter(Boolean);byId('draft-pitch-formation').textContent=draftSelection.length?`${draftFormationLabel(draftStartingIds.map(draftPlayerById).filter(Boolean))} so far`:'';if(!squadPlayers.length){
-// Bug fix: this early return used to skip clearing #draft-bench entirely -- removing the very
-// last player left its stale bench card (and stale Remove-button listener, pointing at an id no
-// longer in draftSelection) on screen, making a second click on it a silent no-op. Both
-// containers must be cleared together whenever the squad is empty, not just the pitch.
-byId('draft-pitch').hidden=true;byId('draft-pitch').innerHTML='';byId('draft-bench').innerHTML='';return;}const startingPlayers=draftStartingIds.map(draftPlayerById).filter(Boolean);const benchPlayers=squadPlayers.filter(player=>!draftStartingIds.includes(player.id));byId('draft-pitch').hidden=false;byId('draft-pitch').setAttribute('aria-label',`Draft pitch in progress: ${startingPlayers.map(player=>player.name).join(', ')||'no starters chosen yet'}`);byId('draft-pitch').innerHTML=['FWD','MID','DEF','GKP'].map(position=>`<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers.filter(player=>player.position_short===position).map(draftPitchCardHtmlBuilding).join('')}</div>`).join('');byId('draft-bench').innerHTML=benchPlayers.map(draftBenchCardHtmlBuilding).join('');
-document.querySelectorAll('[data-draft-bench]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftBench);const benched=draftPlayerById(id);draftStartingIds=draftStartingIds.filter(existing=>existing!==id);if(draftCaptainId===id)draftCaptainId=draftStartingIds[0]||null;if(draftViceId===id||(draftCaptainId!==null&&draftViceId===draftCaptainId))draftViceId=draftStartingIds.find(existing=>existing!==draftCaptainId)||null;if(benched){const squadById=Object.fromEntries(draftSelection.map(playerId=>[playerId,draftPlayerById(playerId)]));draftAutoFillAfterBench(benched.position_short,id,squadById);}renderDraftPitch();}));
-document.querySelectorAll('[data-draft-start]').forEach(button=>{if(button.disabled)return;button.addEventListener('click',()=>{const id=Number(button.dataset.draftStart);draftStartingIds=[...draftStartingIds,id];renderDraftPitch();});});
-document.querySelectorAll('[data-draft-captain]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftCaptain);if(draftViceId===id)draftViceId=draftCaptainId;draftCaptainId=id;renderDraftPitch();}));
-document.querySelectorAll('[data-draft-vice]').forEach(button=>button.addEventListener('click',()=>{const id=Number(button.dataset.draftVice);if(id===draftCaptainId)return;draftViceId=id;renderDraftPitch();}));
-document.querySelectorAll('[data-draft-remove]').forEach(button=>button.addEventListener('click',()=>removeDraftPlayer(Number(button.dataset.draftRemove))));
+function draftPitchCardHtmlBuilding(player) {
+  const isCaptain = player.id === draftCaptainId;
+  const isVice = player.id === draftViceId;
+  const role = isCaptain ? "C" : isVice ? "VC" : "";
+  return `<div class="pitch-player ${isCaptain ? "captain" : ""}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><div class="pitch-player-actions"><button type="button" data-draft-bench="${player.id}">Bench</button><button type="button" data-draft-captain="${player.id}" ${isCaptain ? "disabled" : ""}>C</button><button type="button" data-draft-vice="${player.id}" ${isVice || isCaptain ? "disabled" : ""}>VC</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;
 }
 
-function renderDraftPitch(){const empty=byId('draft-pitch-empty');const roll=draftRollScenario();if(roll&&draftSquadMatchesSaved(roll)){empty.hidden=true;byId('draft-pitch').hidden=false;renderDraftPitchSaved(roll);return;}empty.hidden=!!draftSelection.length;renderDraftPitchBuilding();}
+function draftBenchCardHtmlBuilding(player, index) {
+  const startingSquadById = Object.fromEntries(
+    draftStartingIds.map((startId) => [startId, draftPlayerById(startId)]),
+  );
+  const counts = draftXiPositionCounts(draftStartingIds, startingSquadById);
+  const canAdd = draftXiCanAdd(player.position_short, counts);
+  const blocked = !canAdd;
+  const reason =
+    draftStartingIds.length >= 11
+      ? "Bench a starter first -- the starting XI already has 11 players"
+      : (counts[player.position_short] || 0) >=
+          draftXiMax[player.position_short]
+        ? `Only ${draftXiMax[player.position_short]} ${player.position_short} can start`
+        : "Starting this player would leave no room for a required position -- bench someone from a position already at its minimum first";
+  return `<div class="weekly-bench-card"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><div class="pitch-player-actions"><button type="button" data-draft-start="${player.id}" ${blocked ? "disabled" : ""} title="${blocked ? reason : ""}">Move to starting XI</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;
+}
+
+function renderDraftPitchBuilding() {
+  const squadPlayers = draftSelection.map(draftPlayerById).filter(Boolean);
+  byId("draft-pitch-formation").textContent = draftSelection.length
+    ? `${draftFormationLabel(draftStartingIds.map(draftPlayerById).filter(Boolean))} so far`
+    : "";
+  if (!squadPlayers.length) {
+    // Bug fix: this early return used to skip clearing #draft-bench entirely -- removing the very
+    // last player left its stale bench card (and stale Remove-button listener, pointing at an id no
+    // longer in draftSelection) on screen, making a second click on it a silent no-op. Both
+    // containers must be cleared together whenever the squad is empty, not just the pitch.
+    byId("draft-pitch").hidden = true;
+    byId("draft-pitch").innerHTML = "";
+    byId("draft-bench").innerHTML = "";
+    return;
+  }
+  const startingPlayers = draftStartingIds.map(draftPlayerById).filter(Boolean);
+  const benchPlayers = squadPlayers.filter(
+    (player) => !draftStartingIds.includes(player.id),
+  );
+  byId("draft-pitch").hidden = false;
+  byId("draft-pitch").setAttribute(
+    "aria-label",
+    `Draft pitch in progress: ${startingPlayers.map((player) => player.name).join(", ") || "no starters chosen yet"}`,
+  );
+  byId("draft-pitch").innerHTML = ["FWD", "MID", "DEF", "GKP"]
+    .map(
+      (position) =>
+        `<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers
+          .filter((player) => player.position_short === position)
+          .map(draftPitchCardHtmlBuilding)
+          .join("")}</div>`,
+    )
+    .join("");
+  byId("draft-bench").innerHTML = benchPlayers
+    .map(draftBenchCardHtmlBuilding)
+    .join("");
+  document.querySelectorAll("[data-draft-bench]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftBench);
+      const benched = draftPlayerById(id);
+      draftStartingIds = draftStartingIds.filter((existing) => existing !== id);
+      if (draftCaptainId === id) draftCaptainId = draftStartingIds[0] || null;
+      if (
+        draftViceId === id ||
+        (draftCaptainId !== null && draftViceId === draftCaptainId)
+      )
+        draftViceId =
+          draftStartingIds.find((existing) => existing !== draftCaptainId) ||
+          null;
+      if (benched) {
+        const squadById = Object.fromEntries(
+          draftSelection.map((playerId) => [
+            playerId,
+            draftPlayerById(playerId),
+          ]),
+        );
+        draftAutoFillAfterBench(benched.position_short, id, squadById);
+      }
+      renderDraftPitch();
+    }),
+  );
+  document.querySelectorAll("[data-draft-start]").forEach((button) => {
+    if (button.disabled) return;
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftStart);
+      draftStartingIds = [...draftStartingIds, id];
+      renderDraftPitch();
+    });
+  });
+  document.querySelectorAll("[data-draft-captain]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftCaptain);
+      if (draftViceId === id) draftViceId = draftCaptainId;
+      draftCaptainId = id;
+      renderDraftPitch();
+    }),
+  );
+  document.querySelectorAll("[data-draft-vice]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.draftVice);
+      if (id === draftCaptainId) return;
+      draftViceId = id;
+      renderDraftPitch();
+    }),
+  );
+  document
+    .querySelectorAll("[data-draft-remove]")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        removeDraftPlayer(Number(button.dataset.draftRemove)),
+      ),
+    );
+}
+
+function renderDraftPitch() {
+  const empty = byId("draft-pitch-empty");
+  const roll = draftRollScenario();
+  if (roll && draftSquadMatchesSaved(roll)) {
+    empty.hidden = true;
+    byId("draft-pitch").hidden = false;
+    renderDraftPitchSaved(roll);
+    return;
+  }
+  empty.hidden = !!draftSelection.length;
+  renderDraftPitchBuilding();
+}
 
 // Issue #108: Decision Center and Model Performance are both personalized to a manager's own
 // team and have nothing meaningful to show without one. Rather than gating inside each of their
@@ -439,5 +3150,36 @@ function renderDraftPitch(){const empty=byId('draft-pitch-empty');const roll=dra
 // renderWeeklyDecision()'s weekly-decision section, and renderTeamPerformance() -- so an explicit
 // ?team_id= lookup of someone else's team (never 'not_configured'; see server.py's
 // compute_manager_view/_serve_dashboard) still shows that team's real content, unchanged.
-function applyProfileGates(){const gated=(state.manager||{}).connection_status==='not_configured';byId('decisions-content').hidden=gated;byId('decisions-empty-state').hidden=!gated;byId('performance-content').hidden=gated;byId('performance-empty-state').hidden=!gated;}
-setupThemeToggle();setupRefresh();populateFilters();setupPlayerExplorer();setupFixtures();renderOverview();renderDecision();renderWeeklyDecision();renderManager();renderLookupBanner();setupTeamLookup();renderPerformance();renderShadowModels();renderTeamPerformance();renderPlayerPerformance();renderModel();applyProfileGates();setupDecisionSubnav();setupProfileForm();setupReminderForm();setupDraftSquad();renderDraftHealth();renderDraftPitch();setupContactForm();setupWhatsNew();restoreWorkspaceContext();
+function applyProfileGates() {
+  const gated = (state.manager || {}).connection_status === "not_configured";
+  byId("decisions-content").hidden = gated;
+  byId("decisions-empty-state").hidden = !gated;
+  byId("performance-content").hidden = gated;
+  byId("performance-empty-state").hidden = !gated;
+}
+setupThemeToggle();
+setupRefresh();
+populateFilters();
+setupPlayerExplorer();
+setupFixtures();
+renderOverview();
+renderDecision();
+renderWeeklyDecision();
+renderManager();
+renderLookupBanner();
+setupTeamLookup();
+renderPerformance();
+renderShadowModels();
+renderTeamPerformance();
+renderPlayerPerformance();
+renderModel();
+applyProfileGates();
+setupDecisionSubnav();
+setupProfileForm();
+setupReminderForm();
+setupDraftSquad();
+renderDraftHealth();
+renderDraftPitch();
+setupContactForm();
+setupWhatsNew();
+restoreWorkspaceContext();

@@ -5,6 +5,54 @@ import unittest
 
 from fpl_intel.dashboard import render_dashboard
 
+# Issue #222: dashboard.js went from a hand-minified single-line-per-function file to real,
+# Prettier-formatted multi-line JS with its own quote-style conventions (double quotes by
+# default, spaces around operators/braces). A long tail of tests below were written as exact
+# substring/offset lookups against the old minified text -- those need to keep checking the same
+# *semantic* JS content without being coupled to either formatting style. `_js_pattern`/
+# `js_search`/`js_contains` do that: they tokenize a snippet into identifiers/numbers/punctuation
+# and glue the pieces back together with `\s*`, so the same snippet string matches the code
+# regardless of how much whitespace a formatter put between tokens, and quote characters match
+# either `'` or `"`. Mirrors the whitespace/quote-tolerant regex migration already done for the
+# CSS-side assertions when dashboard.css was reformatted (commit 5108610).
+_JS_TOKEN_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*|[0-9]+|['\"]|\S")
+
+
+def _js_pattern(snippet):
+    tokens = _JS_TOKEN_RE.findall(snippet)
+    parts = []
+    for index, token in enumerate(tokens):
+        if index > 0:
+            # Prettier adds a trailing comma before a closing ), ], or } when it reflows a
+            # call/array/object literal onto multiple lines -- optional here since the snippet
+            # was written against the old single-line minified text, which never had one.
+            parts.append(r",?\s*" if token in (")", "]", "}") else r"\s*")
+        parts.append(r"['\"]" if token in ("'", '"') else re.escape(token))
+    return "".join(parts)
+
+
+def js_search(html, snippet, start=0):
+    """Whitespace/quote-tolerant equivalent of `html.index(snippet, start)` for JS source
+    snippets. Raises ValueError like str.index() does when the snippet isn't found."""
+    match = re.compile(_js_pattern(snippet)).search(html, start)
+    if match is None:
+        raise ValueError(f"JS snippet not found: {snippet!r}")
+    return match.start()
+
+
+def js_contains(html, snippet):
+    """Whitespace/quote-tolerant equivalent of `snippet in html` for JS source snippets."""
+    return re.search(_js_pattern(snippet), html) is not None
+
+
+def js_span(html, snippet, start=0):
+    """Like js_search, but returns (match_start, match_end) -- for callers that used to compute
+    an end offset as `html.index(snippet, start) + len(snippet)` against the old minified text."""
+    match = re.compile(_js_pattern(snippet)).search(html, start)
+    if match is None:
+        raise ValueError(f"JS snippet not found: {snippet!r}")
+    return match.start(), match.end()
+
 
 class WhatsNewTabRenderTests(unittest.TestCase):
     """Issue #143: the "What's New" tab's markup and embedded data."""
@@ -87,8 +135,8 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         # #whats-new-count, and is untouched.)
         html = render_dashboard(self._BASE_STATE)
 
-        entry_start = html.index("function renderWhatsNew(){")
-        entry_end = html.index("}\nfunction ", entry_start)
+        entry_start = js_search(html, "function renderWhatsNew(){")
+        entry_end = js_search(html, "}\nfunction ", entry_start)
         entry_body = html[entry_start:entry_end]
         self.assertIn("whats-new-date", entry_body)
         self.assertIn("whats-new-headline", entry_body)
@@ -316,7 +364,7 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("☀️", html)
         self.assertIn("🌙", html)
         self.assertIn('class="theme-toggle-thumb"', html)
-        self.assertIn("localStorage.getItem('fpl-theme')", html)
+        self.assertTrue(js_contains(html, "localStorage.getItem('fpl-theme')"))
         self.assertIn("prefers-color-scheme: light", html)
 
         # A real light-theme override block exists, keyed off a data attribute.
@@ -475,11 +523,13 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('data-scroll-to="decision-section-weekly"', html)
         self.assertIn('data-scroll-to="decision-section-bench"', html)
         self.assertIn('id="decision-section-bench"', html)
-        self.assertIn(
-            "['decision-section-summary','decision-section-weekly',"
-            "'decision-section-profiles','decision-section-xi',"
-            "'decision-section-bench','decision-section-squad']",
-            html,
+        self.assertTrue(
+            js_contains(
+                html,
+                "['decision-section-summary','decision-section-weekly',"
+                "'decision-section-profiles','decision-section-xi',"
+                "'decision-section-bench','decision-section-squad']",
+            )
         )
 
     def test_fresh_squad_benchmark_is_one_unified_group_open_by_default(self):
@@ -521,24 +571,26 @@ class DashboardRenderTests(unittest.TestCase):
         # declared preseason draft and for a real published squad once GW1 has passed, so the
         # benchmark stays demoted post-season-start too, instead of snapping back open the moment
         # `weekly.draft` goes false again.
-        self.assertIn("const weeklyPersonalized=weekly.status==='active'", html)
-        self.assertIn("classList.toggle('weekly-priority',weeklyPersonalized)", html)
-        self.assertIn("benchmarkDetails.open=!weeklyPersonalized", html)
-        self.assertIn("'Reference: from-scratch squad (ignores your draft)'", html)
-        self.assertIn("'Reference: from-scratch squad (see your weekly decision above)'", html)
+        self.assertTrue(js_contains(html, "const weeklyPersonalized=weekly.status==='active'"))
+        self.assertTrue(js_contains(html, "classList.toggle('weekly-priority',weeklyPersonalized)"))
+        self.assertTrue(js_contains(html, "benchmarkDetails.open=!weeklyPersonalized"))
+        self.assertTrue(js_contains(html, "'Reference: from-scratch squad (ignores your draft)'"))
+        self.assertTrue(
+            js_contains(html, "'Reference: from-scratch squad (see your weekly decision above)'")
+        )
         self.assertIn("#decisions-content.weekly-priority > .decision-subnav", html)
         self.assertIn("#decisions-content.weekly-priority > #decision-section-weekly", html)
 
         # Clicking a subnav chip must open a collapsed ancestor `<details>` before scrolling to
         # it, or it would scroll to an invisible (zero-height, collapsed) target.
-        self.assertIn("const collapsedAncestor=target.closest('details')", html)
-        self.assertIn("collapsedAncestor.open=true", html)
+        self.assertTrue(js_contains(html, "const collapsedAncestor=target.closest('details')"))
+        self.assertTrue(js_contains(html, "collapsedAncestor.open=true"))
 
     def test_decision_scroll_targets_clear_sticky_subnav(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertRegex(html, r"scroll-margin-top:\s*58px")
-        self.assertIn("matchMedia('(prefers-reduced-motion: reduce)')", html)
+        self.assertTrue(js_contains(html, "matchMedia('(prefers-reduced-motion: reduce)')"))
         self.assertNotIn("renderDecisionLegacy", html)
 
     def test_mobile_inspector_order_is_scoped_to_transfers(self):
@@ -587,10 +639,14 @@ class DashboardRenderTests(unittest.TestCase):
         # Bug fix: weekly-profile-panel's own local tab strip (the one that used to produce
         # aria-controls="weekly-profile-panel") was removed as a duplicate profile selector --
         # it's now labelled by the surviving, relocated tab strip's buttons instead.
-        self.assertIn("byId('weekly-profile-panel').setAttribute('aria-labelledby',`profile-tab-", html)
-        self.assertIn("tabindex=\"${profile.id===selected.id?'0':'-1'}\"", html)
-        self.assertIn("['ArrowLeft','ArrowRight','Home','End']", html)
-        self.assertIn("next.focus()", html)
+        self.assertTrue(
+            js_contains(
+                html, "byId('weekly-profile-panel').setAttribute('aria-labelledby',`profile-tab-"
+            )
+        )
+        self.assertTrue(js_contains(html, "tabindex=\"${profile.id===selected.id?'0':'-1'}\""))
+        self.assertTrue(js_contains(html, "['ArrowLeft','ArrowRight','Home','End']"))
+        self.assertTrue(js_contains(html, "next.focus()"))
 
     def test_compare_risk_profiles_panel_can_switch_to_the_visitors_own_squad(self):
         # Issue #158: "Compare risk profiles" used to always be built inline inside
@@ -600,21 +656,25 @@ class DashboardRenderTests(unittest.TestCase):
         # metrics/evaluation_horizons shape) once weekly.status==='active'.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("function renderProfileComparison(profileId=null)", html)
+        self.assertTrue(js_contains(html, "function renderProfileComparison(profileId=null)"))
         self.assertIn('id="profile-comparison-heading">Compare risk profiles</h2>', html)
         self.assertIn('id="profile-comparison-subtitle">', html)
-        comparison_start = html.index("function renderProfileComparison(profileId=null)")
-        comparison_end = html.index("\nfunction renderDecision(profileId=null){", comparison_start)
+        comparison_start = js_search(html, "function renderProfileComparison(profileId=null)")
+        comparison_end = js_search(
+            html, "\nfunction renderDecision(profileId=null){", comparison_start
+        )
         comparison_body = html[comparison_start:comparison_end]
-        self.assertIn("weekly.status==='active'", comparison_body)
-        self.assertIn("weekly.profiles", comparison_body)
+        self.assertTrue(js_contains(comparison_body, "weekly.status==='active'"))
+        self.assertTrue(js_contains(comparison_body, "weekly.profiles"))
         # Captaincy-delta framing replaces the benchmark's "changed players in/out" sentence for
         # the personalized case, since squad membership never varies across profiles there.
         self.assertIn("captains", comparison_body)
         self.assertIn("Same captain and lineup across all three profiles", comparison_body)
         # renderDecision() calls the extracted function so every existing call site keeps working.
-        decision_start = html.index("function renderDecision(profileId=null){")
-        self.assertIn("renderProfileComparison(profileId)", html[decision_start:decision_start + 200])
+        decision_start = js_search(html, "function renderDecision(profileId=null){")
+        self.assertTrue(
+            js_contains(html[decision_start:decision_start + 400], "renderProfileComparison(profileId)")
+        )
 
     def test_personalized_compare_risk_profiles_panel_relocates_out_of_the_collapsed_benchmark(self):
         # Bug fix, live-reported: decision-section-profiles lives by default inside <details
@@ -636,11 +696,13 @@ class DashboardRenderTests(unittest.TestCase):
         weekly_start = html.index('id="decision-section-weekly"')
         self.assertIn("weekly-profile-comparison-mount", html[weekly_start:weekly_start + 600])
 
-        comparison_start = html.index("function renderProfileComparison(profileId=null)")
-        comparison_end = html.index("\nfunction renderDecision(profileId=null){", comparison_start)
+        comparison_start = js_search(html, "function renderProfileComparison(profileId=null)")
+        comparison_end = js_search(
+            html, "\nfunction renderDecision(profileId=null){", comparison_start
+        )
         comparison_body = html[comparison_start:comparison_end]
-        self.assertIn("weeklyMount.appendChild(profilesSection)", comparison_body)
-        self.assertIn("homeAnchor.after(profilesSection)", comparison_body)
+        self.assertTrue(js_contains(comparison_body, "weeklyMount.appendChild(profilesSection)"))
+        self.assertTrue(js_contains(comparison_body, "homeAnchor.after(profilesSection)"))
 
     def test_player_search_folds_diacritics_in_both_search_boxes(self):
         # Reported live: searching "guehi" found nothing for Marc Guéhi, while "guimar" found
@@ -651,25 +713,36 @@ class DashboardRenderTests(unittest.TestCase):
         # Player Explorer and the Draft tab's "Add players" search share this same query logic.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn(
-            "const foldDiacritics=value=>String(value??'').normalize('NFD')"
-            ".replace(/[\\u0300-\\u036f]/g,'');",
-            html,
+        self.assertTrue(
+            js_contains(
+                html,
+                # Prettier's default `arrowParens: always` wraps this single-argument arrow
+                # function's param in parens -- `value=>` became `(value) =>` -- a real syntax
+                # addition, not just whitespace, so the snippet reflects it explicitly.
+                "const foldDiacritics=(value)=>String(value??'').normalize('NFD')"
+                ".replace(/[\\u0300-\\u036f]/g,'');",
+            )
         )
-        player_search_start = html.index("function renderPlayers(){")
-        self.assertIn(
-            "foldDiacritics(byId('player-search').value.trim().toLocaleLowerCase())",
-            html[player_search_start:player_search_start + 400],
+        player_search_start = js_search(html, "function renderPlayers(){")
+        self.assertTrue(
+            js_contains(
+                html[player_search_start:player_search_start + 500],
+                "foldDiacritics(byId('player-search').value.trim().toLocaleLowerCase())",
+            )
         )
-        self.assertIn(
-            "foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase())"
-            ".includes(query)",
-            html[player_search_start:player_search_start + 800],
+        self.assertTrue(
+            js_contains(
+                html[player_search_start:player_search_start + 1000],
+                "foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase())"
+                ".includes(query)",
+            )
         )
-        draft_search_start = html.index("function draftResultRows(){")
-        self.assertIn(
-            "foldDiacritics(byId('draft-search').value.trim().toLocaleLowerCase())",
-            html[draft_search_start:draft_search_start + 400],
+        draft_search_start = js_search(html, "function draftResultRows(){")
+        self.assertTrue(
+            js_contains(
+                html[draft_search_start:draft_search_start + 500],
+                "foldDiacritics(byId('draft-search').value.trim().toLocaleLowerCase())",
+            )
         )
 
     def test_player_and_performance_datasets_use_semantic_tables(self):
@@ -700,7 +773,7 @@ class DashboardRenderTests(unittest.TestCase):
 
         self.assertIn("Deadline passed", html)
         self.assertIn("Refresh required to load the next deadline", html)
-        self.assertIn("deadline <= Date.now()", html)
+        self.assertTrue(js_contains(html, "deadline <= Date.now()"))
 
     def test_page_load_restores_the_previously_saved_view_profile_and_filters(self):
         # Issue #27: `captureWorkspaceContext()`/`restoreWorkspaceContext()` predate the
@@ -710,28 +783,28 @@ class DashboardRenderTests(unittest.TestCase):
         # load, so a workspace-context snapshot from a previous session is still restored.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("function captureWorkspaceContext()", html)
-        self.assertIn("function restoreWorkspaceContext()", html)
-        self.assertIn("'fpl-workspace-context'", html)
-        self.assertIn("restoreWorkspaceContext();", html)
+        self.assertTrue(js_contains(html, "function captureWorkspaceContext()"))
+        self.assertTrue(js_contains(html, "function restoreWorkspaceContext()"))
+        self.assertTrue(js_contains(html, "'fpl-workspace-context'"))
+        self.assertTrue(js_contains(html, "restoreWorkspaceContext();"))
 
     def test_model_performance_collection_errors_are_visible(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertIn('id="performance-errors"', html)
-        self.assertIn("performance.collection_errors||[]", html)
+        self.assertTrue(js_contains(html, "performance.collection_errors||[]"))
         self.assertIn("Result collection issue", html)
 
     def test_invalid_or_untrusted_source_urls_render_as_text_not_links(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("function safeLink(url,label)", html)
-        self.assertIn("parsed.protocol==='https:'", html)
-        self.assertIn("trustedLinkDomains.has(host)", html)
-        self.assertNotIn("['http:','https:'].includes(parsed.protocol)", html)
-        self.assertIn("safeLink(source.url,source.name)", html)
-        self.assertIn("safeLink(url,`Source ${index+1}`)", html)
-        self.assertIn("safeLink(rules.source,'Official FPL rules')", html)
+        self.assertTrue(js_contains(html, "function safeLink(url,label)"))
+        self.assertTrue(js_contains(html, "parsed.protocol==='https:'"))
+        self.assertTrue(js_contains(html, "trustedLinkDomains.has(host)"))
+        self.assertFalse(js_contains(html, "['http:','https:'].includes(parsed.protocol)"))
+        self.assertTrue(js_contains(html, "safeLink(source.url,source.name)"))
+        self.assertTrue(js_contains(html, "safeLink(url,`Source ${index+1}`)"))
+        self.assertTrue(js_contains(html, "safeLink(rules.source,'Official FPL rules')"))
 
     def test_renders_connected_my_team_workspace(self):
         state = {
@@ -763,7 +836,7 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="view-squad" class="view active"', html)
         self.assertNotIn('id="view-overview" class="view active"', html)
         self.assertIn('data-view="squad">My Team</button>', html)
-        self.assertIn("showView(titles[context.view]?context.view:'squad')", html)
+        self.assertTrue(js_contains(html, "showView(titles[context.view]?context.view:'squad')"))
 
     def test_renders_manager_profile_form(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
@@ -777,7 +850,7 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn('id="profile-risk"', html)
         self.assertIn('id="profile-save"', html)
         self.assertIn('id="profile-message"', html)
-        self.assertIn("fetch('/api/profile'", html)
+        self.assertTrue(js_contains(html, "fetch('/api/profile'"))
         # Per request: the "Confirmed free transfers"/"Free transfers gameweek" override was
         # dropped from the form entirely -- UI-only, the backend fields stay nullable and untouched
         # (transfer_decisions.py's derive_free_transfers fallback already handles them being unset).
@@ -945,12 +1018,12 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # remove."
         html = render_dashboard(self._STATE)
 
-        early_return_start = html.index("if(!squadPlayers.length){")
-        early_return_end = html.index("return;}", early_return_start) + len("return;}")
+        early_return_start = js_search(html, "if(!squadPlayers.length){")
+        _, early_return_end = js_span(html, "return;}", early_return_start)
         early_return_body = html[early_return_start:early_return_end]
-        self.assertIn("byId('draft-pitch').hidden=true", early_return_body)
-        self.assertIn("byId('draft-pitch').innerHTML=''", early_return_body)
-        self.assertIn("byId('draft-bench').innerHTML=''", early_return_body)
+        self.assertTrue(js_contains(early_return_body, "byId('draft-pitch').hidden=true"))
+        self.assertTrue(js_contains(early_return_body, "byId('draft-pitch').innerHTML=''"))
+        self.assertTrue(js_contains(early_return_body, "byId('draft-bench').innerHTML=''"))
 
     def test_saved_pitch_only_used_when_local_selection_matches_the_last_save(self):
         # Regression guard: renderDraftPitchSaved can only render players present in the last-
@@ -962,11 +1035,13 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # back to the no-projections builder view, which reads live off draftSelection.
         html = render_dashboard(self._STATE)
 
-        self.assertIn("function draftSquadMatchesSaved(roll)", html)
-        dispatcher_start = html.index("function renderDraftPitch(){")
-        dispatcher_end = html.index("}", html.index("renderDraftPitchBuilding();", dispatcher_start)) + 1
+        self.assertTrue(js_contains(html, "function draftSquadMatchesSaved(roll)"))
+        dispatcher_start = js_search(html, "function renderDraftPitch(){")
+        dispatcher_end = html.index(
+            "}", js_search(html, "renderDraftPitchBuilding();", dispatcher_start)
+        ) + 1
         dispatcher_body = html[dispatcher_start:dispatcher_end]
-        self.assertIn("roll&&draftSquadMatchesSaved(roll)", dispatcher_body)
+        self.assertTrue(js_contains(dispatcher_body, "roll&&draftSquadMatchesSaved(roll)"))
 
     def test_benching_the_only_starting_gkp_auto_promotes_the_other_one(self):
         # Live feedback: "when I bench GK, other one should automatically added in playing XI -
@@ -975,20 +1050,24 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # should auto-promote the other one instead of leaving the XI with zero goalkeepers.
         html = render_dashboard(self._STATE)
 
-        self.assertIn("function draftAutoFillAfterBench(benchedPosition,benchedId,squadById)", html)
-        bench_handler_start = html.index("document.querySelectorAll('[data-draft-bench]')")
-        bench_handler_end = html.index("renderDraftPitch();}));", bench_handler_start)
+        self.assertTrue(
+            js_contains(html, "function draftAutoFillAfterBench(benchedPosition,benchedId,squadById)")
+        )
+        bench_handler_start = js_search(html, "document.querySelectorAll('[data-draft-bench]')")
+        bench_handler_end = js_search(html, "renderDraftPitch();}));", bench_handler_start)
         bench_handler_body = html[bench_handler_start:bench_handler_end]
-        self.assertIn("draftAutoFillAfterBench(benched.position_short,id,squadById)", bench_handler_body)
+        self.assertTrue(
+            js_contains(bench_handler_body, "draftAutoFillAfterBench(benched.position_short,id,squadById)")
+        )
 
     def test_add_and_remove_place_players_directly_on_the_pitch(self):
         html = render_dashboard(self._STATE)
 
-        self.assertIn("function addDraftPlayer(id)", html)
-        self.assertIn("function removeDraftPlayer(id)", html)
-        self.assertIn("function renderDraftBuilder()", html)
-        self.assertIn("function renderDraftPitchBuilding()", html)
-        self.assertIn("function renderDraftPitchSaved(roll)", html)
+        self.assertTrue(js_contains(html, "function addDraftPlayer(id)"))
+        self.assertTrue(js_contains(html, "function removeDraftPlayer(id)"))
+        self.assertTrue(js_contains(html, "function renderDraftBuilder()"))
+        self.assertTrue(js_contains(html, "function renderDraftPitchBuilding()"))
+        self.assertTrue(js_contains(html, "function renderDraftPitchSaved(roll)"))
 
     def test_no_reload_save_success_path_refreshes_draft_health_too(self):
         # Regression guard: the no-reload save success path called renderDraftBuilder() (pitch +
@@ -998,11 +1077,11 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # the Draft tab. `renderDraftBuilder()` alone doesn't touch #draft-health-* at all.
         html = render_dashboard(self._STATE)
 
-        success_start = html.index("refreshPayload.status==='ok'")
-        success_end = html.index("else{", success_start)
+        success_start = js_search(html, "refreshPayload.status==='ok'")
+        success_end = js_search(html, "else{", success_start)
         success_branch = html[success_start:success_end]
-        self.assertIn("renderDraftHealth()", success_branch)
-        self.assertIn("renderDraftBuilder()", success_branch)
+        self.assertTrue(js_contains(success_branch, "renderDraftHealth()"))
+        self.assertTrue(js_contains(success_branch, "renderDraftBuilder()"))
 
     def test_save_success_path_does_not_force_reseed_of_local_pitch_choices(self):
         # Issue #220 regression guard: the no-reload save success path used to force
@@ -1015,19 +1094,19 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # success path shouldn't force it open itself.
         html = render_dashboard(self._STATE)
 
-        success_start = html.index("refreshPayload.status==='ok'")
-        success_end = html.index("else{", success_start)
+        success_start = js_search(html, "refreshPayload.status==='ok'")
+        success_end = js_search(html, "else{", success_start)
         success_branch = html[success_start:success_end]
-        self.assertNotIn("draftPitchSeededFor=null", success_branch)
-        self.assertIn("renderDraftBuilder()", success_branch)
+        self.assertFalse(js_contains(success_branch, "draftPitchSeededFor=null"))
+        self.assertTrue(js_contains(success_branch, "renderDraftBuilder()"))
 
         # The guard itself must still be intact -- this is what makes a *membership* change
         # (not just a same-squad re-save) correctly reseed from the fresh model recommendation.
-        seed_start = html.index("function seedDraftPitch(roll)")
+        seed_start = js_search(html, "function seedDraftPitch(roll)")
         seed_end = html.index("}", seed_start) + 1
         seed_body = html[seed_start:seed_end]
-        self.assertIn("draftPitchSeededFor===key", seed_body)
-        self.assertIn("draftPitchSeededFor=key", seed_body)
+        self.assertTrue(js_contains(seed_body, "draftPitchSeededFor===key"))
+        self.assertTrue(js_contains(seed_body, "draftPitchSeededFor=key"))
 
     def test_draft_pitch_session_notice_does_not_overclaim_reset_on_reload_only(self):
         # Issue #220: the old copy ("...reset on reload -- only the 15-player squad itself is
@@ -1110,15 +1189,17 @@ class ProfileGatedTabsTests(unittest.TestCase):
     def test_gate_toggles_the_content_wrapper_off_the_same_not_configured_signal_used_elsewhere(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn("function applyProfileGates()", html)
-        self.assertIn(
-            "const gated=(state.manager||{}).connection_status==='not_configured';", html,
+        self.assertTrue(js_contains(html, "function applyProfileGates()"))
+        self.assertTrue(
+            js_contains(
+                html, "const gated=(state.manager||{}).connection_status==='not_configured';"
+            )
         )
-        self.assertIn("byId('decisions-content').hidden=gated;", html)
-        self.assertIn("byId('decisions-empty-state').hidden=!gated;", html)
-        self.assertIn("byId('performance-content').hidden=gated;", html)
-        self.assertIn("byId('performance-empty-state').hidden=!gated;", html)
-        self.assertIn("applyProfileGates();setupDecisionSubnav();", html)
+        self.assertTrue(js_contains(html, "byId('decisions-content').hidden=gated;"))
+        self.assertTrue(js_contains(html, "byId('decisions-empty-state').hidden=!gated;"))
+        self.assertTrue(js_contains(html, "byId('performance-content').hidden=gated;"))
+        self.assertTrue(js_contains(html, "byId('performance-empty-state').hidden=!gated;"))
+        self.assertTrue(js_contains(html, "applyProfileGates();setupDecisionSubnav();"))
 
     def test_team_lookup_panel_on_my_team_is_untouched(self):
         """Issue #46's zero-commitment "Look up a team" form is explicitly out of scope."""
