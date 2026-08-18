@@ -302,7 +302,16 @@ function setupDraftSquad(){const clubs=[...new Set(players.map(player=>player.cl
 // into Decision Center for anyone who wants the full view. `/api/manager-view` (issue #125)
 // returns exactly the same `weekly_decisions`/`manager` the old full-page reload would have
 // picked up, as JSON, so the draft health/pitch panels can refresh in place.
-try{const refreshResponse=await fetch(`/api/manager-view?team_id=${teamId}`);const refreshPayload=await refreshResponse.json();if(refreshResponse.ok&&refreshPayload.status==='ok'){decision.weekly_decisions=refreshPayload.weekly_decisions;state.manager=refreshPayload.manager;state.profile=state.profile||{};state.profile.team_id=teamId;state.profile.draft_squad=draftSelection.slice();draftPitchSeededFor=null;message.textContent='Draft squad saved.';renderDraftBuilder();renderDraftHealth();renderManager();renderWeeklyDecision();renderDecision();}else{message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(refreshError){message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(error){message.textContent=`Save failed: ${error.message}`;}finally{saveButton.disabled=false;}});renderDraftBuilder();}
+//
+// Issue #220 fix: this used to also force `draftPitchSeededFor=null` here, on every successful
+// save. That made `seedDraftPitch()` (below) reseed `draftStartingIds`/`draftCaptainId`/
+// `draftViceId` from the model's own recommendation unconditionally, discarding whatever
+// starting-XI/bench arrangement or captain/vice-captain the user had just set locally --
+// reported live as a vice-captain pick silently reverting the instant "Draft squad saved."
+// appeared, with no reload involved. `seedDraftPitch`'s own key (the saved squad's sorted
+// player-id set) already reseeds correctly on its own whenever the squad's membership actually
+// changes; forcing it open here on every save, even when membership didn't change, was the bug.
+try{const refreshResponse=await fetch(`/api/manager-view?team_id=${teamId}`);const refreshPayload=await refreshResponse.json();if(refreshResponse.ok&&refreshPayload.status==='ok'){decision.weekly_decisions=refreshPayload.weekly_decisions;state.manager=refreshPayload.manager;state.profile=state.profile||{};state.profile.team_id=teamId;state.profile.draft_squad=draftSelection.slice();message.textContent='Draft squad saved.';renderDraftBuilder();renderDraftHealth();renderManager();renderWeeklyDecision();renderDecision();}else{message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(refreshError){message.textContent='Draft squad saved. Reloading to refresh Decision Center…';window.setTimeout(()=>window.location.reload(),400);}}catch(error){message.textContent=`Save failed: ${error.message}`;}finally{saveButton.disabled=false;}});renderDraftBuilder();}
 
 // Issue #152: the draft tab's "draft health" summary reuses `build_draft_decisions`'s existing
 // output (already computed server-side pre-GW1, see `refresh.py`'s `compute_manager_view`)
@@ -365,7 +374,10 @@ function draftAutoFillAfterBench(benchedPosition,benchedId,squadById){const coun
 // manually designates their own XI" per the plan's decision, since this is only the initial seed
 // the user then freely edits. Re-seeds (overwriting whatever build-phase XI/bench arrangement was
 // in progress) only when this is the first render with a real, saved squad -- see the
-// `draftPitchSeededFor` guard below.
+// `draftPitchSeededFor` guard below. This is also what has to be left alone (not forced open) on
+// every subsequent save for the *same* squad -- see the issue #220 fix note above, in
+// `setupDraftSquad`'s save handler -- or a user's post-first-save C/VC/XI edits get silently
+// reseeded back to the model's recommendation on every re-save.
 function seedDraftPitch(roll){const key=(roll.squad||[]).map(player=>player.id).slice().sort((a,b)=>a-b).join(',');if(draftPitchSeededFor===key)return;draftStartingIds=(roll.starting_xi||[]).map(player=>player.id);draftCaptainId=roll.captain&&roll.captain.id;draftViceId=roll.vice_captain&&roll.vice_captain.id;draftPendingSwapId=null;draftPitchSeededFor=key;}
 
 function draftPitchCardHtml(player){const isCaptain=player.id===draftCaptainId;const isVice=player.id===draftViceId;const role=isCaptain?'C':isVice?'VC':'';return `<div class="pitch-player ${isCaptain?'captain':''}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role?` (${role})`:''}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span><div class="pitch-player-actions"><button type="button" data-draft-swap-out="${player.id}" ${draftPendingSwapId==null?'disabled':''} title="Swap in the selected bench player">${draftPendingSwapId==null?'Bench':'Swap in'}</button><button type="button" data-draft-captain="${player.id}" ${isCaptain?'disabled':''}>C</button><button type="button" data-draft-vice="${player.id}" ${isVice||isCaptain?'disabled':''}>VC</button><button type="button" data-draft-remove="${player.id}" title="Remove from squad">Remove</button></div></div>`;}

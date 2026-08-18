@@ -1004,6 +1004,45 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         self.assertIn("renderDraftHealth()", success_branch)
         self.assertIn("renderDraftBuilder()", success_branch)
 
+    def test_save_success_path_does_not_force_reseed_of_local_pitch_choices(self):
+        # Issue #220 regression guard: the no-reload save success path used to force
+        # `draftPitchSeededFor=null` right before re-rendering, which made `seedDraftPitch()`
+        # unconditionally overwrite the user's local `draftStartingIds`/`draftCaptainId`/
+        # `draftViceId` with the model's own recommendation on every single save -- reported live
+        # as a vice-captain pick silently reverting the instant "Draft squad saved." appeared,
+        # with no page reload involved. `seedDraftPitch`'s own squad-id-set key already reseeds
+        # correctly on its own whenever the saved squad's membership actually changes, so the
+        # success path shouldn't force it open itself.
+        html = render_dashboard(self._STATE)
+
+        success_start = html.index("refreshPayload.status==='ok'")
+        success_end = html.index("else{", success_start)
+        success_branch = html[success_start:success_end]
+        self.assertNotIn("draftPitchSeededFor=null", success_branch)
+        self.assertIn("renderDraftBuilder()", success_branch)
+
+        # The guard itself must still be intact -- this is what makes a *membership* change
+        # (not just a same-squad re-save) correctly reseed from the fresh model recommendation.
+        seed_start = html.index("function seedDraftPitch(roll)")
+        seed_end = html.index("}", seed_start) + 1
+        seed_body = html[seed_start:seed_end]
+        self.assertIn("draftPitchSeededFor===key", seed_body)
+        self.assertIn("draftPitchSeededFor=key", seed_body)
+
+    def test_draft_pitch_session_notice_does_not_overclaim_reset_on_reload_only(self):
+        # Issue #220: the old copy ("...reset on reload -- only the 15-player squad itself is
+        # saved") implied local C/VC/XI choices persisted through a save, which was already false
+        # before this fix's own bug and is still not literally true after it (they're still
+        # client-only, never sent to /api/draft-squad) -- only *that* they now correctly survive
+        # a same-squad re-save rather than resetting on every save.
+        html = render_dashboard(self._STATE)
+
+        notice_start = html.index('id="draft-pitch-session-notice"')
+        notice_end = html.index("</div>", notice_start)
+        notice_text = html[notice_start:notice_end]
+        self.assertIn("not saved to your account", notice_text)
+        self.assertIn("reset if you reload the page or change who's in the squad", notice_text)
+
     def test_js_pitch_and_health_helpers_present(self):
         html = render_dashboard(self._STATE)
 
