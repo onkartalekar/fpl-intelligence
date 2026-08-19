@@ -153,6 +153,70 @@ class WhatsNewTabRenderTests(unittest.TestCase):
         self.assertNotIn("undefined", html)
 
 
+class TransferFilterPerspectiveTests(unittest.TestCase):
+    """Issue #232: the transfers view's direction/movement filters must be read relative to the
+    selected club, not to whichever club's transfer-centre playlist a record happened to come
+    from. Filtering CLUB=Man Utd + Outgoing used to return Youri Tielemans (Aston Villa -> Man
+    Utd), because his Aston-Villa-relative `movement_direction: "out"` was compared verbatim
+    while the club predicate had matched him on `to_club`.
+
+    The JS itself is not executed by this suite, so these pin the shape of the fix against a
+    silent revert; the behaviour is verified in a real browser as part of shipping.
+    """
+
+    def _js(self):
+        return render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+    def test_direction_and_movement_filters_read_the_selected_club_perspective(self):
+        html = self._js()
+
+        # The filter predicate must consult the derived perspective, never the stored fields.
+        self.assertTrue(js_contains(html, "const view=perspectiveOf(row,club)"))
+        self.assertTrue(js_contains(html, "direction==='all'||view.direction===direction"))
+        self.assertTrue(js_contains(html, "movement==='all'||view.movement===movement"))
+        self.assertNotIn("row.movement_direction===direction", re.sub(r"\s+", "", html))
+        self.assertNotIn("row.movement_type===movement", re.sub(r"\s+", "", html))
+
+    def test_club_predicate_stays_relational(self):
+        """Narrowing it to premier_league_club would be simpler but wrong -- most intra-PL moves
+        are reported by only one of the two clubs, so the buying club's arrivals would vanish
+        from its own view rather than merely being mislabelled."""
+        html = self._js()
+
+        self.assertTrue(js_contains(html, "row.premier_league_club===club"))
+        self.assertTrue(js_contains(html, "row.from_club===club"))
+        self.assertTrue(js_contains(html, "row.to_club===club"))
+
+    def test_counterparty_movement_types_are_mirrored(self):
+        html = self._js()
+
+        self.assertTrue(js_contains(html, "'transfer-in':'transfer-out'"))
+        self.assertTrue(js_contains(html, "'transfer-out':'transfer-in'"))
+        self.assertTrue(js_contains(html, "'loan-in':'loan-out'"))
+        self.assertTrue(js_contains(html, "'loan-out':'loan-in'"))
+        # end-of-loan has no opposite type, so it must fall through to its own value rather than
+        # to undefined.
+        self.assertTrue(
+            js_contains(html, "MIRRORED_MOVEMENT[row.movement_type]||row.movement_type")
+        )
+
+    def test_a_release_keeps_its_own_bucket_only_for_the_releasing_club(self):
+        """"Released" is a departure that deliberately does not fold into Outgoing -- but only
+        for the club doing the releasing. Where the write-up names where the player went (Fulham
+        released Harry Wilson, who joined Leeds), the receiving club sees an ordinary arrival."""
+        html = self._js()
+
+        self.assertTrue(js_contains(html, "if(isOrigin&&stored.direction==='released')return stored"))
+
+    def test_unrelated_club_match_falls_back_to_the_records_own_framing(self):
+        """A record can match the club filter via premier_league_club alone, with the club on
+        neither side of the move -- there is no counterparty perspective to take there."""
+        html = self._js()
+
+        self.assertTrue(js_contains(html, "if(isOrigin===isDestination)return stored"))
+        self.assertTrue(js_contains(html, "if(club==='all')return stored"))
+
+
 class DashboardRenderTests(unittest.TestCase):
     def test_renders_honest_empty_transfer_state_and_source(self):
         state = {
