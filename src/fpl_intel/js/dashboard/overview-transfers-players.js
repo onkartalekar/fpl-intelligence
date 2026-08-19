@@ -156,6 +156,52 @@ function populateFilters() {
       .join(""),
   );
 }
+// Issue #232: a record's movement_type/movement_direction are stored relative to its
+// premier_league_club -- the club whose transfer-centre playlist it came from -- but the club
+// predicate below matches a record whether the selected club is its owner, its origin, or its
+// destination. Reading the stored values while some *other* club is selected therefore answers
+// the wrong club's question: Aston Villa's "Youri Tielemans, transfer-out" satisfied a Man Utd
+// "Outgoing / Transfer out" filter even though he joined United.
+//
+// Deriving both from from_club/to_club against the selected club is the framing two other
+// consumers already settled on for the same reason -- summarize_clubs (relevance.py) and
+// build_gw_recommendations (recommendations.py), both of which explain that refresh.py's
+// cross-source dedup keeps only one side's attribution, so which single movement_type survives
+// is not reliable. from_club/to_club survive on every record regardless.
+//
+// Narrowing the club predicate to premier_league_club instead would be simpler but wrong: most
+// intra-PL moves are reported by only one of the two clubs, so the buying club's arrivals would
+// disappear from its own view entirely rather than merely being mislabelled.
+const MIRRORED_MOVEMENT = {
+  "transfer-in": "transfer-out",
+  "transfer-out": "transfer-in",
+  "loan-in": "loan-out",
+  "loan-out": "loan-in",
+};
+function perspectiveOf(row, club) {
+  const stored = {
+    direction: row.movement_direction,
+    movement: row.movement_type,
+  };
+  if (club === "all") return stored;
+  const isOrigin = row.from_club === club;
+  const isDestination = row.to_club === club;
+  // Neither side is the selected club (it matched as premier_league_club only), or degenerately
+  // both are -- either way the record's own framing is the only one available.
+  if (isOrigin === isDestination) return stored;
+  // "Released" is a departure that keeps its own direction bucket rather than folding into
+  // Outgoing -- but only for the club doing the releasing. Where the write-up names where the
+  // player actually went, the receiving club sees an ordinary arrival: Fulham released Harry
+  // Wilson, who joined Leeds, and Leeds' Incoming should list him.
+  if (isOrigin && stored.direction === "released") return stored;
+  const direction = isOrigin ? "out" : "in";
+  if (direction === stored.direction) return stored;
+  // end-of-loan has no opposite type, so it keeps its movement and only flips direction.
+  return {
+    direction,
+    movement: MIRRORED_MOVEMENT[row.movement_type] || row.movement_type,
+  };
+}
 function filteredRows() {
   const query = byId("transfer-search").value.trim().toLocaleLowerCase();
   const club = byId("club-filter").value;
@@ -182,6 +228,7 @@ function filteredRows() {
       (freshness === "recent14" &&
         ["new_7d", "recent_14d"].includes(row.freshness)) ||
       row.freshness === freshness;
+    const view = perspectiveOf(row, club);
     return (
       (!query || text.includes(query)) &&
       (club === "all" ||
@@ -189,8 +236,8 @@ function filteredRows() {
         row.from_club === club ||
         row.to_club === club) &&
       relevanceOk &&
-      (direction === "all" || row.movement_direction === direction) &&
-      (movement === "all" || row.movement_type === movement) &&
+      (direction === "all" || view.direction === direction) &&
+      (movement === "all" || view.movement === movement) &&
       freshOk
     );
   });

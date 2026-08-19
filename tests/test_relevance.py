@@ -203,6 +203,76 @@ class TransferRelevanceTests(unittest.TestCase):
         self.assertEqual(rows[0]["from_club"], "Brighton & Hove Albion")
         self.assertEqual(rows[0]["to_club"], "Porto")
 
+    def test_normalizes_premier_league_club_to_the_same_bootstrap_form(self):
+        """Issue #232: `premier_league_club` carries the PL transfer-centre playlist's own title
+        ("Tottenham Hotspur"), a third vocabulary again -- while the dashboard's club dropdown is
+        built from summarize_clubs, i.e. from the already-normalized from_club/to_club names
+        ("Spurs"). Six clubs' dropdown values matched no `premier_league_club` at all, so that arm
+        of the filter's club predicate silently contributed nothing for them.
+        """
+        bootstrap = {
+            "elements": self.bootstrap["elements"],
+            "teams": [{"id": 1, "name": "Spurs"}, {"id": 2, "name": "Nott'm Forest"}],
+        }
+
+        rows = enrich_transfers(
+            [
+                {
+                    "player": "Someone",
+                    "from_club": "Tottenham Hotspur",
+                    "to_club": "Porto",
+                    "premier_league_club": "Tottenham Hotspur",
+                    "movement_type": "transfer-out",
+                    "announced_at": "2026-07-23T12:00:00Z",
+                },
+                {
+                    "player": "Another",
+                    "from_club": "Ajax",
+                    "to_club": "Nottingham Forest",
+                    "premier_league_club": "Nottingham Forest",
+                    "movement_type": "transfer-in",
+                    "announced_at": "2026-07-24T12:00:00Z",
+                },
+            ],
+            bootstrap,
+            generated_at="2026-08-01T12:00:00Z",
+        )
+
+        # All three club fields now speak the one vocabulary the dropdown is built from.
+        self.assertEqual(rows[0]["premier_league_club"], "Spurs")
+        self.assertEqual(rows[0]["from_club"], "Spurs")
+        self.assertEqual(rows[1]["premier_league_club"], "Nott'm Forest")
+        self.assertEqual(rows[1]["to_club"], "Nott'm Forest")
+
+        # And the dropdown values summarize_clubs produces all resolve against them.
+        dropdown = {entry["club"] for entry in summarize_clubs(rows, bootstrap)}
+        owners = {row["premier_league_club"] for row in rows}
+        self.assertTrue(
+            dropdown <= owners,
+            f"dropdown values with no premier_league_club match: {sorted(dropdown - owners)}",
+        )
+
+    def test_normalization_leaves_an_absent_premier_league_club_to_its_fallback(self):
+        """The `premier_league_club` fallback (derive it from to_club/from_club when the record
+        has none) must survive being routed through the normalizer."""
+        bootstrap = {"elements": self.bootstrap["elements"], "teams": [{"id": 1, "name": "Spurs"}]}
+
+        rows = enrich_transfers(
+            [
+                {
+                    "player": "Someone",
+                    "from_club": "Ajax",
+                    "to_club": "Tottenham Hotspur",
+                    "movement_type": "transfer-in",
+                    "announced_at": "2026-07-23T12:00:00Z",
+                }
+            ],
+            bootstrap,
+            generated_at="2026-08-01T12:00:00Z",
+        )
+
+        self.assertEqual(rows[0]["premier_league_club"], "Spurs")
+
     def test_club_summary_counts_arrivals_departures_and_relevant_moves(self):
         bootstrap = {"teams": [{"id": 1, "name": "Arsenal"}]}
         rows = [

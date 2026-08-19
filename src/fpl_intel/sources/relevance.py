@@ -57,6 +57,17 @@ def enrich_transfers(transfers, bootstrap, generated_at):
     # downstream consumer (summarize_clubs, the dashboard's club filter)
     # sees one consistent name per club instead of splitting the same club
     # across multiple spellings.
+    #
+    # Issue #232: premier_league_club gets the same treatment. It carries the
+    # PL transfer-centre playlist's own title ("Tottenham Hotspur", "AFC
+    # Bournemouth", "Nottingham Forest"), which is a third vocabulary again --
+    # while the dashboard's club dropdown is built from summarize_clubs, i.e.
+    # from these already-normalized from_club/to_club names ("Spurs",
+    # "Bournemouth", "Nott'm Forest"). Six clubs' dropdown values therefore
+    # matched no premier_league_club at all, so that arm of the filter's club
+    # predicate silently contributed nothing for them. It cost no rows only
+    # because those records happen to carry the short name on from_club or
+    # to_club as well -- luck, not design.
     team_name_by_canonical = {
         canonical_club(team.get("name")): team.get("name")
         for team in bootstrap.get("teams", [])
@@ -89,7 +100,7 @@ def enrich_transfers(transfers, bootstrap, generated_at):
     enriched = []
     for transfer in transfers:
         row = dict(transfer)
-        for side in ("from_club", "to_club"):
+        for side in ("from_club", "to_club", "premier_league_club"):
             row[side] = team_name_by_canonical.get(canonical_club(row.get(side)), row.get(side))
         direction = _direction(row.get("movement_type"))
         player_token = _token(row.get("player"))
