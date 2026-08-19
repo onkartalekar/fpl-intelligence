@@ -302,7 +302,15 @@ function renderFilterChips() {
     }),
   );
 }
+const INSPECTOR_PLACEHOLDER =
+  "Select a result to inspect its source, classification, and FPL reconciliation state.";
+function resetInspector() {
+  const inspector = byId("inspector");
+  inspector.className = "empty";
+  inspector.textContent = INSPECTOR_PLACEHOLDER;
+}
 function applyFilters() {
+  resetInspector();
   const rows = filteredRows();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   page = Math.min(page, pages);
