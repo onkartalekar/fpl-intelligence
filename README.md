@@ -95,6 +95,16 @@ This opens:
 http://127.0.0.1:8877/dashboard.html
 ```
 
+**Startup refreshes stale data first (issue #228).** If the cached generation is more than an
+hour old -- or the clone has never refreshed at all -- `start_dashboard.py` runs a refresh before
+the server starts, printing a line first and taking roughly 30 seconds. Nothing else refreshes a
+local checkout: the hourly GitHub Actions workflow calls the *hosted* origin over HTTP and can't
+reach `127.0.0.1`. Press Control-C during the wait to skip it and start on cached data. If the
+refresh fails (offline, FPL API down, another refresh already holding the lock), the message says
+so and the server starts anyway on whatever data is already there -- a failed refresh never keeps
+the dashboard from coming up. This is a boot-time check, not a timer: a server left running for
+days still won't refresh itself, and running one is still a manual step (below).
+
 There is no in-page refresh control -- see `## Refresh manually from Terminal` below for the only
 way to pull new data, locally or hosted. `POST /api/refresh` still exists on the server as an
 operator-only HTTP endpoint (for future scripting/automation), gated by `FPL_INTEL_REFRESH_TOKEN`;
@@ -134,7 +144,7 @@ It writes:
 
 The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. `server.py` and the refresh pipeline never self-trigger -- by explicit choice, nothing inside this app schedules its own actions.
 
-Two GitHub Actions workflows call that same manual endpoint automatically, on a schedule, from outside the app: issue #101's `.github/workflows/scheduled-refresh.yml` (hourly cron) checks four fixed checkpoints before each gameweek deadline (T-2d, T-1d, T-12h, T-3h) and calls `POST /api/refresh` with `X-Refresh-Token` only when one matches, keeping the shared hosted dashboard's data from going stale between manual refreshes; and issue #55's opt-in deadline-email reminder, `.github/workflows/deadline-reminder.yml` (also hourly), invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. Both are admin/secrets-configured (tokens and, for the reminder, recipient team IDs/emails/SMTP credentials live in Actions secrets, not in this repo) and run entirely outside `server.py` and the refresh pipeline, which still never act on their own -- an external scheduled caller hitting the same endpoint a human would click is not the app scheduling itself. This is the app's permanent scheduling architecture (see [ARCHITECTURE.md](ARCHITECTURE.md)), not a stopgap pending further migration.
+Two GitHub Actions workflows call that same manual endpoint automatically, on a schedule, from outside the app: issue #101's `.github/workflows/scheduled-refresh.yml` (hourly cron) calls `POST /api/refresh` with `X-Refresh-Token` on every tick, keeping the shared hosted dashboard's data from going stale between manual refreshes (until issue #228 it fired only at four fixed checkpoints before each gameweek deadline, which left mid-week transfer news invisible for days); and issue #55's opt-in deadline-email reminder, `.github/workflows/deadline-reminder.yml` (also hourly), invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. Both are admin/secrets-configured (tokens and, for the reminder, recipient team IDs/emails/SMTP credentials live in Actions secrets, not in this repo) and run entirely outside `server.py` and the refresh pipeline, which still never act on their own -- an external scheduled caller hitting the same endpoint a human would click is not the app scheduling itself. This is the app's permanent scheduling architecture (see [ARCHITECTURE.md](ARCHITECTURE.md)), not a stopgap pending further migration.
 
 ## Keep dashboard.html in sync with dashboard.py
 

@@ -27,7 +27,7 @@ flowchart TB
     visitor["Visitor's browser"]
 
     subgraph gha["GitHub Actions (ephemeral runners -- no shared filesystem with Railway)"]
-        scheduledRefresh["scheduled-refresh.yml<br/>(issue #101, hourly cron)"]
+        scheduledRefresh["scheduled-refresh.yml<br/>(issue #101, hourly cron --<br/>triggers every tick since #228)"]
         deadlineReminder["deadline-reminder.yml<br/>(issue #55, hourly cron)"]
         liveCheck["live-regression-check.yml<br/>(issue #119, daily cron)"]
         releaseNotes["release-notes.yml<br/>(issue #143, twice-daily cron --<br/>12:00 &amp; 13:00 UTC, DST-safe 8am ET)"]
@@ -56,8 +56,8 @@ flowchart TB
 
     server -->|"send confirmation / contact<br/>notification email"| smtp
 
-    scheduledRefresh -->|"live bootstrap fetch<br/>(decides whether to trigger,<br/>independent of Railway's own state)"| fplApi
-    scheduledRefresh -->|"POST /api/refresh<br/>(X-Refresh-Token)"| server
+    scheduledRefresh -->|"live bootstrap fetch<br/>(issue #102 archive step's own<br/>T-24h/12h/3h window check --<br/>the refresh trigger stopped<br/>needing this in #228)"| fplApi
+    scheduledRefresh -->|"POST /api/refresh<br/>(X-Refresh-Token, every tick)"| server
     scheduledRefresh -->|"GET /api/registered-teams,<br/>POST /api/archive-team-forecast<br/>(X-Refresh-Token, issue #102)"| server
     server -->|"fetch bootstrap/fixtures"| fplApi
     server -->|"fetch official transfers"| transferSources

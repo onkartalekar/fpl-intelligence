@@ -1,18 +1,22 @@
 """Issue #27: unit tests for `scripts/start_dashboard.py`'s pure config-resolution logic.
 
-Only `resolve_server_config` is exercised here -- no real server is started, matching this
-codebase's convention of keeping env-var precedence/defaulting logic in small pure functions
-independently testable without spinning up a process (see `tests/test_send_deadline_reminder.py`
-for the same pattern applied to `scripts/send_deadline_reminder.py`).
+No real server is started here, matching this codebase's convention of keeping env-var
+precedence/defaulting logic in small pure functions independently testable without spinning up a
+process (see `tests/test_send_deadline_reminder.py` for the same pattern applied to
+`scripts/send_deadline_reminder.py`). Issue #228 added `refresh_if_stale` to the same startup
+path and the same treatment: the subprocess is mocked, so nothing here refreshes for real.
 """
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # scripts/ is not a package (no __init__.py, matching the rest of this repo's scripts/), so the
 # module under test is loaded directly from its file path rather than imported by dotted name.
@@ -29,6 +33,7 @@ class ResolveServerConfigTests(unittest.TestCase):
         self.assertEqual(
             config,
             {
+                "hosted": False,
                 "host": "127.0.0.1",
                 "port": 8877,
                 "token": None,
@@ -115,6 +120,7 @@ class ResolveServerConfigTests(unittest.TestCase):
         self.assertEqual(
             config,
             {
+                "hosted": True,
                 "host": "0.0.0.0",
                 "port": 8080,
                 "token": "op-token",
@@ -239,6 +245,212 @@ class SeedMissingDataFilesTests(unittest.TestCase):
                 target = root / "data" / filename
                 self.assertTrue(target.exists())
                 json.loads(target.read_text(encoding="utf-8"))  # still valid JSON
+
+
+NOW = datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc)
+
+
+def _root_with_state(directory, generated_at):
+    """A temp root holding a `data/dashboard-state.json`, plus the `scripts/` entry point
+    `refresh_if_stale` checks for before deciding it has anything to run."""
+    root = Path(directory)
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    (root / "scripts" / "refresh_dashboard.py").write_text("", encoding="utf-8")
+    if generated_at is not None:
+        (root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": generated_at}), encoding="utf-8"
+        )
+    return root
+
+
+class CachedStateAgeTests(unittest.TestCase):
+    """Issue #228: age of the cached generation, and the several ways it can be unusable."""
+
+    def test_reports_age_of_a_parseable_timestamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(hours=3)).isoformat())
+
+            self.assertAlmostEqual(
+                start_dashboard.cached_state_age_seconds(root, now=NOW), 3 * 3600, delta=1
+            )
+
+    def test_handles_a_non_utc_offset(self):
+        """`generated_at` is written in the profile's own timezone, not UTC -- an offset-aware
+        timestamp three hours old must read as three hours old regardless of its offset."""
+        with tempfile.TemporaryDirectory() as directory:
+            local = (NOW - timedelta(hours=3)).astimezone(timezone(timedelta(hours=-4)))
+            root = _root_with_state(directory, local.isoformat())
+
+            self.assertAlmostEqual(
+                start_dashboard.cached_state_age_seconds(root, now=NOW), 3 * 3600, delta=1
+            )
+
+    def test_missing_state_file_reads_as_no_usable_timestamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, generated_at=None)
+
+            self.assertIsNone(start_dashboard.cached_state_age_seconds(root, now=NOW))
+
+    def test_unusable_timestamps_never_raise(self):
+        """Every one of these must return None rather than propagating: this runs on the startup
+        path, where an exception would cost the user their dashboard entirely."""
+        for label, payload in (
+            ("malformed json", "{not json"),
+            ("missing key", json.dumps({})),
+            ("null value", json.dumps({"generated_at": None})),
+            ("unparseable", json.dumps({"generated_at": "not-a-timestamp"})),
+            ("wrong type", json.dumps({"generated_at": 1234})),
+            ("naive timestamp", json.dumps({"generated_at": "2026-08-19T12:00:00"})),
+        ):
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = _root_with_state(directory, generated_at=None)
+                    (root / "data" / "dashboard-state.json").write_text(payload, encoding="utf-8")
+
+                    self.assertIsNone(start_dashboard.cached_state_age_seconds(root, now=NOW))
+
+
+class RefreshIfStaleTests(unittest.TestCase):
+    """Issue #228: the boot refresh's decision to run, and its refusal to ever block startup."""
+
+    def _run(self, root, hosted=False, now=NOW, **kwargs):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            ran = start_dashboard.refresh_if_stale(root, hosted=hosted, now=now, **kwargs)
+        return ran, out.getvalue(), err.getvalue()
+
+    def test_refreshes_when_the_cache_is_stale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+
+            with patch.object(start_dashboard.subprocess, "run",
+                              return_value=subprocess.CompletedProcess([], 0)) as mock_run:
+                ran, out, _ = self._run(root)
+
+            self.assertTrue(ran)
+            mock_run.assert_called_once()
+            self.assertIn("8.0d old", out)
+
+    def test_skips_when_the_cache_is_fresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(minutes=10)).isoformat())
+
+            with patch.object(start_dashboard.subprocess, "run") as mock_run:
+                ran, out, _ = self._run(root)
+
+            self.assertFalse(ran)
+            mock_run.assert_not_called()
+            self.assertEqual(out, "")
+
+    def test_refreshes_a_clone_that_has_never_refreshed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, generated_at=None)
+
+            with patch.object(start_dashboard.subprocess, "run",
+                              return_value=subprocess.CompletedProcess([], 0)) as mock_run:
+                ran, out, _ = self._run(root)
+
+            self.assertTrue(ran)
+            mock_run.assert_called_once()
+            self.assertIn("no cached data", out)
+
+    def test_hosted_never_refreshes_at_boot(self):
+        """Railway runs this same script. A blocking pre-`create_server` refresh would delay port
+        binding on every deploy, and the hourly workflow already covers the hosted server."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+
+            with patch.object(start_dashboard.subprocess, "run") as mock_run:
+                ran, out, _ = self._run(root, hosted=True)
+
+            self.assertFalse(ran)
+            mock_run.assert_not_called()
+            self.assertEqual(out, "")
+
+    def test_announces_before_blocking(self):
+        """The message has to be emitted *before* the subprocess call, not after: everything else
+        `main()` prints happens after `create_server`, so without this the terminal is silent for
+        the whole refresh and reads as a hang."""
+        printed_before_subprocess = []
+
+        def record(*args, **kwargs):
+            printed_before_subprocess.append(out_stream.getvalue())
+            return subprocess.CompletedProcess([], 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+            out_stream = io.StringIO()
+            with patch.object(start_dashboard.subprocess, "run", side_effect=record), \
+                 redirect_stdout(out_stream):
+                start_dashboard.refresh_if_stale(root, hosted=False, now=NOW)
+
+        self.assertIn("refreshing before start", printed_before_subprocess[0])
+
+    def test_lock_contention_is_reported_calmly_and_does_not_block_startup(self):
+        """Exit 75 means another refresh already holds the project lock -- a normal outcome when
+        a manual refresh, an /api/refresh, or a second start_dashboard.py is already running."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+
+            with patch.object(
+                start_dashboard.subprocess, "run",
+                return_value=subprocess.CompletedProcess([], start_dashboard.REFRESH_BUSY_EXIT_CODE),
+            ):
+                ran, out, err = self._run(root)
+
+            self.assertFalse(ran)
+            self.assertIn("Another refresh is already running", out)
+            self.assertEqual(err, "")
+
+    def test_no_failure_mode_prevents_startup(self):
+        """The central guarantee of issue #228's ask 2. Before it, the worst case was stale data;
+        it must not become a dashboard that refuses to start. `fetch_bootstrap()` in particular is
+        unprotected inside the pipeline and propagates on an offline machine.
+        """
+        for label, side_effect, return_value in (
+            ("nonzero exit", None, subprocess.CompletedProcess([], 1)),
+            ("timeout", subprocess.TimeoutExpired("refresh", 180), None),
+            ("interpreter missing", OSError("No such file or directory"), None),
+            ("ctrl-c during refresh", KeyboardInterrupt(), None),
+        ):
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+
+                    with patch.object(start_dashboard.subprocess, "run",
+                                      side_effect=side_effect, return_value=return_value):
+                        ran, out, err = self._run(root)
+
+                self.assertFalse(ran)
+                self.assertIn("cached data", out + err)
+
+    def test_missing_refresh_script_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+            (root / "scripts" / "refresh_dashboard.py").unlink()
+
+            with patch.object(start_dashboard.subprocess, "run") as mock_run:
+                ran, _, _ = self._run(root)
+
+            self.assertFalse(ran)
+            mock_run.assert_not_called()
+
+    def test_boot_refresh_is_bounded_by_a_timeout(self):
+        """`refresh_dashboard.py` has no timeout of its own -- the 300s cap lives in the endpoint,
+        not the script -- so the boot path must impose one rather than inheriting none."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = _root_with_state(directory, (NOW - timedelta(days=8)).isoformat())
+
+            with patch.object(start_dashboard.subprocess, "run",
+                              return_value=subprocess.CompletedProcess([], 0)) as mock_run:
+                self._run(root)
+
+            self.assertEqual(
+                mock_run.call_args.kwargs.get("timeout"),
+                start_dashboard.BOOT_REFRESH_TIMEOUT_SECONDS,
+            )
+            self.assertLess(start_dashboard.BOOT_REFRESH_TIMEOUT_SECONDS, 600)
 
 
 if __name__ == "__main__":
