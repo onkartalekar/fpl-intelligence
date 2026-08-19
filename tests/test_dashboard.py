@@ -181,6 +181,42 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("https://fantasy.premierleague.com/api/bootstrap-static/", html)
         self.assertNotIn("undefined", html)
 
+    def test_evidence_inspector_resets_when_filters_change(self):
+        """Issue #233: the evidence inspector is a persistent panel written only by `inspect()`.
+        Before this fix, `applyFilters()` (run on every search/filter/reset/page change) never
+        touched it, so a previously-inspected transfer's evidence stayed pinned even after it
+        dropped out of the filtered result set. `applyFilters()` must reset it back to the same
+        placeholder markup the template ships initially, so a stale row is never shown as current."""
+        state = {
+            "generated_at": "2026-07-18T12:00:00-04:00",
+            "timezone": "America/New_York",
+            "fpl": {"season_status": "prior_season_data", "ready_for_2026_27": False, "player_count": 0, "team_count": 20},
+            "transfers": [],
+            "sources": [],
+        }
+
+        html = render_dashboard(state)
+
+        # Initial server-rendered placeholder (dashboard-shell.html).
+        placeholder = "Select a result to inspect its source, classification, and FPL reconciliation state."
+        self.assertIn(f'id="inspector" class="empty" aria-live="polite">{placeholder}', html)
+
+        # `applyFilters()` must reset the inspector to that same placeholder/class on every call,
+        # not just leave whatever `inspect(row)` last wrote in place.
+        self.assertTrue(
+            js_contains(html, "function resetInspector() {"),
+            "no resetInspector() helper found in dashboard JS",
+        )
+        self.assertTrue(
+            js_contains(html, f'"{placeholder}"'),
+            "resetInspector() placeholder text doesn't match the template's initial copy",
+        )
+        self.assertTrue(
+            js_contains(html, "function applyFilters() { resetInspector();"),
+            "applyFilters() must call resetInspector() first, so a stale inspected row can't "
+            "survive a filter/search/reset/page change",
+        )
+
     def test_renders_preseason_workspace_and_manageable_transfer_controls(self):
         state = {
             "generated_at": "2026-07-18T12:00:00-04:00",
