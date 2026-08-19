@@ -54,7 +54,10 @@ behavior yet, and they aren't exposed in the in-UI form either.
 
 `dashboard.html` and everything under `data/` except `data/history/` and
 the `backtest-baseline-*` fixtures are generated locally and gitignored --
-a fresh clone won't have them yet. Run a refresh once to create them:
+a fresh clone won't have them yet. Run a refresh once to create the `data/`
+files (`dashboard.html` is a separate, optional step -- see
+[`## The standalone dashboard.html file`](#the-standalone-dashboardhtml-file)
+below; you don't need it to use the local server):
 
 (`data/history/` -- four seasons of prior-year data, committed in full --
 is not one of those generated files, but you don't need to do anything
@@ -110,14 +113,9 @@ way to pull new data, locally or hosted. `POST /api/refresh` still exists on the
 operator-only HTTP endpoint (for future scripting/automation), gated by `FPL_INTEL_REFRESH_TOKEN`;
 it is never reachable from the dashboard UI.
 
-The standalone file remains available at:
-
-```text
-<path-to-clone>/fpl-intelligence/dashboard.html
-```
-
-When opened as a standalone file, the Manager profile, Draft squad, and deadline-reminder forms
-are disabled, since a static HTML file has no server behind it to save anything to.
+A standalone `dashboard.html` file is also available, but it is built by a separate command and
+does not exist until you run it -- see
+[`## The standalone dashboard.html file`](#the-standalone-dashboardhtml-file) below.
 
 ## Refresh manually from Terminal
 
@@ -140,32 +138,49 @@ It writes:
 - `data/official-transfers-latest.json`
 - `data/fpl-bootstrap-latest.json`
 - `data/dashboard-state.json`
-- `dashboard.html`
 
-The generated dashboard file remains self-contained. The localhost service supplies the secure refresh endpoint used by the button. `server.py` and the refresh pipeline never self-trigger -- by explicit choice, nothing inside this app schedules its own actions.
+It does **not** write `dashboard.html` -- see the next section. The server reads
+`data/dashboard-state.json` and renders each page from it on the fly, so a refresh is all the
+running dashboard needs. `server.py` and the refresh pipeline never self-trigger -- by explicit
+choice, nothing inside this app schedules its own actions (issue #228's startup refresh is the
+`start_dashboard.py` boot path deciding to call this script once, not the app scheduling itself).
 
 Two GitHub Actions workflows call that same manual endpoint automatically, on a schedule, from outside the app: issue #101's `.github/workflows/scheduled-refresh.yml` (hourly cron) calls `POST /api/refresh` with `X-Refresh-Token` on every tick, keeping the shared hosted dashboard's data from going stale between manual refreshes (until issue #228 it fired only at four fixed checkpoints before each gameweek deadline, which left mid-week transfer news invisible for days); and issue #55's opt-in deadline-email reminder, `.github/workflows/deadline-reminder.yml` (also hourly), invokes the trigger-agnostic `scripts/send_deadline_reminder.py` to email current transfer recommendations a configurable number of hours before each gameweek's deadline. Both are admin/secrets-configured (tokens and, for the reminder, recipient team IDs/emails/SMTP credentials live in Actions secrets, not in this repo) and run entirely outside `server.py` and the refresh pipeline, which still never act on their own -- an external scheduled caller hitting the same endpoint a human would click is not the app scheduling itself. This is the app's permanent scheduling architecture (see [ARCHITECTURE.md](ARCHITECTURE.md)), not a stopgap pending further migration.
 
-## Keep dashboard.html in sync with dashboard.py
+## The standalone dashboard.html file
 
-`dashboard.html` is gitignored (see above) and is not regenerated
-automatically just because `src/fpl_intel/dashboard.py`'s template changes
--- pulling a template/CSS/JS change onto `main` leaves the local
-`dashboard.html` stale until something rebuilds it.
+**You only need this if you want to open the dashboard as a plain file, with no server running.**
+Using `scripts/start_dashboard.py` and `http://127.0.0.1:8877/dashboard.html` requires none of it
+-- the server renders every page fresh from `data/dashboard-state.json` per request, so a
+`refresh_dashboard.py` run is immediately live there.
 
-For a one-off rebuild without hitting any live API (fast, uses the last
-cached `data/dashboard-state.json`):
+`dashboard.html` is gitignored, and **`scripts/refresh_dashboard.py` does not write it**. Since
+issue #120 the refresh pipeline stopped publishing an HTML snapshot (the server had stopped
+reading one), which left `scripts/rebuild_dashboard.py` as the only thing that writes the file.
+So building a current standalone copy is two commands, in this order:
 
 ```bash
-python3 scripts/rebuild_dashboard.py
+python3 scripts/refresh_dashboard.py    # fetch live data -> data/
+python3 scripts/rebuild_dashboard.py    # render data/ -> dashboard.html
 ```
 
-To do this automatically after every merge and branch checkout, activate
-the repo's tracked git hooks once per clone:
+The second is fast and hits no live API -- it re-renders from the cached
+`data/dashboard-state.json` the first one just wrote. Run it alone whenever you want current
+*markup* against unchanged data: `dashboard.html` is not regenerated just because
+`src/fpl_intel/dashboard.py`'s template, CSS, or JS changed, so pulling such a change onto `main`
+leaves the file stale until something rebuilds it. To rebuild automatically after every merge and
+branch checkout, activate the repo's tracked git hooks once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
+
+Note that this only re-renders; it never fetches. A `dashboard.html` rebuilt from a week-old
+`dashboard-state.json` has current markup and week-old data. Run `refresh_dashboard.py` first
+when you want both.
+
+When opened as a standalone file, the Manager profile, Draft squad, and deadline-reminder forms
+are disabled, since a static HTML file has no server behind it to save anything to.
 
 ## Projection model
 

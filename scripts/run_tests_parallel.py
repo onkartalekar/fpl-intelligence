@@ -73,6 +73,9 @@ GROUPS = {
         "tests.test_minutes", "tests.test_ml_minutes", "tests.test_model_performance",
         "tests.test_news_signals", "tests.test_pl_transfers", "tests.test_profiles",
         "tests.test_projection", "tests.test_publish_release_notes", "tests.test_rate_limit",
+        # Issue #229: the refresh *script*'s output contract (the pipeline itself is
+        # tests.test_refresh, in another group).
+        "tests.test_refresh_dashboard_script",
         "tests.test_refresh_safety", "tests.test_release_notes",
         "tests.test_release_notes_email", "tests.test_release_notes_subscribers", "tests.test_relevance",
         "tests.test_reminder_confirmation", "tests.test_start_dashboard",
