@@ -9,18 +9,29 @@ actually use `/api/refresh` and so the Host/Origin allowlist matches the real de
 Also reads `FPL_INTEL_REMINDER_TEAMS_TOKEN` (issue #105) -- a separate secret gating
 `/api/reminder-teams`, deliberately not `FPL_INTEL_REFRESH_TOKEN` reused, so a leak of either
 token compromises only what that token actually gates (see `server.py`'s `create_server` docstring).
+
+Issue #228 added one piece of local-only startup behavior: a boot refresh when the cached
+generation has gone stale (`refresh_if_stale`), since nothing else refreshes a local checkout --
+the hourly GitHub Actions workflow calls the *hosted* origin over HTTP and cannot reach
+`127.0.0.1`. This is a boot-time check, deliberately not a timer: an in-process scheduler thread
+was declined in `SPECIFICATION.md` and `IMPLEMENTATION_PLAN.md`, and nothing here revisits that.
+A server left running for days still will not refresh itself.
 """
 
 import argparse
+from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from fpl_intel.generation import resolve_artifact
 from fpl_intel.server import create_server
 
 
@@ -42,6 +53,23 @@ SEEDED_DATA_FILENAMES = (
     "official-transfers-latest.json",
     "fpl-fixtures-latest.json",
 )
+
+# Issue #228: how stale `dashboard-state.json` may be before a local boot refreshes it first.
+# One hour matches the hosted cadence `.github/workflows/scheduled-refresh.yml` now runs at, so
+# a local checkout and the shared deployment target the same freshness.
+BOOT_REFRESH_MAX_AGE_SECONDS = 3600
+# Hard ceiling on the boot refresh. `refresh_dashboard.py` has no timeout of its own -- the
+# 300s cap lives in the *endpoint* (`server_handlers/refresh_endpoint.py`'s
+# `default_refresh_action`), not in the script -- and its only intrinsic limits are per-HTTP-call
+# (`fetch_confirmed_transfers(timeout=30)` across 21 playlist requests, plus bootstrap and
+# fixtures), so an unbounded worst case runs to roughly ten minutes. A boot path must not inherit
+# that: a slow upstream should cost a bounded delay and then a start with stale data, never an
+# apparent hang. 180s is ~6x the ~30s a healthy refresh actually takes.
+BOOT_REFRESH_TIMEOUT_SECONDS = 180
+# `scripts/refresh_dashboard.py`'s "another refresh already holds the project lock" exit code.
+# Not an error: a manual refresh, an `/api/refresh` call, or a second `start_dashboard.py`
+# booting concurrently is already doing the work this boot wanted done.
+REFRESH_BUSY_EXIT_CODE = 75
 
 
 def seed_missing_data_files(root):
@@ -69,6 +97,118 @@ def seed_missing_data_files(root):
         print(f"Seeded data/{filename} from data-seed/ (first boot)")
 
 
+def cached_state_age_seconds(root, now=None):
+    """Age of the cached `dashboard-state.json`, or None when there is no usable timestamp.
+
+    None is deliberately not an error condition -- it collapses three cases that all warrant the
+    same response (refresh): a clone that has never refreshed and so has no state file at all, a
+    file that can't be parsed, and a `generated_at` that is missing, malformed, or naive. Reading
+    a broken cache is exactly when fresh data is most wanted, and none of these may raise: this
+    runs on the startup path, where any exception would cost the user their dashboard.
+    """
+    now = now or datetime.now(timezone.utc)
+    try:
+        state_path = resolve_artifact(root, "dashboard-state.json")
+        if not state_path.is_file():
+            return None
+        generated_at = json.loads(state_path.read_text(encoding="utf-8")).get("generated_at")
+        generated = datetime.fromisoformat(generated_at) if generated_at else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    # A naive timestamp can't be compared against an aware `now`, and guessing a timezone for it
+    # would be worse than just refreshing.
+    if generated is None or generated.tzinfo is None:
+        return None
+    return (now - generated).total_seconds()
+
+
+def _describe_age(age_seconds):
+    if age_seconds is None:
+        return "no cached data"
+    if age_seconds < 90:
+        return f"cached data is {int(age_seconds)}s old"
+    if age_seconds < 5400:
+        return f"cached data is {age_seconds / 60:.0f}m old"
+    if age_seconds < 172800:
+        return f"cached data is {age_seconds / 3600:.1f}h old"
+    return f"cached data is {age_seconds / 86400:.1f}d old"
+
+
+def refresh_if_stale(
+    root,
+    hosted,
+    max_age_seconds=BOOT_REFRESH_MAX_AGE_SECONDS,
+    timeout=BOOT_REFRESH_TIMEOUT_SECONDS,
+    now=None,
+):
+    """Refresh live data before the server starts, when the local cache has gone stale (#228).
+
+    Returns True when a refresh actually ran to completion, False otherwise. **Never raises**,
+    and its return value is advisory only: nothing about starting the server is conditional on
+    it. That is the whole design constraint here -- before this existed, the worst case was
+    stale data; it must not become a dashboard that refuses to start because an upstream API was
+    down or the machine was offline. `refresh.py`'s pipeline degrades gracefully for two of its
+    three sources (fixtures fall back to cache, transfers are caught by `refresh_dashboard.py`),
+    but `fetch_bootstrap()` is unprotected and propagates, so failure is caught here at the call
+    site rather than assumed away.
+
+    Hosted deployments skip this entirely. Railway runs this same script (`Procfile`), where a
+    blocking pre-`create_server` refresh would delay port binding on every deploy and restart --
+    and since #228 the hosted server is refreshed hourly by
+    `.github/workflows/scheduled-refresh.yml` anyway, so a boot refresh there buys nothing.
+    Binding first and refreshing after is not a fix for that: connections would queue in the
+    listen backlog and hang rather than being refused.
+    """
+    if hosted:
+        return False
+
+    age_seconds = cached_state_age_seconds(root, now=now)
+    if age_seconds is not None and age_seconds <= max_age_seconds:
+        return False
+
+    script = Path(root) / "scripts" / "refresh_dashboard.py"
+    if not script.is_file():
+        return False
+
+    # Printed *before* blocking, and flushed: every other sign of life in `main()` happens after
+    # `create_server`, so without this the terminal sits silent for ~30s with no URL and no
+    # browser -- indistinguishable from a hang, and an invitation to Ctrl-C the very refresh
+    # being waited on. stdout is block-buffered when piped or redirected, so `flush` is load-
+    # bearing rather than decorative.
+    print(
+        f"{_describe_age(age_seconds)} -- refreshing before start (~30s, Ctrl-C to skip).",
+        flush=True,
+    )
+    try:
+        completed = subprocess.run([sys.executable, str(script)], cwd=str(root), timeout=timeout)
+    except KeyboardInterrupt:
+        # Turns the hazard above into a deliberate escape hatch: skip the wait, start on stale
+        # data. A second Ctrl-C still stops the server itself.
+        print("Refresh skipped -- starting with cached data.", flush=True)
+        return False
+    except subprocess.TimeoutExpired:
+        print(
+            f"Refresh timed out after {timeout}s -- starting with cached data.",
+            file=sys.stderr, flush=True,
+        )
+        return False
+    except OSError as error:
+        print(f"Refresh could not run ({error}) -- starting with cached data.", file=sys.stderr, flush=True)
+        return False
+
+    if completed.returncode == REFRESH_BUSY_EXIT_CODE:
+        # Someone else is already doing this work; nothing is wrong and nothing needs retrying.
+        print("Another refresh is already running -- starting with its data.", flush=True)
+        return False
+    if completed.returncode:
+        print(
+            f"Refresh failed (exit {completed.returncode}) -- starting with cached data.",
+            file=sys.stderr, flush=True,
+        )
+        return False
+    return True
+
+
 def resolve_server_config(env, cli_port=None):
     """Resolve host/port/token/allowed_origin from the environment and an optional CLI port.
 
@@ -93,6 +233,10 @@ def resolve_server_config(env, cli_port=None):
     else:
         port = DEFAULT_PORT
     return {
+        # Returned rather than re-derived by callers: issue #228's boot refresh needs the same
+        # local-vs-hosted distinction the host choice is already made from, and one source for
+        # it beats two copies of `PORT_ENV_VAR in env` drifting apart.
+        "hosted": hosted,
         "host": "0.0.0.0" if hosted else "127.0.0.1",
         "port": port,
         "token": env.get(REFRESH_TOKEN_ENV_VAR),
@@ -109,6 +253,9 @@ def main():
 
     config = resolve_server_config(os.environ, cli_port=args.port)
     seed_missing_data_files(ROOT)
+    # Issue #228, after seeding (so a first boot has a baseline to compare) and before the
+    # server exists (so nobody is served the stale generation this is about to replace).
+    refresh_if_stale(ROOT, hosted=config["hosted"])
     server = create_server(
         ROOT,
         host=config["host"],
@@ -123,8 +270,12 @@ def main():
     else:
         url = f"http://{bound_host}:{bound_port}/dashboard.html"
         print(f"FPL dashboard: {url}")
-    print("Refreshes run only when POST /api/refresh is called (e.g. from a script or")
-    print("`python3 scripts/refresh_dashboard.py`). No schedule is configured.")
+    if config["hosted"]:
+        print("Refreshes run when POST /api/refresh is called -- hourly from")
+        print("`.github/workflows/scheduled-refresh.yml`, or manually by an operator.")
+    else:
+        print("Data older than 1h is refreshed at startup. While the service keeps running,")
+        print("refresh with `python3 scripts/refresh_dashboard.py` or POST /api/refresh.")
     print("Press Control-C to stop the service.")
     # No local browser to open in a hosted container -- and nothing sensible to open it to
     # anyway, since 0.0.0.0 isn't a browsable address.

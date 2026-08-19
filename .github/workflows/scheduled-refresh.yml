@@ -1,20 +1,22 @@
 name: Scheduled refresh
 
-# Issue #101: triggers the shared dashboard's POST /api/refresh at four fixed checkpoints before
-# each gameweek deadline -- T-2d, T-1d, T-12h, T-3h -- so the shared market data (prices,
-# projections, fixture difficulty, official transfers, model performance) doesn't go stale between
-# an operator's manual `curl` calls. Deliberately a separate workflow from deadline-reminder.yml:
-# different purpose (freshening shared data, not emailing anyone) and a different cost profile (a
-# refresh can take up to 5 minutes and calls live FPL/transfer-source APIs), so the two stay
-# independently schedulable/disableable. See plans/issue-101-refresh-trigger.md for the full
-# design, including why this lives on GitHub Actions rather than a Railway cron service.
+# Issue #101: triggers the shared dashboard's POST /api/refresh so the shared market data
+# (prices, projections, fixture difficulty, official transfers, model performance) doesn't go
+# stale between an operator's manual `curl` calls. Deliberately a separate workflow from
+# deadline-reminder.yml: different purpose (freshening shared data, not emailing anyone) and a
+# different cost profile (a refresh can take up to 5 minutes and calls live FPL/transfer-source
+# APIs), so the two stay independently schedulable/disableable. See
+# plans/issue-101-refresh-trigger.md for the full design, including why this lives on GitHub
+# Actions rather than a Railway cron service.
 #
-# Window resolution (fpl_intel/deadline_windows.py) is stateless and self-contained -- it fetches
-# the live FPL bootstrap itself to resolve the next deadline, so it needs nothing from Railway
-# except the one POST /api/refresh call once a checkpoint actually matches. GitHub's schedule cron
-# is best-effort (documented delays of minutes, occasionally longer, under load); the hourly
-# cadence against checkpoints hours apart comfortably absorbs that, exactly like
-# deadline-reminder.yml already does for its own hourly tick.
+# Issue #228: the refresh step now fires on EVERY hourly tick. It used to fire only inside four
+# deadline-relative windows (T-2d, T-1d, T-12h, T-3h), which meant roughly four refreshes per
+# gameweek, all clustered near the deadline, and nothing in between -- transfer news landing
+# mid-week stayed invisible for days. Because the trigger no longer resolves a deadline, it no
+# longer fetches the FPL bootstrap either; it needs nothing from Railway or the FPL API except
+# the one POST /api/refresh call. GitHub's schedule cron is best-effort (documented delays of
+# minutes, occasionally longer, under load), which an unconditional hourly trigger absorbs even
+# more easily than the old window check did.
 #
 # Issue #102: also runs scripts/archive_team_forecasts.py on this same hourly tick, checked
 # against its own independent set of checkpoints (T-24h/T-12h/T-3h) -- deliberately folded into
