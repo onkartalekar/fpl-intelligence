@@ -1,5 +1,7 @@
 """Normalize official FPL players and fixtures for dashboard use."""
 
+from ..text_fold import search_key
+
 
 def _number(value, default=0.0):
     try:
@@ -18,13 +20,19 @@ def build_player_catalog(bootstrap):
     for player in bootstrap.get("elements", []):
         team = team_by_id.get(player.get("team"), {})
         position = position_by_id.get(player.get("element_type"), {})
+        name = player.get("web_name")
+        full_name = " ".join(
+            part for part in [player.get("first_name"), player.get("second_name")] if part
+        )
         players.append(
             {
                 "id": player.get("id"),
-                "name": player.get("web_name"),
-                "full_name": " ".join(
-                    part for part in [player.get("first_name"), player.get("second_name")] if part
-                ),
+                "name": name,
+                "full_name": full_name,
+                # Issue #239: precomputed once here instead of the browser re-deriving an
+                # accent/special-letter fold from `name`/`full_name` on every keystroke --
+                # see text_fold.py for why this is the single source of truth for the fold.
+                "search_key": search_key(f"{name or ''} {full_name}"),
                 "club": team.get("name"),
                 "club_short": team.get("short_name"),
                 "position": position.get("singular_name"),

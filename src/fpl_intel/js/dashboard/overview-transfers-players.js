@@ -203,21 +203,21 @@ function perspectiveOf(row, club) {
   };
 }
 function filteredRows() {
-  const query = byId("transfer-search").value.trim().toLocaleLowerCase();
+  // Issue #239: this search box used to compare against a plain `.toLocaleLowerCase()` of
+  // the row text -- no diacritic folding at all, so it couldn't match a special-lettered
+  // name even after #238 fixed Player Explorer and Draft Squad's identical search boxes.
+  // `row.search_key` is precomputed server-side (relevance.py's enrich_transfers) with a
+  // real accent/special-letter fold; only the query -- typically plain ASCII -- needs
+  // folding here.
+  const query = foldDiacritics(
+    byId("transfer-search").value.trim().toLocaleLowerCase(),
+  );
   const club = byId("club-filter").value;
   const relevance = byId("relevance-filter").value;
   const direction = byId("direction-filter").value;
   const movement = byId("movement-filter").value;
   const freshness = byId("freshness-filter").value;
   return transfers.filter((row) => {
-    const text = [
-      row.player,
-      row.from_club,
-      row.to_club,
-      row.premier_league_club,
-    ]
-      .join(" ")
-      .toLocaleLowerCase();
     const relevanceOk =
       relevance === "all" ||
       (relevance === "actionable" &&
@@ -230,7 +230,7 @@ function filteredRows() {
       row.freshness === freshness;
     const view = perspectiveOf(row, club);
     return (
-      (!query || text.includes(query)) &&
+      (!query || (row.search_key || "").includes(query)) &&
       (club === "all" ||
         row.premier_league_club === club ||
         row.from_club === club ||
@@ -430,6 +430,10 @@ function setupPlayerExplorer() {
   renderPlayers();
 }
 function renderPlayers() {
+  // Issue #239: `player.search_key` is precomputed server-side (catalog.py's
+  // build_player_catalog) with a real accent/special-letter fold, so the browser no longer
+  // re-derives one from `player.name`/`full_name` on every keystroke -- only the (typically
+  // plain-ASCII) query needs folding here.
   const query = foldDiacritics(
     byId("player-search").value.trim().toLocaleLowerCase(),
   );
@@ -438,10 +442,7 @@ function renderPlayers() {
   const sort = byId("player-sort").value;
   const rows = players.filter(
     (player) =>
-      (!query ||
-        foldDiacritics(
-          `${player.name} ${player.full_name || ""}`.toLocaleLowerCase(),
-        ).includes(query)) &&
+      (!query || (player.search_key || "").includes(query)) &&
       (club === "all" || player.club === club) &&
       (position === "all" || player.position === position),
   );

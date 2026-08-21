@@ -61,6 +61,8 @@ function removeDraftPlayer(id) {
 const draftResultsPageSize = 10;
 let draftResultsPage = 1;
 function draftResultRows() {
+  // Issue #239: see the identical comment in overview-transfers-players.js's renderPlayers --
+  // `player.search_key` is precomputed server-side, so only the query is folded here.
   const query = foldDiacritics(
     byId("draft-search").value.trim().toLocaleLowerCase(),
   );
@@ -69,10 +71,7 @@ function draftResultRows() {
   const sort = byId("draft-sort").value;
   const rows = players.filter(
     (player) =>
-      (!query ||
-        foldDiacritics(
-          `${player.name} ${player.full_name || ""}`.toLocaleLowerCase(),
-        ).includes(query)) &&
+      (!query || (player.search_key || "").includes(query)) &&
       (club === "all" || player.club === club) &&
       (position === "all" || player.position === position),
   );

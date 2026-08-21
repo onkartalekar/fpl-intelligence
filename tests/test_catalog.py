@@ -37,6 +37,40 @@ class PlayerCatalogTests(unittest.TestCase):
         self.assertEqual(players[0]["price"], 6.0)
         self.assertEqual(players[0]["ownership"], 26.9)
 
+    def test_search_key_folds_special_letters_so_dashboard_search_can_match_them(self):
+        # Issue #239: the dashboard search boxes used to re-derive an accent fold from
+        # `name`/`full_name` in the browser on every keystroke, via a fold that (before #238)
+        # didn't even handle non-decomposable special letters like "Ø" -- so "ode" never
+        # matched Martin Ødegaard. search_key is now computed once here, server-side, with
+        # text_fold's real special-letter map, so the dashboard just does a substring match.
+        bootstrap = {
+            "teams": [{"id": 1, "name": "Arsenal", "short_name": "ARS"}],
+            "element_types": [{"id": 1, "singular_name": "Midfielder", "singular_name_short": "MID"}],
+            "elements": [
+                {
+                    "id": 1,
+                    "first_name": "Martin",
+                    "second_name": "Ødegaard",
+                    "web_name": "Ødegaard",
+                    "team": 1,
+                    "element_type": 1,
+                    "now_cost": 65,
+                    "selected_by_percent": "6.1",
+                    "status": "a",
+                    "news": "",
+                    "form": "0.0",
+                    "total_points": 0,
+                    "minutes": 0,
+                    "starts": 0,
+                }
+            ],
+        }
+
+        players = build_player_catalog(bootstrap)
+
+        self.assertIn("ode", players[0]["search_key"])
+        self.assertEqual(players[0]["search_key"], "odegaard martin odegaard")
+
 
 class FixtureCatalogTests(unittest.TestCase):
     def test_maps_fixture_team_ids_to_names_and_difficulties(self):
