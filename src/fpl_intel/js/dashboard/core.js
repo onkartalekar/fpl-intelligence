@@ -29,8 +29,32 @@ const esc = (value) =>
 // ASCII-prefix of a name (e.g. "guimar" against "Guimarães") looked like it worked by
 // coincidence, since it never reached the accent at all. Strip diacritics from both sides before
 // comparing so every query works the same regardless of where an accent falls in the name.
+// Bug fix: NFD normalization only decomposes a base letter plus a combining mark (e.g.
+// e + U+0301 -> "é"), so the .replace below only ever strips combining marks. Letters like
+// "Ø", "Æ", "Œ", "ß", "Đ", "Ł" are single codepoints with no such decomposition -- NFD leaves
+// them completely untouched, so "Ødegaard" never matched a search for "ode" even though the
+// same fold above already fixed accented letters like the "é" in "Guéhi". Map those explicitly
+// before the NFD pass runs.
+const specialLetterFold = {
+  ø: "o",
+  Ø: "O",
+  æ: "ae",
+  Æ: "AE",
+  œ: "oe",
+  Œ: "OE",
+  ß: "ss",
+  đ: "d",
+  Đ: "D",
+  ł: "l",
+  Ł: "L",
+  ð: "d",
+  Ð: "D",
+  þ: "th",
+  Þ: "Th",
+};
 const foldDiacritics = (value) =>
   String(value ?? "")
+    .replace(/[øØæÆœŒßđĐłŁðÐþÞ]/g, (char) => specialLetterFold[char])
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 const pageSize = 20;
