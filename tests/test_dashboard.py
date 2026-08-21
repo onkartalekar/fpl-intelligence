@@ -811,6 +811,13 @@ class DashboardRenderTests(unittest.TestCase):
         # only "worked" because it happened to end before Guimarães' accented "ã"; any query
         # reaching an accent (like "guehi" needing to match through "é") always failed. Both the
         # Player Explorer and the Draft tab's "Add players" search share this same query logic.
+        #
+        # Reported live again: searching "ode" found nothing for Martin Ødegaard, even after the
+        # Guéhi fix above shipped. NFD normalization only decomposes a base letter plus a
+        # combining mark (e.g. e + U+0301 -> "é"); "Ø" is a single codepoint with no such
+        # decomposition, so NFD leaves it untouched and the same fold that rescued "Guéhi" does
+        # nothing for "Ødegaard". foldDiacritics now maps that fixed set of special Latin letters
+        # explicitly before the NFD pass runs.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertTrue(
@@ -819,10 +826,14 @@ class DashboardRenderTests(unittest.TestCase):
                 # Prettier's default `arrowParens: always` wraps this single-argument arrow
                 # function's param in parens -- `value=>` became `(value) =>` -- a real syntax
                 # addition, not just whitespace, so the snippet reflects it explicitly.
-                "const foldDiacritics=(value)=>String(value??'').normalize('NFD')"
+                "const foldDiacritics=(value)=>String(value??'')"
+                ".replace(/[øØæÆœŒßđĐłŁðÐþÞ]/g,(char)=>specialLetterFold[char])"
+                ".normalize('NFD')"
                 ".replace(/[\\u0300-\\u036f]/g,'');",
             )
         )
+        self.assertTrue(js_contains(html, "ø:'o'"))
+        self.assertTrue(js_contains(html, "Ø:'O'"))
         player_search_start = js_search(html, "function renderPlayers(){")
         self.assertTrue(
             js_contains(
