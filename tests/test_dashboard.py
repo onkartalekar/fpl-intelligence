@@ -817,7 +817,12 @@ class DashboardRenderTests(unittest.TestCase):
         # combining mark (e.g. e + U+0301 -> "é"); "Ø" is a single codepoint with no such
         # decomposition, so NFD leaves it untouched and the same fold that rescued "Guéhi" does
         # nothing for "Ødegaard". foldDiacritics now maps that fixed set of special Latin letters
-        # explicitly before the NFD pass runs.
+        # explicitly before the NFD pass runs (#238).
+        #
+        # Issue #239: the browser used to re-derive this fold from `player.name`/`full_name` on
+        # every keystroke. It's now precomputed server-side (catalog.py's build_player_catalog)
+        # into `player.search_key`, so these two search boxes just fold the (typically
+        # plain-ASCII) query and substring-match it against that precomputed key.
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertTrue(
@@ -844,8 +849,7 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertTrue(
             js_contains(
                 html[player_search_start:player_search_start + 1000],
-                "foldDiacritics(`${player.name} ${player.full_name||''}`.toLocaleLowerCase())"
-                ".includes(query)",
+                "(player.search_key||'').includes(query)",
             )
         )
         draft_search_start = js_search(html, "function draftResultRows(){")
@@ -853,6 +857,37 @@ class DashboardRenderTests(unittest.TestCase):
             js_contains(
                 html[draft_search_start:draft_search_start + 500],
                 "foldDiacritics(byId('draft-search').value.trim().toLocaleLowerCase())",
+            )
+        )
+        self.assertTrue(
+            js_contains(
+                html[draft_search_start:draft_search_start + 1000],
+                "(player.search_key||'').includes(query)",
+            )
+        )
+
+    def test_transfer_search_folds_diacritics_against_a_precomputed_search_key(self):
+        # Issue #239: unlike Player Explorer/Draft Squad's search (fixed in #161/#238), the
+        # Transfers & News search box had no diacritic folding at all -- it substring-matched
+        # against a plain `.toLocaleLowerCase()` of the row's display text, so "guehi" or "ode"
+        # never matched a transfer row for a special-lettered player even before #238. It now
+        # folds the query and matches it against `row.search_key`, which relevance.py's
+        # enrich_transfers precomputes server-side with a real fold -- the same fix applied to
+        # the other two search boxes above.
+        html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+        transfer_search_start = js_search(html, "function filteredRows(){")
+        transfer_search_body = html[transfer_search_start:transfer_search_start + 1500]
+        self.assertTrue(
+            js_contains(
+                transfer_search_body,
+                "foldDiacritics(byId('transfer-search').value.trim().toLocaleLowerCase())",
+            )
+        )
+        self.assertTrue(
+            js_contains(
+                transfer_search_body,
+                "(row.search_key||'').includes(query)",
             )
         )
 

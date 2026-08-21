@@ -125,6 +125,30 @@ class TransferRelevanceTests(unittest.TestCase):
         self.assertEqual(rows[0]["matched_fpl_element_id"], 21)
         self.assertEqual(rows[0]["fpl_relevance"], "high")
 
+    def test_search_key_folds_special_letters_for_the_transfer_search_box(self):
+        # Issue #239: the Transfers & News search box compared raw, unfolded row text --
+        # unlike Player Explorer/Draft Squad's search, it had no diacritic folding at all, so
+        # a query like "ode" or "guehi" could never match a transfer row for a special-lettered
+        # player name even before #238. search_key is precomputed here with a real fold so the
+        # dashboard just does a substring match against it.
+        rows = enrich_transfers(
+            [
+                {
+                    "player": "Martin Ødegaard",
+                    "from_club": "Arsenal",
+                    "to_club": "Real Sociedad",
+                    "premier_league_club": "Arsenal",
+                    "movement_type": "transfer-out",
+                    "announced_at": "2026-07-23T12:00:00Z",
+                }
+            ],
+            self.bootstrap,
+            generated_at="2026-08-01T12:00:00Z",
+        )
+
+        self.assertIn("ode", rows[0]["search_key"])
+        self.assertEqual(rows[0]["search_key"], "martin odegaard arsenal real sociedad arsenal")
+
     def test_ambiguous_primary_surname_across_two_players_is_not_matched(self):
         # Two different bootstrap players sharing a first name and primary
         # surname (differing only in an extra family surname) must not

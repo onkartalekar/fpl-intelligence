@@ -3,33 +3,17 @@
 from collections import defaultdict
 from datetime import datetime
 import re
-import unicodedata
 
+from ..text_fold import fold_ascii, search_key
 from .transfers import canonical_club
 
 
-# Some Latin letters have no NFKD decomposition into "base letter + combining
-# diacritic" -- they're distinct letterforms, not accented variants of an
-# ASCII letter -- so NFKD-then-ascii-encode silently drops them instead of
-# transliterating them (e.g. "Nørgaard" loses the "o" entirely and becomes
-# "Nrgaard", not "Norgaard"). Substitute these first so the rest of the
-# pipeline sees a plausible ASCII form, matching how press/transfer-feed
-# reporting typically renders them.
-_NON_DECOMPOSABLE_LETTERS = str.maketrans({
-    "ø": "o", "Ø": "O",
-    "æ": "ae", "Æ": "AE",
-    "œ": "oe", "Œ": "OE",
-    "ð": "d", "Ð": "D",
-    "þ": "th", "Þ": "Th",
-    "đ": "d", "Đ": "D",
-    "ł": "l", "Ł": "L",
-    "ß": "ss",
-})
-
-
 def _token(value):
-    text = (value or "").translate(_NON_DECOMPOSABLE_LETTERS)
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    # Stricter than text_fold.search_key: also strips all non-alphanumeric
+    # characters, since this is used for exact reconciliation-key matching
+    # (find *the* FPL player a transfer-feed name refers to) rather than
+    # substring search, where word boundaries need to survive the fold.
+    text = fold_ascii(value)
     return re.sub(r"[^a-z0-9]+", "", text.casefold())
 
 
@@ -126,6 +110,15 @@ def enrich_transfers(transfers, bootstrap, generated_at):
         if not club:
             club = row.get("to_club") if direction == "in" else row.get("from_club")
 
+        # Issue #239: precompute the same ASCII-folded, casefolded text the dashboard's
+        # transfer-search box matches a typed query against, so a special-lettered name
+        # (e.g. "Ødegaard") is searchable without the browser having to re-derive an
+        # accent fold from raw display text on every keystroke -- and so this search box,
+        # which previously had no diacritic folding applied at all, can't drift out of
+        # sync with the folding Player Explorer/Draft Squad search already do.
+        search_text = " ".join(
+            part for part in [row.get("player"), row.get("from_club"), row.get("to_club"), club] if part
+        )
         row.update(
             {
                 "movement_direction": direction,
@@ -139,6 +132,7 @@ def enrich_transfers(transfers, bootstrap, generated_at):
                     if match
                     else row.get("fpl_reconciliation_status", "pending_new_season_fpl")
                 ),
+                "search_key": search_key(search_text),
             }
         )
         enriched.append(row)
