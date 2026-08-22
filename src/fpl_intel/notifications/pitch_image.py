@@ -28,6 +28,18 @@ and a hand-rolled `zlib`/`struct`-only PNG encoder plus a hardcoded pixel font (
 alternative, considered and rejected in issue #240) would be substantially more code and more
 surface for rendering bugs, for a cosmetic diagram.
 
+Issue #248: `/api/reminder-pitch.png` is served with a 24h public `Cache-Control` (`server.py`'s
+`_send_static`), safe only as long as a given URL always renders the same bytes -- true until the
+rendering code itself changes. `build_query()` appends `_RENDER_VERSION` (see its own comment
+near the bottom of this file) as a cache-buster for exactly that case, so a rendering change
+doesn't leave stale copies of a previously emailed (and previously cached, e.g. by Gmail's own
+image proxy) starting XI's image stuck behind an old cache entry. `_RENDER_VERSION` was originally
+a hand-maintained integer a developer had to remember to bump on every rendering change -- exactly
+the kind of step that gets forgotten (confirmed: nobody bumped anything for #245's box-width fix,
+because the mechanism didn't exist yet). It's now an automatically derived fingerprint instead
+(`_compute_render_fingerprint()`), hashed from the actual constants and source code that determine
+`render_png()`'s pixel output, so there's nothing left to remember.
+
 Text is drawn with Pillow's own bundled default font (`ImageFont.load_default(size=...)`, which
 ships inside the Pillow package itself -- no system-font path is read, so this renders
 identically whether it runs on a developer's laptop or Railway's container, which has no
@@ -39,6 +51,8 @@ render; the HTML side of the email is unaffected and keeps full accented names.
 """
 
 import base64
+import hashlib
+import inspect
 import io
 import json
 
@@ -90,12 +104,20 @@ _TEXT_MARGIN = 8
 _MAX_PLAYERS = 15
 _MAX_FIELD_LEN = 40
 
+# `_RENDER_VERSION` (issue #248's cache-buster, used by `build_query()` below) is computed by
+# `_compute_render_fingerprint()` at the bottom of this file, after `_box_width_for_row()`,
+# `_fit_text()`, and `render_png()` are all defined -- it needs `inspect.getsource()` on them.
+# `build_query()` only reads the name at call time, which is always after the whole module has
+# finished loading, so its earlier position in the file here is fine.
+
 
 def build_query(starting_xi, captain_id):
     """Encode `starting_xi`/`captain_id` (the same inputs the old `_pitch_svg()` took) into a
     URL query string for the `/api/reminder-pitch.png` endpoint. A single `d` param carrying the
     whole payload, not one query param per player/field -- keeps the URL one opaque,
-    self-contained snapshot rather than several separately-tamperable pieces.
+    self-contained snapshot rather than several separately-tamperable pieces. `v` is a sibling
+    param, not part of that payload -- see `_compute_render_fingerprint()`'s docstring (bottom of
+    this file) for why.
     """
     payload = {
         "xi": [
@@ -110,7 +132,7 @@ def build_query(starting_xi, captain_id):
         "cap": captain_id,
     }
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    return "d=" + encoded.decode("ascii")
+    return f"d={encoded.decode('ascii')}&v={_RENDER_VERSION}"
 
 
 class InvalidPitchQuery(ValueError):
@@ -238,3 +260,35 @@ def render_png(starting_xi, captain_id):
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _compute_render_fingerprint():
+    """Issue #248's cache-buster, derived automatically rather than hand-maintained. The original
+    version of this was a plain integer a developer had to remember to bump on every rendering
+    change -- exactly the kind of step that gets forgotten (confirmed: nobody bumped anything for
+    issue #245's box-width fix, since the mechanism didn't exist at the time). This hashes
+    everything that actually determines `render_png()`'s pixel output -- every layout/color/font
+    constant, plus the literal source of the three functions that use them -- so any future
+    change to a constant, to `_box_width_for_row()`, to `_fit_text()`, or to `render_png()` itself
+    changes the result with no separate step to remember. Verified directly in
+    `tests/test_reminder_pitch.py`: patching a single constant and recomputing this changes the
+    output.
+
+    Known blind spot, inherent to hashing *this repository's own* source rather than the actual
+    rendered pixels: it can't see into Pillow's own internal font-rendering behavior, so a Pillow
+    version bump that happens to change how `ImageFont.load_default()` rasterizes glyphs wouldn't
+    change this fingerprint even though it could change pixel output. Accepted as out of scope --
+    `requirements.txt`'s own `Pillow>=10.1,<12.0` pin is the real guard against that risk, not
+    this fingerprint, which only targets *this module's own* code changes.
+    """
+    constants = (
+        _WIDTH, _HEIGHT, _BOX_H, _BOX_GAP, _BOX_W_MIN, _BOX_W_MAX,
+        _TURF, _HALFWAY_LINE, _BOX_FILL, _CAPTAIN_FILL, _CAPTAIN_OUTLINE,
+        _NAME_FILL, _CLUB_FILL, tuple(_FONT_NAME_SIZES), tuple(_FONT_CLUB_SIZES), _TEXT_MARGIN,
+    )
+    source = "".join(inspect.getsource(fn) for fn in (_box_width_for_row, _fit_text, render_png))
+    fingerprint_input = f"{constants!r}{source}".encode("utf-8")
+    return hashlib.sha256(fingerprint_input).hexdigest()[:12]
+
+
+_RENDER_VERSION = _compute_render_fingerprint()
