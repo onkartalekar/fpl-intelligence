@@ -8,3 +8,13 @@
 # weighted sum and does not import numpy itself. See MODEL.md and
 # plans/issue-65-ml-shadow-model.md for the full rationale.
 numpy>=2.0,<3.0
+
+# Second deliberate, narrow exception (issue #240): the deadline reminder email's Starting XI
+# diagram used to be inline <svg>, which Gmail's HTML sanitizer strips down to garbled unstyled
+# text (see src/fpl_intel/notifications/pitch_image.py's module docstring for the full repro).
+# Rendering it server-side as a real PNG and serving it as a plain <img> is the fix -- every
+# mainstream client, Gmail included, reliably displays a plain raster image, unlike inline SVG or
+# a data-URI. There is no stdlib way to rasterize shapes/text into an image; Pillow does the
+# drawing and PNG encoding. Used only by pitch_image.py (both the reminder script, to build the
+# image URL, and the dashboard server, to render it on request) -- no other module imports it.
+Pillow>=10.1,<12.0

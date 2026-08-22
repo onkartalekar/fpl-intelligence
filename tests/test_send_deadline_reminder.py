@@ -1,16 +1,20 @@
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+import html
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.error import URLError
+import urllib.parse
 
 from fpl_intel.modeling.recommendations import build_gw_recommendations
+from fpl_intel.notifications import pitch_image
 from fpl_intel.refresh import compute_manager_view
 from tests.test_recommendations import sample_bootstrap, sample_fixtures
 from tests.test_transfer_decisions import gw2_inputs
@@ -236,10 +240,13 @@ class EmailCompositionTests(unittest.TestCase):
             self.assertIn(profile["squad"]["captain"]["name"], body)
 
         # Issue #83: HTML counterpart -- header badge, all three profile cards, and (since the
-        # sample decision center always has a starting XI) the inline SVG pitch diagram.
+        # sample decision center always has a starting XI) the Starting XI pitch diagram.
+        # Issue #240: rendered as a real <img> (a server-side PNG), not inline <svg> -- Gmail's
+        # HTML sanitizer strips <svg>/<rect>/<text> tags but keeps their text content, mangling
+        # the diagram into unstyled running text.
         self.assertIn("GAMEWEEK 1", html_body)
         self.assertIn("DEADLINE IN 3H", html_body)
-        self.assertIn("<svg", html_body)
+        self.assertIn('<img src="http://localhost:8877/api/reminder-pitch.png?d=', html_body)
         self.assertIn("CONSERVATIVE", html_body)
         self.assertIn("BALANCED", html_body)
         self.assertIn("AGGRESSIVE", html_body)
@@ -278,9 +285,10 @@ class EmailCompositionTests(unittest.TestCase):
                 self.assertIn(captain_name, body)
 
         # Issue #83: HTML counterpart, mirroring the plain-text all-three-profiles coverage above.
+        # Issue #240: see the matching comment in the waiting_for_gw2 test above -- <img>, not <svg>.
         self.assertIn("GAMEWEEK 2", html_body)
         self.assertIn("DEADLINE IN 3H", html_body)
-        self.assertIn("<svg", html_body)
+        self.assertIn('<img src="http://localhost:8877/api/reminder-pitch.png?d=', html_body)
         self.assertIn("CONSERVATIVE", html_body)
         self.assertIn("BALANCED", html_body)
         self.assertIn("AGGRESSIVE", html_body)
@@ -369,7 +377,8 @@ class HtmlEmailTests(unittest.TestCase):
                     text_body.strip(),
                 )
                 self.assertIn(
-                    "<svg", message.get_body(preferencelist=("html",)).get_content(),
+                    '<img src="http://localhost:8877/api/reminder-pitch.png?d=',
+                    message.get_body(preferencelist=("html",)).get_content(),
                 )
 
     def test_badge_mapping_hold_is_info_blue(self):
@@ -397,15 +406,29 @@ class HtmlEmailTests(unittest.TestCase):
                 self.assertEqual(variant, "roll")
                 self.assertNotIn("-", label)
 
-    def test_mso_conditional_comment_structure_is_present_when_a_starting_xi_exists(self):
+    def test_pitch_image_url_round_trips_through_the_reminder_pitch_endpoint(self):
+        """Issue #240: replaces the old MSO-conditional-comment test (that whole mechanism is
+        gone -- a plain <img> renders in Outlook desktop too, so there's nothing left to gate).
+        Instead, asserts the <img src> is a real, well-formed reminder-pitch.png URL whose query
+        string actually decodes back to a starting XI server_handlers/reminder_pitch.py can draw
+        -- i.e. the two ends of pitch_image.py's encode/decode round trip agree with each other,
+        not just that some URL-shaped string is present.
+        """
         for bodies_factory in (self._gw1_bodies, self._active_bodies):
             with self.subTest(factory=bodies_factory.__name__):
                 _, _, html_body = bodies_factory()
-                self.assertIn("<!--[if !mso]><!-->", html_body)
-                self.assertIn("<!--<![endif]-->", html_body)
-                self.assertIn("<!--[if mso]>", html_body)
-                self.assertIn("<![endif]-->", html_body)
-                self.assertIn("starting-XI diagram not shown in this client", html_body)
+                match = re.search(r'<img src="([^"]+)"', html_body)
+                self.assertIsNotNone(match)
+                image_url = html.unescape(match.group(1))
+                self.assertTrue(image_url.startswith("http://localhost:8877/api/reminder-pitch.png?d="))
+                query = urllib.parse.urlsplit(image_url).query
+                d_param = urllib.parse.parse_qs(query)["d"][0]
+                starting_xi, captain_id = pitch_image.decode_query(d_param)
+                self.assertTrue(starting_xi)
+                self.assertTrue(any(player["id"] == captain_id for player in starting_xi))
+                # Confirms the round trip is actually drawable, not just structurally valid JSON.
+                png_bytes = pitch_image.render_png(starting_xi, captain_id)
+                self.assertTrue(png_bytes.startswith(b"\x89PNG"))
 
     def test_html_body_declares_both_color_schemes_and_carries_the_light_style_block(self):
         """Issue #197: this email used to declare `content="dark"` only. Both `_gw1_bodies` and

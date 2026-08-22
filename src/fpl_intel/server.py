@@ -36,6 +36,7 @@ from .server_handlers import profile as profile_handlers
 from .server_handlers import refresh_endpoint
 from .server_handlers import release_notes_handlers
 from .server_handlers import reminder as reminder_handlers
+from .server_handlers import reminder_pitch
 from .server_handlers import team_lookup
 from .server_handlers.common import parse_team_id, parse_team_id_cookie
 from .server_handlers.reminder import ReminderOptInCooldownError  # noqa: F401 (re-exported)
@@ -303,14 +304,20 @@ def create_server(
                 self.wfile.write(body)
 
         def _send_static(self, body, content_type):
-            """Issue #216: the icon and robots.txt responses -- fixed bytes, chosen once at
-            process start (APP_ICON_PNG at import time, _ROBOTS_TXT as a module constant), never
-            per-request-generated like _json/_send_html's bodies. Skips _compress_if_accepted
-            (the PNG is already compressed and gzipping it would only add overhead; robots.txt is
+            """Issue #216: originally the icon and robots.txt responses -- fixed bytes, chosen
+            once at process start (APP_ICON_PNG at import time, _ROBOTS_TXT as a module constant),
+            never per-request-generated like _json/_send_html's bodies. Skips _compress_if_accepted
+            (a PNG is already compressed and gzipping it would only add overhead; robots.txt is
             a couple dozen bytes, too small for gzip's own framing to pay for itself) and allows
             caching (unlike every other response here, which sets Cache-Control: no-store) since
             neither ever changes within a running process -- a day is long enough to cut repeat-
             crawler traffic without risking a stale icon surviving a deploy that changes it.
+
+            Issue #240: also reused for `/api/reminder-pitch.png`'s per-request-rendered PNG
+            bytes -- "chosen once at process start" no longer describes every caller, but the
+            caching rationale still holds: that endpoint's whole body is a deterministic function
+            of its own query string, so the same request always renders the same bytes, same as
+            an unchanging file.
             """
             self.send_response(200)
             self.send_header("Content-Type", content_type)
@@ -494,6 +501,9 @@ def create_server(
                 return
             if path == "/api/registered-teams":
                 self._handle_registered_teams()
+                return
+            if path == "/api/reminder-pitch.png":
+                self._handle_reminder_pitch(split_path.query)
                 return
             # Issue #216: previously /favicon.ico alone answered 204 (no icon), and every other
             # icon/robots.txt path a real browser or crawler tries fell through to the generic
@@ -733,6 +743,9 @@ def create_server(
     DashboardHandler._handle_shared_state = team_lookup.make_handle_shared_state(root)
     DashboardHandler._handle_manager_view = team_lookup.make_handle_manager_view(lookup_limiter)
     DashboardHandler._handle_registered_teams = team_lookup.make_handle_registered_teams(root, token)
+    # Not a `make_handle_...` factory like its neighbors above -- see reminder_pitch.py's module
+    # docstring for why this endpoint has nothing to close over.
+    DashboardHandler._handle_reminder_pitch = reminder_pitch.handle_reminder_pitch
     DashboardHandler._handle_archive_team_forecast = team_lookup.make_handle_archive_team_forecast(root)
 
     class _DashboardServer(ThreadingHTTPServer):

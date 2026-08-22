@@ -67,7 +67,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from fpl_intel.notifications import email_template
+from fpl_intel.notifications import email_template, pitch_image
 from fpl_intel.sources.deadline_windows import DeadlineDataError, hours_until, in_send_window, next_unfinished_event
 from fpl_intel.sources.deadline_windows import load_bootstrap_and_fixtures as _shared_load_bootstrap_and_fixtures
 
@@ -487,16 +487,6 @@ _TEXT_MUTED = email_template.TEXT_MUTED
 _SURFACE_INSET_BG = email_template.SURFACE_INSET_BG
 _AMBER_NOTE_BORDER = email_template.AMBER_NOTE_BORDER
 
-# Pitch diagram layout. Row order top-to-bottom mirrors dashboard.js's weeklyPitch()/pitch()
-# grouping exactly (`['FWD','MID','DEF','GKP'].map(...)` inside a `flex-direction: column`
-# container renders FWD first/top, GKP last/bottom) -- see dashboard.js and the mockup PDF.
-_PITCH_ROW_ORDER = ["FWD", "MID", "DEF", "GKP"]
-_PITCH_WIDTH = 400
-_PITCH_HEIGHT = 500
-_PITCH_BOX_W = 86
-_PITCH_BOX_H = 56
-
-
 def _dashboard_base_url():
     """Resolve the base URL for the footer's "Manage reminder settings" link. See
     `DASHBOARD_BASE_URL_ENV_VAR`'s module-level comment for why this differs from server.py's
@@ -568,84 +558,32 @@ def _profile_eyebrow(profile_id, label, default_profile_id):
     return text
 
 
-def _pitch_svg(starting_xi, captain_id):
-    """Build the inline-<svg> starting-XI pitch diagram.
-
-    Mirrors dashboard.js's weeklyPitch()/pitch() grouping logic (one row per position, players
-    spread evenly left-to-right within a row) but emits literal SVG coordinates instead of
-    flexbox rows, since none of the dashboard's actual pitch CSS (custom properties, flexbox,
-    gradients, :before/:after pseudo-elements) is email-safe -- see
-    plans/issue-83-reminder-html-email.md. The captain is shown as an outlined/bordered box
-    rather than a filled one: an email-safe stand-in for the dashboard's box-shadow captain glow,
-    which does not survive into email.
-    """
-    starting_xi = starting_xi or []
-    row_height = _PITCH_HEIGHT / len(_PITCH_ROW_ORDER)
-    boxes = []
-    for row_index, position in enumerate(_PITCH_ROW_ORDER):
-        players = [player for player in starting_xi if player.get("position_short") == position]
-        if not players:
-            continue
-        row_center_y = row_height * row_index + row_height / 2
-        cell_width = _PITCH_WIDTH / len(players)
-        for player_index, player in enumerate(players):
-            cx = cell_width * player_index + cell_width / 2
-            x = cx - _PITCH_BOX_W / 2
-            y = row_center_y - _PITCH_BOX_H / 2
-            is_captain = player.get("id") == captain_id
-            name = _esc(player.get("name"))
-            if is_captain:
-                name = f"{name} (C)"
-                fill, stroke, stroke_width = "#0b3d24", "#94efcb", "2.5"
-            else:
-                fill, stroke, stroke_width = "#1f5c3f", "none", "0"
-            club = _esc(player.get("club_short") or player.get("club"))
-            boxes.append(
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{_PITCH_BOX_W}" height="{_PITCH_BOX_H}" '
-                f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width}"/>'
-                f'<text x="{cx:.1f}" y="{y + 23:.1f}" text-anchor="middle" font-size="13" '
-                f'font-weight="bold" fill="#ffffff" font-family="Arial,Helvetica,sans-serif">{name}</text>'
-                f'<text x="{cx:.1f}" y="{y + 41:.1f}" text-anchor="middle" font-size="11" '
-                f'fill="#c9e8d8" font-family="Arial,Helvetica,sans-serif">{club}</text>'
-            )
-    body = "".join(boxes)
-    return (
-        f'<svg viewBox="0 0 {_PITCH_WIDTH} {_PITCH_HEIGHT}" width="100%" height="auto" '
-        'xmlns="http://www.w3.org/2000/svg" role="img" '
-        'aria-label="Recommended starting XI, grouped by position, captain outlined">'
-        f'<rect x="0" y="0" width="{_PITCH_WIDTH}" height="{_PITCH_HEIGHT}" fill="#0b3d24"/>'
-        f'<line x1="0" y1="{_PITCH_HEIGHT / 2:.1f}" x2="{_PITCH_WIDTH}" y2="{_PITCH_HEIGHT / 2:.1f}" '
-        'stroke="#1f5c3f" stroke-width="2"/>'
-        f'<circle cx="{_PITCH_WIDTH / 2:.1f}" cy="{_PITCH_HEIGHT / 2:.1f}" r="45" fill="none" '
-        'stroke="#1f5c3f" stroke-width="2"/>'
-        f'{body}</svg>'
-    )
-
-
 def _pitch_section_html(starting_xi, captain_id):
-    """The "RECOMMENDED STARTING XI" section: the real inline <svg> for every client except
-    Outlook desktop, which gets an explanatory dashed-border placeholder instead of silence, via
-    MSO conditional comments (`<!--[if mso]>` / `<!--[if !mso]><!-->`) -- the standard
-    Outlook-targeting technique, since a raw <svg> tag alone only degrades to *nothing shown*,
-    not to an explanation. See the plan doc's "Mockup review" section.
+    """The "RECOMMENDED STARTING XI" section: a plain `<img>` pointing at the
+    `/api/reminder-pitch.png` endpoint (`pitch_image.py`/`server_handlers/reminder_pitch.py`),
+    rendered server-side as a real PNG.
+
+    Issue #240: this used to be a raw inline `<svg>`, which rendered fine in Apple Mail/Yahoo but
+    was silently mangled by Gmail's HTML sanitizer into unstyled, unspaced running text (Gmail
+    strips the `<svg>`/`<rect>`/`<text>` tags but keeps their text content). There's no markup
+    equivalent of Outlook's MSO conditional comments to target "Gmail specifically," so rather
+    than add a second client-specific carve-out, this drops inline SVG entirely in favor of a
+    format every mainstream client -- Gmail included -- actually displays: a real `<img>`.
     """
     if not starting_xi:
         return ""
-    svg = _pitch_svg(starting_xi, captain_id)
-    placeholder = (
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-        '<td style="border:1px dashed #3a4a5c;border-radius:6px;padding:36px 16px;'
-        'text-align:center;font-family:Arial,Helvetica,sans-serif">'
-        '<span style="color:#8aa0b8;font-size:12px;font-style:italic">'
-        "(starting-XI diagram not shown in this client)</span></td></tr></table>"
+    image_url = f"{_dashboard_base_url()}/api/reminder-pitch.png?{pitch_image.build_query(starting_xi, captain_id)}"
+    img = (
+        f'<img src="{_esc(image_url)}" width="400" height="500" '
+        'alt="Recommended starting XI, grouped by position, captain outlined" '
+        'style="display:block;width:100%;max-width:400px;height:auto;border-radius:6px;border:0">'
     )
     return (
         '<tr><td style="padding:16px 16px 0 16px">'
         f'<div class="text-muted" style="font-size:12px;font-weight:bold;color:{_TEXT_MUTED};'
         'letter-spacing:.4px;margin-bottom:10px;font-family:Arial,Helvetica,sans-serif">'
         'RECOMMENDED STARTING XI</div>'
-        "<!--[if !mso]><!-->" + svg + "<!--<![endif]-->"
-        "<!--[if mso]>" + placeholder + "<![endif]-->"
+        + img +
         "</td></tr>"
     )
 
