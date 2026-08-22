@@ -110,16 +110,46 @@ class RenderVersionCacheBusterTests(unittest.TestCase):
     as long as a given URL always renders the same bytes -- confirmed broken live across #245's
     deploy, when Gmail's own image proxy kept serving a pre-#245 cached copy of an unchanged
     starting XI's URL well after the origin had already shipped the fix. `_RENDER_VERSION` exists
-    so bumping it (whenever `render_png()`'s visual output changes) changes the URL for an
-    otherwise-identical starting XI, busting any such downstream cache."""
+    so a rendering-code change automatically changes the URL for an otherwise-identical starting
+    XI, busting any such downstream cache -- and unlike a hand-maintained version counter (this
+    module's first attempt, which required remembering to bump an integer on every rendering
+    change -- exactly the forgettable step that caused #245's own staleness), it's derived
+    automatically by `_compute_render_fingerprint()` from the actual constants/source that
+    determine `render_png()`'s output, so there's nothing to remember."""
 
     def test_query_carries_the_current_render_version(self):
         query = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
-        self.assertEqual(parse_qs(query)["v"], [str(pitch_image._RENDER_VERSION)])
+        self.assertEqual(parse_qs(query)["v"], [pitch_image._RENDER_VERSION])
 
-    def test_bumping_render_version_changes_the_url_for_an_unchanged_starting_xi(self):
+    def test_render_version_matches_a_fresh_fingerprint_computation(self):
+        self.assertEqual(pitch_image._RENDER_VERSION, pitch_image._compute_render_fingerprint())
+
+    def test_changing_a_layout_constant_changes_the_fingerprint(self):
+        """The actual regression test for issue #248's real fix: a rendering-affecting change
+        automatically changes the cache-buster with no separate step, unlike the hand-maintained
+        counter this replaced."""
+        original = pitch_image._compute_render_fingerprint()
+        with patch.object(pitch_image, "_BOX_GAP", pitch_image._BOX_GAP + 1):
+            changed = pitch_image._compute_render_fingerprint()
+        self.assertNotEqual(original, changed)
+
+    def test_changing_a_color_constant_changes_the_fingerprint(self):
+        original = pitch_image._compute_render_fingerprint()
+        with patch.object(pitch_image, "_TURF", (0, 0, 0)):
+            changed = pitch_image._compute_render_fingerprint()
+        self.assertNotEqual(original, changed)
+
+    def test_a_no_op_recomputation_is_stable(self):
+        """Guards against the fingerprint accidentally depending on anything nondeterministic
+        (e.g. object identity/memory addresses) -- two computations with nothing changed between
+        them must agree, or the cache-buster would spuriously churn on every process restart."""
+        self.assertEqual(
+            pitch_image._compute_render_fingerprint(), pitch_image._compute_render_fingerprint(),
+        )
+
+    def test_different_render_version_produces_a_different_url_for_the_same_starting_xi(self):
         query_v1 = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
-        with patch.object(pitch_image, "_RENDER_VERSION", pitch_image._RENDER_VERSION + 1):
+        with patch.object(pitch_image, "_RENDER_VERSION", "a-different-fingerprint"):
             query_v2 = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
 
         self.assertNotEqual(query_v1, query_v2)
