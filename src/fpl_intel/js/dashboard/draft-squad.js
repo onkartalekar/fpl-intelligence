@@ -249,7 +249,21 @@ function setupDraftSquad() {
     draftResultsPage += 1;
     renderDraftResultsList();
   });
-  byId("draft-clear").addEventListener("click", clearDraftSquad);
+  byId("draft-clear").addEventListener("click", () => {
+    // Issue #242: on mobile, a confirm sheet stands between the tap and the clear -- this wipes
+    // the saved draft server-side with no undo, and there was no confirmation at all before this
+    // (not even a browser confirm()). Desktop keeps the original immediate behavior.
+    if (typeof openConfirmSheet === "function" && typeof isMobileShellBreakpoint === "function" && isMobileShellBreakpoint()) {
+      openConfirmSheet({
+        title: "Clear draft squad?",
+        message: "This clears your saved 15-player draft. It can't be undone.",
+        confirmLabel: "Clear draft",
+        onConfirm: clearDraftSquad,
+      });
+      return;
+    }
+    clearDraftSquad();
+  });
   const controls = [byId("draft-team-id"), byId("draft-save")];
   if (!servedLive()) {
     controls.forEach((control) => (control.disabled = true));

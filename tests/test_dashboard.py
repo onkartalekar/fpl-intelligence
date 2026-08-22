@@ -1424,5 +1424,162 @@ class ProfileGatedTabsTests(unittest.TestCase):
         self.assertLess(html.index('<section id="view-performance"'), main_end)
 
 
+class MobileResponsivePassTests(unittest.TestCase):
+    """Issue #242: bottom tab bar, shared bottom-sheet primitive, hover-trap fix, the Player
+    Explorer table's mobile card reflow, day-grouped fixtures, and destructive-action confirm
+    sheets -- all gated to the mobile breakpoint, all progressive enhancement over the existing
+    no-JS/desktop markup rather than a replacement of it."""
+
+    def _render(self):
+        return render_dashboard({"fpl": {}, "transfers": [], "sources": []})
+
+    def test_bottom_tabbar_and_shared_sheets_render(self):
+        html = self._render()
+
+        self.assertIn('id="bottom-tabbar"', html)
+        self.assertIn('class="bottom-tabbar"', html)
+        # Hidden by default -- dashboard.css's `body.js-mobile-shell` gate is what actually shows
+        # it, so a no-JS load never displays a tab bar with no working click handlers behind it.
+        self.assertIn('id="bottom-tabbar" class="bottom-tabbar" aria-label="Primary sections" hidden', html)
+        for view in ("squad", "decisions", "draft", "players"):
+            self.assertIn(f'class="tabbar-item" data-view="{view}"', html)
+        self.assertIn('id="tabbar-more"', html)
+
+        # One shared <dialog class="sheet"> reused by nav, content, and confirmation.
+        self.assertIn('id="nav-more-sheet" class="sheet"', html)
+        self.assertIn('id="app-sheet" class="sheet"', html)
+        self.assertIn('id="confirm-sheet" class="sheet confirm-sheet"', html)
+        self.assertIn('id="nav-more-list" class="sheet-nav-list"', html)
+        self.assertIn('id="app-sheet-body" class="sheet-body"', html)
+
+    def test_mobile_shell_setup_runs_once_from_bootstrap_after_workspace_context_restore(self):
+        html = self._render()
+
+        self.assertTrue(js_contains(html, "function setupMobileShell() {"))
+        self.assertTrue(
+            js_contains(html, "restoreWorkspaceContext(); setupMobileShell();"),
+            "setupMobileShell() must run as part of the same final bootstrap call sequence, "
+            "after state restore -- not float independently or run twice",
+        )
+
+    def test_show_view_syncs_mobile_chrome(self):
+        html = self._render()
+
+        self.assertTrue(
+            js_contains(html, 'if (typeof syncMobileChrome === "function") syncMobileChrome(name);'),
+        )
+
+    def test_hover_rules_are_all_guarded_to_hover_capable_pointers(self):
+        """Every bare `:hover` selector in the CSS must sit inside
+        `@media (hover: hover) and (pointer: fine)` -- unguarded, it latches on tap and never
+        releases on a touch device (no cursor to move away with)."""
+        html = self._render()
+        style_block = html[html.index(":root {"):html.index("</style>")]
+
+        for match in re.finditer(r"([.\w-]+(?:\([^)]*\))?):hover", style_block):
+            start = match.start()
+            preceding = style_block[:start]
+            open_media = preceding.count("@media (hover: hover) and (pointer: fine) {")
+            # Count only *unclosed* hover-media blocks at this point -- a crude but sufficient
+            # brace balance since this file has no nested @media blocks of its own.
+            closed = 0
+            cursor = 0
+            for _ in range(open_media):
+                idx = preceding.index("@media (hover: hover) and (pointer: fine) {", cursor)
+                depth = 1
+                pos = idx + len("@media (hover: hover) and (pointer: fine) {")
+                while depth > 0 and pos < len(preceding):
+                    if preceding[pos] == "{":
+                        depth += 1
+                    elif preceding[pos] == "}":
+                        depth -= 1
+                    pos += 1
+                if depth == 0:
+                    closed += 1
+                cursor = idx + 1
+            self.assertGreater(
+                open_media, closed,
+                f"unguarded :hover rule found: {match.group(0)!r} at offset {start}",
+            )
+
+    def test_filters_trigger_wraps_the_filter_shell_as_a_sheet(self):
+        html = self._render()
+
+        self.assertIn('id="filters-trigger" class="filters-trigger"', html)
+        self.assertIn('id="filters-trigger-count" class="filters-trigger-count" hidden', html)
+        self.assertIn('id="filter-shell"', html)
+        self.assertTrue(js_contains(html, 'byId("filters-trigger")'))
+        self.assertTrue(js_contains(html, "openContentSheet(filterShell,'Filters')"))
+        self.assertTrue(js_contains(html, "function syncFiltersTriggerBadge() {"))
+
+    def test_evidence_inspector_and_player_breakdown_open_as_sheets_on_mobile_only(self):
+        html = self._render()
+
+        self.assertTrue(
+            js_contains(html, "openContentSheet(byId('inspector'),'Evidence')"),
+        )
+        self.assertTrue(js_contains(html, "isMobileShellBreakpoint()"))
+        # The default-selection call into selectPlayerCard (scroll:false, at bootstrap/re-render)
+        # must never itself open a sheet -- only options.scroll (an explicit tap) may.
+        self.assertTrue(
+            js_contains(html, "if (options.scroll && typeof openContentSheet"),
+        )
+
+    def test_destructive_actions_route_through_confirm_sheet_on_mobile_only(self):
+        html = self._render()
+
+        self.assertTrue(js_contains(html, "function openConfirmSheet(options) {"))
+        self.assertTrue(js_contains(html, "title: 'Clear draft squad?'"))
+        self.assertTrue(js_contains(html, "onConfirm: clearDraftSquad"))
+        self.assertTrue(js_contains(html, "title: 'Reset filters?'"))
+        self.assertTrue(js_contains(html, "onConfirm: doResetFilters"))
+        # Both call sites must still fall through to the original, unconfirmed action when not on
+        # the mobile breakpoint -- desktop's behavior is unchanged.
+        self.assertTrue(js_contains(html, "clearDraftSquad();"))
+        self.assertTrue(js_contains(html, "doResetFilters();"))
+
+    def test_player_table_rows_carry_data_label_for_the_mobile_card_reflow(self):
+        html = self._render()
+
+        for column in ("Club", "Position", "Price", "Owned", "Status"):
+            self.assertTrue(
+                js_contains(html, f'data-label="{column}"'),
+                f"player row is missing a data-label={column!r} cell",
+            )
+        style_block = html[html.index(":root {"):html.index("</style>")]
+        breakpoint_block = style_block[style_block.index("@media(max-width:760px)"):]
+        self.assertIn(".player-table thead {", breakpoint_block)
+        self.assertIn('.player-row td[data-label]::before {', breakpoint_block)
+
+    def test_fixtures_group_by_day_on_mobile_and_stay_flat_on_desktop(self):
+        html = self._render()
+
+        self.assertTrue(js_contains(html, "function renderFixtureRowsGroupedByDay(rows) {"))
+        self.assertTrue(js_contains(html, "function renderFixtureRowsFlat(rows) {"))
+        self.assertTrue(
+            js_contains(html, "grouped ? renderFixtureRowsGroupedByDay(rows) : renderFixtureRowsFlat(rows)"),
+        )
+        self.assertTrue(js_contains(html, "function attachFixtureSwipe(container) {"))
+
+    def test_draft_builder_add_col_styled_as_a_static_sheet_on_mobile(self):
+        """The player-picker column stacks below the pitch and reads as a sheet visually
+        (rounded top corners, drag handle) but is never a <dialog> -- it stays reachable while
+        the pitch stays visible above it, per the design's "pitch stays visible while you add"."""
+        html = self._render()
+        style_block = html[html.index(":root {"):html.index("</style>")]
+        breakpoint_block = style_block[style_block.index("@media(max-width:760px)"):]
+
+        self.assertIn(".draft-builder-add-col {", breakpoint_block)
+        self.assertIn(".draft-builder-add-col::before {", breakpoint_block)
+
+    def test_touch_target_floor_expands_hit_areas_without_growing_compact_chips(self):
+        html = self._render()
+        style_block = html[html.index(":root {"):html.index("</style>")]
+        breakpoint_block = style_block[style_block.index("@media(max-width:760px)"):]
+
+        self.assertIn(".attention-action,.gw-nav-btn {", breakpoint_block)
+        self.assertIn(".filter-chip::after,.decision-subnav-chip::after {", breakpoint_block)
+
+
 if __name__ == "__main__":
     unittest.main()

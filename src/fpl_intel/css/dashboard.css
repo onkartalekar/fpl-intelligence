@@ -60,6 +60,12 @@
   --pitch-text-muted: #d0d9e8;
   --pitch-projection: #a8d7ff;
   --control-shadow: rgba(0,0,0,.35);
+  --scrim: rgba(4,8,16,.6);
+  --sheet-shadow: rgba(0,0,0,.5);
+  --sheet-handle: #384a6c;
+  --tabbar-bg: rgba(11,21,38,.96);
+  --touch-feedback: rgba(255,255,255,.08);
+  --on-danger: #2a0810;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -113,6 +119,12 @@
   --range-fill-bg: #d7e3f4;
   --range-fill-active-bg: #bfe9d6;
   --control-shadow: rgba(20,30,50,.18);
+  --scrim: rgba(20,30,50,.45);
+  --sheet-shadow: rgba(20,30,50,.28);
+  --sheet-handle: #c7d0e0;
+  --tabbar-bg: rgba(255,255,255,.96);
+  --touch-feedback: rgba(20,30,50,.06);
+  --on-danger: #fff5f6;
 }
 * {
   box-sizing: border-box;
@@ -184,8 +196,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   padding: 10px 11px;
   cursor: pointer;
 }
-.nav button:hover {
-  background: var(--panel2);
+/* Issue 242: hover latches after a tap on touch and never releases (no cursor to move away
+   with), so every hover-only rule below is guarded to real hover-capable pointers -- a mouse,
+   not a finger -- rather than firing (and sticking) on tap. */
+@media (hover: hover) and (pointer: fine) {
+  .nav button:hover {
+    background: var(--panel2);
+  }
 }
 .nav button.active {
   background: var(--panel2);
@@ -195,6 +212,32 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 }
 .mobile-nav-wrap {
   display: none;
+}
+.filters-trigger {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  background: var(--panel2);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.filters-trigger:active {
+  background: var(--touch-feedback);
+}
+.filters-trigger-count {
+  min-height: auto;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
 }
 .content {
   padding: 28px 32px;
@@ -238,8 +281,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   border-radius: 9px;
   cursor: pointer;
 }
-.refresh-button:hover {
-  filter: brightness(1.08);
+@media (hover: hover) and (pointer: fine) {
+  .refresh-button:hover {
+    filter: brightness(1.08);
+  }
+}
+.refresh-button:active {
+  filter: brightness(.92);
 }
 .refresh-button:disabled {
   opacity: .55;
@@ -257,8 +305,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   border-radius: 999px;
   cursor: pointer;
 }
-.theme-toggle:hover {
-  border-color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .theme-toggle:hover {
+    border-color: var(--accent);
+  }
 }
 .theme-toggle-icon {
   position: absolute;
@@ -464,8 +514,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   text-align: left;
   cursor: pointer;
 }
-.club-card:hover,.club-card:focus-visible {
+.club-card:focus-visible {
   border-color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .club-card:hover {
+    border-color: var(--accent);
+  }
+}
+.club-card:active {
+  background: var(--touch-feedback);
 }
 .club-card strong {
   display: block;
@@ -587,8 +645,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   padding: 12px;
   cursor: pointer;
 }
-.transfer:hover,.transfer:focus-visible {
+.transfer:focus-visible {
   border-color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .transfer:hover {
+    border-color: var(--accent);
+  }
+}
+.transfer:active {
+  background: var(--touch-feedback);
 }
 .transfer strong {
   display: block;
@@ -848,9 +914,14 @@ dd {
   opacity: .5;
   cursor: not-allowed;
 }
-.draft-add:not(:disabled):hover,.draft-remove:not(:disabled):hover {
-  border-color: var(--accent);
-  color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .draft-add:not(:disabled):hover,.draft-remove:not(:disabled):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+.draft-add:not(:disabled):active,.draft-remove:not(:disabled):active {
+  background: var(--touch-feedback);
 }
 .player-toolbar {
   display: grid;
@@ -914,8 +985,13 @@ dd {
   font-size: 16px;
   line-height: 1;
 }
-.gw-nav-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  .gw-nav-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+}
+.gw-nav-btn:active:not(:disabled) {
+  background: var(--touch-feedback);
 }
 .gw-nav-btn:disabled {
   opacity: .35;
@@ -981,8 +1057,13 @@ dd {
   text-align: left;
   cursor: pointer;
 }
-.profile-option:hover {
-  border-color: var(--blue);
+@media (hover: hover) and (pointer: fine) {
+  .profile-option:hover {
+    border-color: var(--blue);
+  }
+}
+.profile-option:active {
+  background: var(--touch-feedback);
 }
 .profile-option.active {
   border-color: var(--accent);
@@ -2018,9 +2099,336 @@ footer {
   .topbar h1 {
     font-size: 24px;
   }
+
+  /* Issue 242: 44x44 minimum / 8px minimum spacing touch-target floor. Controls that can grow
+     visually without harming their layout are bumped directly; compact chips/badges that need to
+     stay visually small get their hit area expanded with a transparent ::after instead, per the
+     design's "expand small badges with a transparent ::after rather than growing them visually". */
+  .attention-action,.gw-nav-btn {
+    min-height: 44px;
+  }
+  .gw-nav-btn {
+    min-width: 44px;
+  }
+  .filter-chip,.decision-subnav-chip {
+    position: relative;
+  }
+  .filter-chip::after,.decision-subnav-chip::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+
+  /* Issue 242: Player Explorer's table stops horizontally scrolling and becomes stacked
+     label/value rows instead -- same <table> and <td>s (desktop keeps its columns unchanged),
+     just reflowed at the row level and given each cell's column name back via `data-label`
+     (set in overview-transfers-players.js's renderPlayers()) since the <thead> is hidden. */
+  .player-table {
+    overflow-x: visible;
+  }
+  .player-table thead {
+    display: none;
+  }
+  .player-table,.player-table tbody,.player-table tr {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .player-row {
+    padding: 12px 13px;
+  }
+  .player-row th,.player-row td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 3px 0;
+    border-top: 0;
+    text-align: right;
+  }
+  .player-row th[scope="row"] {
+    padding-bottom: 6px;
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .player-row td[data-label]::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    text-align: left;
+  }
+  .player-row td.price {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  /* Issue 242: Fixtures becomes a day-grouped list (fixtures.js's renderFixtures()) with a
+     touch-swipe pager layered over the existing prev/next arrows, instead of a flat row list. */
+  .fixture-day-heading {
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 12px 0 6px;
+  }
+  .fixture-day-heading:first-child {
+    padding-top: 0;
+  }
+  .fixture-swipe-track {
+    touch-action: pan-y;
+  }
+
+  /* Issue 242: the "Filters" trigger that opens the transfers filter panel as a sheet (see
+     mobile-shell.js's setupMobileShell(), which wires #filters-trigger to openContentSheet) --
+     hidden by default (see the base rule below) and only shown once mobile-shell.js has
+     confirmed it can actually open the sheet it promises. The filter panel itself is hidden
+     alongside it -- otherwise both the trigger and the full inline form would show at once,
+     duplicating the same controls -- and un-hidden once openContentSheet() has actually moved it
+     into the sheet body (a plain descendant selector would just re-hide it there too). */
+  body.js-mobile-shell .filters-trigger {
+    display: inline-flex;
+  }
+  body.js-mobile-shell .filter-shell {
+    display: none;
+  }
+  #app-sheet-body.sheet-body > .filter-shell {
+    display: block;
+  }
+
+  /* Issue 242: Draft Squad's player-picker column stacks below the pitch instead of beside it,
+     styled to read as the sheet the design mocks (rounded top corners, drag handle, no modal
+     behavior -- it stays reachable while the pitch stays visible above it). */
+  .draft-builder-add-col {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    margin: 0 -14px;
+  }
+  .draft-builder-add-col::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--sheet-handle);
+    margin: 0 auto 12px;
+  }
 }
 @media(prefers-reduced-motion:reduce) {
   * {
     scroll-behavior: auto!important;
   }
+  dialog.sheet[open] {
+    animation: none;
+  }
+}
+
+/* ============================================================================================
+   Mobile shell: bottom tab bar + shared bottom-sheet primitive (issue 242).
+
+   Progressive enhancement -- every rule below that isn't already scoped by `[open]`/`::backdrop`
+   is additionally gated behind `body.js-mobile-shell`, a class mobile-shell.js adds once it runs.
+   Without JS (or above the 760px breakpoint, where mobile-shell.js never opens a sheet or shows
+   the tab bar), the page falls straight back to the `.mobile-nav-wrap` dropdown and the inline
+   `.inspector`/`.filter-shell`/`.draft-builder-add-col` panels that already existed -- nothing
+   here can leave mobile navigation stranded if JS fails to load.
+   ============================================================================================ */
+.bottom-tabbar {
+  display: none;
+}
+@media(max-width:760px) {
+  body.js-mobile-shell .mobile-nav-wrap {
+    display: none;
+  }
+  body.js-mobile-shell .content {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  body.js-mobile-shell .bottom-tabbar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 6;
+    display: grid;
+    grid-template-columns: repeat(5,1fr);
+    background: var(--tabbar-bg);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+}
+.tabbar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tabbar-item-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.tabbar-item.active {
+  color: var(--accent);
+}
+.tabbar-item:active {
+  background: var(--touch-feedback);
+}
+
+/* One shared <dialog>-based bottom sheet, reused by the "More" nav list, the evidence
+   inspector, the Decision Center player breakdown, the transfers filter panel, and destructive-
+   action confirmation -- native <dialog> gives focus-trapping and Escape-to-close for free. */
+dialog.sheet {
+  /* display:none is the browser's own default for a <dialog> without [open] -- stating it
+     explicitly here rather than leaving it implicit, since author CSS always wins over the UA
+     stylesheet regardless of specificity: any unconditional `display` on `dialog.sheet` here
+     would otherwise render the sheet permanently, [open] or not. */
+  display: none;
+  position: fixed;
+  inset: auto 0 0 0;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  max-height: 86vh;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 -10px 30px var(--sheet-shadow);
+  padding: 0;
+}
+dialog.sheet::backdrop {
+  background: var(--scrim);
+}
+dialog.sheet[open] {
+  display: flex;
+  flex-direction: column;
+  animation: sheet-slide-in .22s ease-out;
+}
+@keyframes sheet-slide-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.sheet-handle {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--sheet-handle);
+  margin: 10px auto 4px;
+  touch-action: none;
+}
+.sheet-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.sheet-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+.sheet-close {
+  min-width: 36px;
+  min-height: 36px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.sheet-close:active {
+  background: var(--touch-feedback);
+}
+.sheet-body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
+}
+.sheet-nav-list {
+  display: grid;
+  gap: 4px;
+}
+.sheet-nav-list button {
+  min-height: 48px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel2);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.sheet-nav-list button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sheet-nav-list button:active {
+  background: var(--touch-feedback);
+}
+
+/* The small destructive-action confirm sheet (Clear draft, Reset filters) -- a second <dialog>
+   so it can stack on top of an already-open content sheet (e.g. Reset filters lives inside the
+   filter sheet) without either needing to relocate the trigger or nest one dialog inside another. */
+dialog.confirm-sheet {
+  max-height: none;
+}
+.confirm-sheet-body {
+  padding: 4px 16px calc(20px + env(safe-area-inset-bottom));
+}
+.confirm-sheet-message {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.confirm-sheet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.confirm-sheet-actions button {
+  flex: 1;
+  min-height: 46px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  font: inherit;
+}
+.confirm-sheet-cancel {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.confirm-sheet-cancel:active {
+  background: var(--touch-feedback);
+}
+.confirm-sheet-confirm {
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: var(--on-danger);
+}
+.confirm-sheet-confirm:active {
+  filter: brightness(.92);
 }

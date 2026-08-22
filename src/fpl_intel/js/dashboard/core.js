@@ -126,6 +126,7 @@ function showView(name) {
     renderDraftHealth();
     renderDraftPitch();
   }
+  if (typeof syncMobileChrome === "function") syncMobileChrome(name);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 document

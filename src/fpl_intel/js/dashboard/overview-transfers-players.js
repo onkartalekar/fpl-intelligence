@@ -301,6 +301,7 @@ function renderFilterChips() {
       applyFilters();
     }),
   );
+  if (typeof syncFiltersTriggerBadge === "function") syncFiltersTriggerBadge();
 }
 const INSPECTOR_PLACEHOLDER =
   "Select a result to inspect its source, classification, and FPL reconciliation state.";
@@ -347,6 +348,10 @@ function inspect(row) {
   byId("inspector").className = "";
   byId("inspector").innerHTML =
     `<dl><dt>Player</dt><dd>${esc(row.player)}</dd><dt>Movement</dt><dd>${esc(row.from_club)} → ${esc(row.to_club)}</dd><dt>Why it matters</dt><dd>${esc(whyMatters(row))}</dd><dt>PL club</dt><dd>${esc(row.premier_league_club)}</dd><dt>Announced</dt><dd>${esc(fmtDate(row.announced_at, true))}</dd><dt>FPL relevance</dt><dd>${esc(label(row.fpl_relevance))}</dd><dt>Verification</dt><dd>${esc(label(row.verification_status))}</dd><dt>FPL status</dt><dd>${esc(label(row.fpl_reconciliation_status))}</dd><dt>Evidence</dt><dd>${links}</dd></dl>`;
+  // Issue #242: on mobile, the inspector opens as a sheet instead of just being written into the
+  // always-visible side panel (still the desktop behavior, and the mobile no-JS fallback).
+  if (typeof openContentSheet === "function" && typeof isMobileShellBreakpoint === "function" && isMobileShellBreakpoint())
+    openContentSheet(byId("inspector"), "Evidence");
 }
 const filterIds = [
   "transfer-search",
@@ -365,7 +370,7 @@ filterIds.forEach((id) =>
     },
   ),
 );
-byId("reset-filters").addEventListener("click", () => {
+function doResetFilters() {
   byId("transfer-search").value = "";
   byId("club-filter").value = "all";
   byId("relevance-filter").value = "actionable";
@@ -374,6 +379,21 @@ byId("reset-filters").addEventListener("click", () => {
   byId("freshness-filter").value = "recent14";
   page = 1;
   applyFilters();
+}
+byId("reset-filters").addEventListener("click", () => {
+  // Issue #242: on mobile, a confirm sheet stands between the tap and the reset -- fat fingers
+  // near the edge of a small screen shouldn't be able to instantly wipe an in-progress filter
+  // set. Desktop keeps the original immediate behavior.
+  if (typeof openConfirmSheet === "function" && typeof isMobileShellBreakpoint === "function" && isMobileShellBreakpoint()) {
+    openConfirmSheet({
+      title: "Reset filters?",
+      message: "This clears your search and every filter, back to the defaults.",
+      confirmLabel: "Reset filters",
+      onConfirm: doResetFilters,
+    });
+    return;
+  }
+  doResetFilters();
 });
 byId("prev-page").addEventListener("click", () => {
   page = Math.max(1, page - 1);
@@ -476,7 +496,10 @@ function renderPlayers() {
     ? visible
         .map(
           (player) =>
-            `<tr class="player-row"><th scope="row"><strong>${esc(player.name)}</strong><small>${esc(player.full_name || "")}</small></th><td>${esc(player.club)}</td><td>${esc(player.position)}</td><td class="price">£${Number(player.price).toFixed(1)}m</td><td>${Number(player.ownership).toFixed(1)}%</td><td><strong>${esc(statuses[player.status] || player.status || "Unknown")}</strong>${player.news ? `<small>${esc(player.news)}</small>` : ""}</td></tr>`,
+            // data-label (issue #242): column names the <thead> would otherwise supply, exposed
+            // per-cell so the mobile @media(max-width:760px) block can hide the header row and
+            // reflow .player-row into stacked label/value lines -- same cells, same <table>.
+            `<tr class="player-row"><th scope="row"><strong>${esc(player.name)}</strong><small>${esc(player.full_name || "")}</small></th><td data-label="Club">${esc(player.club)}</td><td data-label="Position">${esc(player.position)}</td><td class="price" data-label="Price">£${Number(player.price).toFixed(1)}m</td><td data-label="Owned">${Number(player.ownership).toFixed(1)}%</td><td data-label="Status"><strong>${esc(statuses[player.status] || player.status || "Unknown")}</strong>${player.news ? `<small>${esc(player.news)}</small>` : ""}</td></tr>`,
         )
         .join("")
     : '<tr><td colspan="6"><div class="empty">No players match these filters.</div></td></tr>';

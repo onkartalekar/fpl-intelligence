@@ -45,3 +45,4 @@ renderDraftPitch();
 setupContactForm();
 setupWhatsNew();
 restoreWorkspaceContext();
+setupMobileShell();
