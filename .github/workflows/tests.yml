@@ -137,6 +137,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        # Issue #240: this step didn't exist before -- numpy (requirements.txt's original, sole
+        # entry) is only ever imported by offline experiment/weight-fitting scripts
+        # (scripts/fit_ml_minutes_weights.py and friends), none of which any tests.yml module
+        # imports, so the suite happened to never need a real install. That stopped being true
+        # the moment `Pillow` (requirements.txt's second entry) became a hard import of
+        # `notifications/pitch_image.py`, itself imported unconditionally by
+        # `server_handlers/reminder_pitch.py` -> `server.py` -- and `server.py` is on the import
+        # path of most of this matrix (server-and-recommendations, refresh-and-reminders, and
+        # everything-else's test_start_dashboard all import it transitively). Confirmed live: CI
+        # failed with `ModuleNotFoundError: No module named 'PIL'` before this step was added.
+        if: steps.scope.outputs.skip != 'true'
+        run: pip install -r requirements.txt
 
       - name: Run test suite
         if: steps.scope.outputs.skip != 'true'

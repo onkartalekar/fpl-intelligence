@@ -25,6 +25,7 @@ requests).
 ```mermaid
 flowchart TB
     visitor["Visitor's browser"]
+    mailClient["Reminder recipient's mail client<br/>(Gmail, Apple Mail, ...)"]
 
     subgraph gha["GitHub Actions (ephemeral runners -- no shared filesystem with Railway)"]
         scheduledRefresh["scheduled-refresh.yml<br/>(issue #101, hourly cron --<br/>triggers every tick since #228)"]
@@ -67,6 +68,7 @@ flowchart TB
     deadlineReminder -->|"GET /api/manager-view?team_id=<br/>(X-Refresh-Token rate-limit exemption)"| server
     deadlineReminder -->|"GET /api/reminder-teams<br/>(X-Reminder-Teams-Token, issue #105)"| server
     deadlineReminder -->|"send reminder email"| smtp
+    mailClient -->|"GET /api/reminder-pitch.png?d=&lt;starting XI, url-encoded&gt;<br/>(public, no token -- issue #240;<br/>fetched whenever the email is opened,<br/>possibly days after send)"| server
 
     liveCheck -->|"exercises every endpoint above<br/>with a reserved synthetic team ID"| server
     liveCheck -->|"IMAP poll: did the Contact Us<br/>notification actually arrive?"| smtp
@@ -90,6 +92,19 @@ state -- correct by design, not an instance of the bug), #122 (a script tried re
 and `/api/manager-view` (issue #125) and `/api/reminder-teams` (issue #105) exist specifically so
 every GitHub-Actions-hosted script reads Railway's live, already-computed state over HTTP instead
 of assuming local file access it will never have.
+
+**Why `/api/reminder-pitch.png`'s query string carries the whole starting XI instead of a
+team/event lookup key** (issue #240): the deadline reminder's Starting XI diagram used to be
+inline `<svg>`, which Gmail's HTML sanitizer strips down to garbled unstyled text (it keeps
+`<text>` nodes' content but not the tags around them). Rendering the diagram server-side as a PNG
+and serving it as a plain `<img>` fixes that -- every mainstream client, Gmail included, reliably
+displays a real raster image. But `mailClient` fetches that `<img>` whenever the recipient opens
+the email, which can be days after `deadlineReminder` sent it, after that gameweek's real
+recommendation has already moved on -- so the endpoint can't look anything up by team/event ID at
+fetch time. `deadlineReminder` encodes the exact starting XI + captain it composed the email with
+directly into the image URL, making `/api/reminder-pitch.png` a stateless, pure function of its
+own query string: whenever it's fetched, it renders the same snapshot the recipient's email
+actually described, not whatever the live recommendation happens to be that day.
 
 ## Code layout
 
