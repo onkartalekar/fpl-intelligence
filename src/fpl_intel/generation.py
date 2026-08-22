@@ -7,6 +7,15 @@ import uuid
 
 from .sources.fpl_data import save_json
 
+# How many published generations to retain on disk. Each generation is a full snapshot
+# (~5MB), and until this existed publish_generation() never deleted old ones -- on a
+# Railway volume with refreshes running every few hours, that's unbounded growth (one
+# real deployment reached 43 generations / ~210MB before this was added). Nothing reads
+# a generation once it's no longer the current-generation.json pointer target (the only
+# other consumer, decision_cache.py, keys off the generation id for cache invalidation,
+# never reads the old directory's contents), so pruning superseded ones is safe.
+GENERATION_RETENTION_COUNT = 10
+
 
 def _safe_generation_dir(root):
     root = Path(root).resolve()
@@ -50,6 +59,22 @@ def resolve_artifact(root, filename):
         if candidate.is_file():
             return candidate
     return root / "data" / filename
+
+
+def _prune_old_generations(generations_root, keep):
+    """Delete all but the `keep` most-recently-created generation directories.
+
+    Best-effort: this runs after the current-generation pointer has already switched,
+    so a pruning failure (permissions, a concurrent refresh, etc.) must never surface
+    as a publish failure -- it just leaves an extra directory for next time to catch.
+    """
+    try:
+        candidates = [entry for entry in generations_root.iterdir() if entry.is_dir()]
+    except OSError:
+        return
+    candidates.sort(key=lambda entry: entry.stat().st_mtime, reverse=True)
+    for stale in candidates[keep:]:
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 def publish_generation(root, generated_at, json_artifacts):
@@ -97,4 +122,6 @@ def publish_generation(root, generated_at, json_artifacts):
     except Exception:
         shutil.rmtree(staged, ignore_errors=True)
         raise
+
+    _prune_old_generations(generations_root, GENERATION_RETENTION_COUNT)
     return generation_id
