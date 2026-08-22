@@ -10,7 +10,9 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import parse_qs
 from urllib.request import urlopen
 
 from PIL import Image, ImageDraw
@@ -26,10 +28,18 @@ _SAMPLE_XI = [
 ]
 
 
+def _extract_d(query):
+    """Pulls the `d` param out of a `build_query()` result the same way the real server route
+    does (`server_handlers/reminder_pitch.py`'s `parse_qs(query_string).get("d")`) -- not a naive
+    string split, since #248's `&v=<_RENDER_VERSION>` suffix means `d` is no longer the whole
+    query string."""
+    return parse_qs(query)["d"][0]
+
+
 class PitchImageEncodeDecodeTests(unittest.TestCase):
     def test_round_trips_id_name_position_and_club(self):
         query = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
-        d_param = query.split("d=", 1)[1]
+        d_param = _extract_d(query)
 
         starting_xi, captain_id = pitch_image.decode_query(d_param)
 
@@ -44,12 +54,12 @@ class PitchImageEncodeDecodeTests(unittest.TestCase):
         """Mirrors the old `_pitch_svg()`'s `player.get("club_short") or player.get("club")`
         fallback -- not every caller's player dicts carry `club_short`."""
         query = pitch_image.build_query([{"id": 1, "name": "Watkins", "position_short": "FWD", "club": "AVL"}], None)
-        starting_xi, _ = pitch_image.decode_query(query.split("d=", 1)[1])
+        starting_xi, _ = pitch_image.decode_query(_extract_d(query))
         self.assertEqual(starting_xi[0]["club_short"], "AVL")
 
     def test_empty_starting_xi_round_trips_to_an_empty_list(self):
         query = pitch_image.build_query([], None)
-        starting_xi, captain_id = pitch_image.decode_query(query.split("d=", 1)[1])
+        starting_xi, captain_id = pitch_image.decode_query(_extract_d(query))
         self.assertEqual(starting_xi, [])
         self.assertIsNone(captain_id)
 
@@ -77,7 +87,7 @@ class PitchImageEncodeDecodeTests(unittest.TestCase):
         ]
         query = pitch_image.build_query(oversized_xi, None)
         with self.assertRaises(pitch_image.InvalidPitchQuery):
-            pitch_image.decode_query(query.split("d=", 1)[1])
+            pitch_image.decode_query(_extract_d(query))
 
     def test_rejects_an_unknown_position(self):
         encoded = base64.urlsafe_b64encode(
@@ -91,8 +101,35 @@ class PitchImageEncodeDecodeTests(unittest.TestCase):
         query = pitch_image.build_query(
             [{"id": 1, "name": long_name, "position_short": "FWD", "club_short": "AVL"}], None,
         )
-        starting_xi, _ = pitch_image.decode_query(query.split("d=", 1)[1])
+        starting_xi, _ = pitch_image.decode_query(_extract_d(query))
         self.assertLessEqual(len(starting_xi[0]["name"]), 40)
+
+
+class RenderVersionCacheBusterTests(unittest.TestCase):
+    """Issue #248: `/api/reminder-pitch.png` is served with a 24h public Cache-Control, safe only
+    as long as a given URL always renders the same bytes -- confirmed broken live across #245's
+    deploy, when Gmail's own image proxy kept serving a pre-#245 cached copy of an unchanged
+    starting XI's URL well after the origin had already shipped the fix. `_RENDER_VERSION` exists
+    so bumping it (whenever `render_png()`'s visual output changes) changes the URL for an
+    otherwise-identical starting XI, busting any such downstream cache."""
+
+    def test_query_carries_the_current_render_version(self):
+        query = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
+        self.assertEqual(parse_qs(query)["v"], [str(pitch_image._RENDER_VERSION)])
+
+    def test_bumping_render_version_changes_the_url_for_an_unchanged_starting_xi(self):
+        query_v1 = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
+        with patch.object(pitch_image, "_RENDER_VERSION", pitch_image._RENDER_VERSION + 1):
+            query_v2 = pitch_image.build_query(_SAMPLE_XI, captain_id=2)
+
+        self.assertNotEqual(query_v1, query_v2)
+        # The starting XI itself is unchanged -- only `v`, and therefore the `d` payload it's
+        # concatenated after, differs; decoding either still recovers the same starting XI, so
+        # `v`'s presence hasn't altered what the image actually contains.
+        self.assertEqual(
+            pitch_image.decode_query(_extract_d(query_v1)),
+            pitch_image.decode_query(_extract_d(query_v2)),
+        )
 
 
 class BoxWidthForRowTests(unittest.TestCase):
@@ -217,6 +254,20 @@ class ReminderPitchEndpointTests(unittest.TestCase):
         query = pitch_image.build_query(_SAMPLE_XI, captain_id=None)
         response = urlopen(f"{self.base_url}/api/reminder-pitch.png?{query}", timeout=3)
         self.assertEqual(response.status, 200)
+
+    def test_ignores_v_and_still_renders_correctly_from_d_alone(self):
+        """Issue #248: `v` only exists to change the URL string across a rendering-code change --
+        the server route never reads it. A request carrying a stale/arbitrary `v` alongside a
+        valid `d` must render exactly as if `v` were absent, since that's precisely what an
+        already-sent email's URL (built under a lower `_RENDER_VERSION`, but never revisited by
+        this test suite once shipped) needs to keep doing forever."""
+        d_param = _extract_d(pitch_image.build_query(_SAMPLE_XI, captain_id=2))
+
+        response_stale_v = urlopen(f"{self.base_url}/api/reminder-pitch.png?d={d_param}&v=0", timeout=3)
+        response_no_v = urlopen(f"{self.base_url}/api/reminder-pitch.png?d={d_param}", timeout=3)
+
+        self.assertEqual(response_stale_v.status, 200)
+        self.assertEqual(response_stale_v.read(), response_no_v.read())
 
 
 if __name__ == "__main__":

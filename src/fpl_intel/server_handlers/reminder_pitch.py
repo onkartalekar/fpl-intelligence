@@ -17,6 +17,10 @@ from ..notifications import pitch_image
 
 
 def handle_reminder_pitch(self, query_string):
+    # `v` (pitch_image._RENDER_VERSION, issue #248) deliberately never gets read here -- its only
+    # job is making the URL string itself change across a rendering-code update, so a client/
+    # proxy cache holding an older `v`'s response never gets asked for this one. Reading it would
+    # add nothing: `d` alone is already everything render_png() needs.
     d_param = (parse_qs(query_string).get("d") or [None])[0]
     try:
         starting_xi, captain_id = pitch_image.decode_query(d_param)
@@ -25,7 +29,9 @@ def handle_reminder_pitch(self, query_string):
         return
     png_bytes = pitch_image.render_png(starting_xi, captain_id)
     # Deterministic and cacheable like the other `_send_static` bodies (favicon, robots.txt) --
-    # identical `d` always renders identical bytes, so the same day-long Cache-Control there is
+    # identical `d` always renders identical bytes *for a given version of this code* -- issue
+    # #248: that's not automatically true across a rendering-code change, which is what `v`
+    # above exists to guard against. Same day-long Cache-Control as those bodies is otherwise
     # just as safe here, even though (unlike those) this body is generated per request rather
     # than chosen once at process start.
     self._send_static(png_bytes, "image/png")

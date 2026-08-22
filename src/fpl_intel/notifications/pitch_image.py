@@ -28,6 +28,13 @@ and a hand-rolled `zlib`/`struct`-only PNG encoder plus a hardcoded pixel font (
 alternative, considered and rejected in issue #240) would be substantially more code and more
 surface for rendering bugs, for a cosmetic diagram.
 
+Issue #248: `/api/reminder-pitch.png` is served with a 24h public `Cache-Control` (`server.py`'s
+`_send_static`), safe only as long as a given URL always renders the same bytes -- true until the
+rendering code itself changes. See `_RENDER_VERSION`'s own comment below for the cache-buster
+this module carries specifically so a rendering change doesn't leave stale copies of a previously
+emailed (and previously cached, e.g. by Gmail's own image proxy) starting XI's image stuck behind
+an old cache entry.
+
 Text is drawn with Pillow's own bundled default font (`ImageFont.load_default(size=...)`, which
 ships inside the Pillow package itself -- no system-font path is read, so this renders
 identically whether it runs on a developer's laptop or Railway's container, which has no
@@ -90,12 +97,32 @@ _TEXT_MARGIN = 8
 _MAX_PLAYERS = 15
 _MAX_FIELD_LEN = 40
 
+# Issue #248: `/api/reminder-pitch.png` is served with a 24h public `Cache-Control`
+# (`server.py`'s `_send_static`), which is safe *only* as long as "same URL -> same bytes" holds
+# forever -- true until the rendering code itself changes. Confirmed live across issue #245's
+# deploy: a real test send used the same starting XI (so the same `d=` URL) before and after
+# #245's box-width fix shipped, and Gmail's own image proxy kept serving its pre-#245 cached copy
+# well after the origin was already fixed, because nothing about the URL had changed to tell it
+# to re-fetch.
+#
+# `build_query()` appends this as a separate `&v=` query param the server never parses or
+# validates (see `handle_reminder_pitch()`) -- deliberately NOT folded into the `d` payload
+# itself, so `decode_query()`'s shape/validation never has to change, and every already-sent
+# email's existing `d=`-only URL keeps decoding and rendering exactly as it does today.
+#
+# BUMP THIS whenever `render_png()`'s visual output changes for the same inputs (box sizing,
+# colors, fonts, layout math, anything pixel-visible) -- that's what actually busts stale
+# downstream caches (Gmail's proxy included) for a starting XI that was already emailed before
+# the change. Forgetting to bump it is exactly what caused #248.
+_RENDER_VERSION = 1
+
 
 def build_query(starting_xi, captain_id):
     """Encode `starting_xi`/`captain_id` (the same inputs the old `_pitch_svg()` took) into a
     URL query string for the `/api/reminder-pitch.png` endpoint. A single `d` param carrying the
     whole payload, not one query param per player/field -- keeps the URL one opaque,
-    self-contained snapshot rather than several separately-tamperable pieces.
+    self-contained snapshot rather than several separately-tamperable pieces. `v` is a sibling
+    param, not part of that payload -- see `_RENDER_VERSION`'s comment above for why.
     """
     payload = {
         "xi": [
@@ -110,7 +137,7 @@ def build_query(starting_xi, captain_id):
         "cap": captain_id,
     }
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    return "d=" + encoded.decode("ascii")
+    return f"d={encoded.decode('ascii')}&v={_RENDER_VERSION}"
 
 
 class InvalidPitchQuery(ValueError):
