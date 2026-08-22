@@ -28,7 +28,8 @@
 <section class="panel"><h2>Club movement summary</h2><div class="muted" style="margin-bottom:12px">Select a club to inspect its relevant movements.</div><div id="club-summary" class="club-grid"></div></section>
 </div></div></section>
 <section id="view-transfers" class="view"><section class="panel"><div class="eyebrow">Secondary evidence view</div><h2 style="font-size:19px;margin-top:3px">Confirmed transfers and squad changes</h2><div class="muted">Recent, potentially relevant records are shown by default. Every confirmed record remains retrievable.</div>
-<div class="filter-shell"><div class="toolbar"><div class="field"><label for="transfer-search">Search</label><input id="transfer-search" type="search" placeholder="Player or club"></div><div class="field"><label for="club-filter">Club</label><select id="club-filter"><option value="all">All clubs</option></select></div><div class="field"><label for="relevance-filter">FPL relevance</label><select id="relevance-filter"><option value="actionable" selected>High + medium</option><option value="high">High only</option><option value="medium">Medium only</option><option value="low">Low only</option><option value="all">All records</option></select></div></div>
+<button type="button" id="filters-trigger" class="filters-trigger" aria-haspopup="dialog">Filters<span id="filters-trigger-count" class="filters-trigger-count" hidden>0</span></button>
+<div class="filter-shell" id="filter-shell"><div class="toolbar"><div class="field"><label for="transfer-search">Search</label><input id="transfer-search" type="search" placeholder="Player or club"></div><div class="field"><label for="club-filter">Club</label><select id="club-filter"><option value="all">All clubs</option></select></div><div class="field"><label for="relevance-filter">FPL relevance</label><select id="relevance-filter"><option value="actionable" selected>High + medium</option><option value="high">High only</option><option value="medium">Medium only</option><option value="low">Low only</option><option value="all">All records</option></select></div></div>
 <details id="more-filters" class="more-filters"><summary>More filters</summary><div class="more-grid"><div class="field"><label for="direction-filter">Direction</label><select id="direction-filter"><option value="all">In and out</option><option value="in">Incoming</option><option value="out">Outgoing</option><option value="released">Released</option></select></div><div class="field"><label for="movement-filter">Movement</label><select id="movement-filter"><option value="all">All types</option><option value="transfer-in">Transfer in</option><option value="transfer-out">Transfer out</option><option value="loan-in">Loan in</option><option value="loan-out">Loan out</option><option value="player-released">Released</option><option value="end-of-loan">End of loan</option></select></div><div class="field"><label for="freshness-filter">Date</label><select id="freshness-filter"><option value="recent14" selected>Last 14 days</option><option value="new_7d">Last 7 days</option><option value="older">Older</option><option value="all">All dates</option></select></div></div></details>
 <div class="filter-meta"><div id="active-filters" class="active-filters" aria-label="Active filters"></div><button id="reset-filters" class="reset-filters" type="button">Reset filters</button></div></div>
 <div class="countline"><span id="result-count">0 results</span><span>20 per page</span></div><div class="transfer-layout"><div><div id="feed" class="feed"><div class="empty">No confirmed transfers have been loaded yet. This does not mean no transfers have occurred. Refresh from first-party sources.</div></div><div class="pagination"><button id="prev-page">Previous</button><span id="page-label">Page 1 of 1</span><button id="next-page">Next</button></div></div><aside class="panel inspector"><h2>Evidence inspector</h2><div id="inspector" class="empty" aria-live="polite">Select a result to inspect its source, classification, and FPL reconciliation state.</div></aside></div>
@@ -89,5 +90,27 @@
 <section class="panel" style="margin-top:14px"><div class="player-toolbar"><div class="field"><label for="whats-new-search">Search</label><input id="whats-new-search" type="search" placeholder="Search release notes"></div></div><div id="whats-new-filters" class="active-filters" role="group" aria-label="Filter by category"><button type="button" class="decision-subnav-chip active" data-whats-new-filter="all">All</button><button type="button" class="decision-subnav-chip" data-whats-new-filter="Feature">Feature</button><button type="button" class="decision-subnav-chip" data-whats-new-filter="Fix">Fix</button><button type="button" class="decision-subnav-chip" data-whats-new-filter="Data">Data</button><button type="button" class="decision-subnav-chip" data-whats-new-filter="Docs">Docs</button><button type="button" class="decision-subnav-chip" data-whats-new-filter="Chore">Chore</button></div><div class="countline" style="margin-top:12px"><span id="whats-new-count">0 entries</span></div><div id="whats-new-entries"></div></section></section>
 <footer>Recommendations only. Evidence is locally stored with source provenance.</footer>
 </main></div>
+<nav id="bottom-tabbar" class="bottom-tabbar" aria-label="Primary sections" hidden>
+<button type="button" class="tabbar-item" data-view="squad"><span class="tabbar-item-icon" aria-hidden="true">&#9673;</span>Team</button>
+<button type="button" class="tabbar-item" data-view="decisions"><span class="tabbar-item-icon" aria-hidden="true">&#9672;</span>Decide</button>
+<button type="button" class="tabbar-item" data-view="draft"><span class="tabbar-item-icon" aria-hidden="true">&#9636;</span>Draft</button>
+<button type="button" class="tabbar-item" data-view="players"><span class="tabbar-item-icon" aria-hidden="true">&#8981;</span>Players</button>
+<button type="button" id="tabbar-more" class="tabbar-item" aria-haspopup="dialog"><span class="tabbar-item-icon" aria-hidden="true">&#8943;</span>More</button>
+</nav>
+<dialog id="nav-more-sheet" class="sheet" aria-label="More sections">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">More</span><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
+<div class="sheet-body"><div id="nav-more-list" class="sheet-nav-list"></div></div>
+</dialog>
+<dialog id="app-sheet" class="sheet" aria-labelledby="app-sheet-title">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span id="app-sheet-title" class="sheet-title"></span><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
+<div id="app-sheet-body" class="sheet-body"></div>
+</dialog>
+<dialog id="confirm-sheet" class="sheet confirm-sheet" aria-labelledby="confirm-sheet-title">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span id="confirm-sheet-title" class="sheet-title"></span><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
+<div class="sheet-body confirm-sheet-body"><p id="confirm-sheet-message" class="confirm-sheet-message"></p><div class="confirm-sheet-actions"><button type="button" id="confirm-sheet-cancel" class="confirm-sheet-cancel">Cancel</button><button type="button" id="confirm-sheet-confirm" class="confirm-sheet-confirm"></button></div></div>
+</dialog>
 <script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
 <script>__DASHBOARD_JS__</script></body></html>

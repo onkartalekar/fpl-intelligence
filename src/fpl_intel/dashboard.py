@@ -47,11 +47,19 @@ _DASHBOARD_CSS = (_STATIC_DIR / "css" / "dashboard.css").read_text(encoding="utf
 #      (`setupThemeToggle(); ...; restoreWorkspaceContext();`) that actually invokes every other
 #      file's setup/render functions -- it has to run only once every other file's own top-level
 #      `const`/`let` declarations have already executed.
-#   3. The 8 files in between only reference each other from inside function bodies (never from
+#   3. The 9 files in between only reference each other from inside function bodies (never from
 #      their own top-level code), so their relative order among themselves doesn't affect
-#      correctness -- ordered here to roughly match the original file's layout.
+#      correctness -- ordered here to roughly match the original file's layout. mobile-shell.js
+#      (issue #242) is the one exception worth calling out explicitly even though it doesn't
+#      change the rule: its own top-level code is all `function` declarations (hoisted, so its
+#      actual position in the concatenation doesn't matter for availability) plus module state
+#      initialized from literals, never from another file's `const`/`let` -- placed right after
+#      core.js only because it's chrome every other view-specific file's click handlers call into
+#      (openContentSheet/openConfirmSheet/isMobileShellBreakpoint), not because load order
+#      requires it there.
 _DASHBOARD_JS_FILES = [
     "core.js",
+    "mobile-shell.js",
     "overview-transfers-players.js",
     "whats-new.js",
     "fixtures.js",

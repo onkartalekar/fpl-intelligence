@@ -146,13 +146,24 @@ function selectPlayerCard(player, options = {}) {
     .querySelectorAll(`[data-player-id="${player.id}"]`)
     .forEach((node) => node.classList.add("selected"));
   renderPlayerBreakdown(player);
-  if (options.scroll) {
-    const panel = byId("decision-section-breakdown");
-    if (panel)
-      panel.scrollIntoView({
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
-        block: "nearest",
-      });
+  const panel = byId("decision-section-breakdown");
+  // Issue #242: an explicit tap on a player card/chip (options.scroll -- see
+  // attachBreakdownHandlers below) opens the breakdown panel as a sheet on mobile, instead of
+  // scrolling the page to an inline panel. attachBreakdownHandlers' own initial default-player
+  // selection passes scroll:false specifically so it only populates the panel in place, both on
+  // desktop and on mobile -- it must never pop a sheet open on page load.
+  if (
+    options.scroll &&
+    typeof openContentSheet === "function" &&
+    typeof isMobileShellBreakpoint === "function" &&
+    isMobileShellBreakpoint()
+  ) {
+    if (panel) openContentSheet(panel, `${player.name} · ${player.position_short}`);
+  } else if (options.scroll && panel) {
+    panel.scrollIntoView({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "nearest",
+    });
   }
 }
 function attachBreakdownHandlers(squadPlayers, preferredDefault, rationaleMap) {
