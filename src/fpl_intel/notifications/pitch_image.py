@@ -53,7 +53,20 @@ from ..text_fold import fold_ascii
 PITCH_ROW_ORDER = ["FWD", "MID", "DEF", "GKP"]
 
 _WIDTH, _HEIGHT = 400, 500
-_BOX_W, _BOX_H = 86, 56
+_BOX_H = 56
+
+# Issue #245: box width used to be a fixed `_BOX_W = 86` regardless of how many players shared a
+# row -- with 5 players, `cell_width` (400/5=80) was already narrower than the box itself, so
+# adjacent boxes overlapped by ~6px each side (confirmed in a real sent email: the DEF row's five
+# boxes touched/overlapped edge-to-edge, reading as one continuous band, not five cards); with 1
+# player (a lone FWD, or GKP's row, always exactly 1), the box stayed 86px in the middle of 400px
+# of otherwise-empty turf. Box width is now computed per row from that row's own `cell_width`
+# (see `render_png`'s row loop), clamped to this range: `_BOX_GAP` keeps a visible gap between
+# adjacent boxes at the packed end (a 5-wide row: 400/5-8=72px boxes, no overlap); `_BOX_W_MIN`
+# floors that same packed case so boxes still read as cards, not slivers; `_BOX_W_MAX` caps the
+# sparse end (a 1-wide row) so a lone box grows to use its row better without sprawling absurdly
+# wide across all 400px.
+_BOX_GAP, _BOX_W_MIN, _BOX_W_MAX = 8, 60, 140
 
 # Same literal colors the SVG version used (send_deadline_reminder.py's old `_pitch_svg`), just
 # as RGB tuples instead of hex strings -- Pillow's draw calls take either, tuples read slightly
@@ -62,8 +75,9 @@ _TURF, _HALFWAY_LINE = (11, 61, 36), (31, 92, 63)
 _BOX_FILL, _CAPTAIN_FILL, _CAPTAIN_OUTLINE = (31, 92, 63), (11, 61, 36), (148, 239, 203)
 _NAME_FILL, _CLUB_FILL = (255, 255, 255), (201, 232, 216)
 
-# Descending candidate sizes, tried largest-first until the text fits `_BOX_W` -- a fixed size
-# alone (13/11, the old SVG's own `font-size="13"`/`"11"`) let a long name overflow past its box,
+# Descending candidate sizes, tried largest-first until the text fits its (per-row, since #245)
+# box width -- a fixed size alone (13/11, the old SVG's own `font-size="13"`/`"11"`) let a long
+# name overflow past its box,
 # confirmed live: "B.Fernandes (C)" spilled off the image's left edge. The SVG version had the
 # identical risk (same box width, same fixed font-size, and SVG doesn't clip overflowing text by
 # default either) -- just less visible there than on a filled raster box.
@@ -162,6 +176,16 @@ def _fit_text(draw, text, font_sizes, max_width):
     return font, text, draw.textbbox((0, 0), text, font=font)
 
 
+def _box_width_for_row(player_count):
+    """Issue #245: box width for a row of `player_count` players, sized to fit within that row's
+    own `cell_width` (`_WIDTH / player_count`) with a visible gap between adjacent boxes, rather
+    than the fixed 86px every row used to get regardless of density -- which let a 5-wide row's
+    boxes overlap (400/5=80 < 86) and left a 1-wide row's box stranded in mostly-empty space.
+    """
+    cell_width = _WIDTH / player_count
+    return max(_BOX_W_MIN, min(_BOX_W_MAX, cell_width - _BOX_GAP))
+
+
 def render_png(starting_xi, captain_id):
     """Draw the pitch diagram and return PNG bytes. Same row-by-position grouping/layout math as
     the SVG version this replaces (`_pitch_svg()`, removed by issue #240): four y-bands
@@ -176,8 +200,6 @@ def render_png(starting_xi, captain_id):
         outline=_HALFWAY_LINE, width=2,
     )
 
-    max_text_width = _BOX_W - _TEXT_MARGIN
-
     row_height = _HEIGHT / len(PITCH_ROW_ORDER)
     for row_index, position in enumerate(PITCH_ROW_ORDER):
         players = [player for player in starting_xi if player.get("position_short") == position]
@@ -185,10 +207,12 @@ def render_png(starting_xi, captain_id):
             continue
         row_center_y = row_height * row_index + row_height / 2
         cell_width = _WIDTH / len(players)
+        box_w = _box_width_for_row(len(players))
+        max_text_width = box_w - _TEXT_MARGIN
         for player_index, player in enumerate(players):
             cx = cell_width * player_index + cell_width / 2
-            x0, y0 = cx - _BOX_W / 2, row_center_y - _BOX_H / 2
-            x1, y1 = cx + _BOX_W / 2, row_center_y + _BOX_H / 2
+            x0, y0 = cx - box_w / 2, row_center_y - _BOX_H / 2
+            x1, y1 = cx + box_w / 2, row_center_y + _BOX_H / 2
             is_captain = player.get("id") == captain_id
             name = fold_ascii(player.get("name") or "")
             if is_captain:

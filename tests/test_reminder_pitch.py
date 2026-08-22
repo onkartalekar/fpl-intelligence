@@ -95,6 +95,30 @@ class PitchImageEncodeDecodeTests(unittest.TestCase):
         self.assertLessEqual(len(starting_xi[0]["name"]), 40)
 
 
+class BoxWidthForRowTests(unittest.TestCase):
+    """Issue #245: the fixed 86px box width used to overlap for a 5-player row (400/5=80 < 86,
+    confirmed in a real sent email -- the DEF row's five boxes touched/overlapped edge-to-edge)
+    and left a 1-player row's box stranded in mostly-empty space. Box width is now a function of
+    the row's own player count, clamped to `[_BOX_W_MIN, _BOX_W_MAX]` with a `_BOX_GAP` margin."""
+
+    def test_five_player_row_leaves_a_visible_gap_instead_of_overlapping(self):
+        box_w = pitch_image._box_width_for_row(5)
+        cell_width = pitch_image._WIDTH / 5
+        self.assertLess(box_w, cell_width)  # strictly less, not just <=, so a real gap remains
+
+    def test_five_player_row_box_width_matches_the_expected_clamp_result(self):
+        # 400/5 - 8 = 72, within [_BOX_W_MIN, _BOX_W_MAX] -- exercised directly, not just via <.
+        self.assertEqual(pitch_image._box_width_for_row(5), 72)
+
+    def test_one_player_row_grows_past_the_old_fixed_width_but_stays_capped(self):
+        box_w = pitch_image._box_width_for_row(1)
+        self.assertGreater(box_w, 86)  # the old fixed width -- confirms it actually grew
+        self.assertEqual(box_w, pitch_image._BOX_W_MAX)  # capped, not sprawling across all 400px
+
+    def test_box_width_never_drops_below_the_floor_for_an_unrealistically_packed_row(self):
+        self.assertEqual(pitch_image._box_width_for_row(15), pitch_image._BOX_W_MIN)
+
+
 class PitchImageRenderTests(unittest.TestCase):
     def test_renders_a_valid_png_for_a_full_starting_xi(self):
         png_bytes = pitch_image.render_png(_SAMPLE_XI, captain_id=2)
@@ -129,7 +153,7 @@ class FitTextTests(unittest.TestCase):
 
     def test_long_text_shrinks_rather_than_overflows(self):
         long_name = "B.Fernandes (C)"
-        max_width = pitch_image._BOX_W - pitch_image._TEXT_MARGIN
+        max_width = 86 - pitch_image._TEXT_MARGIN  # a representative box width, not tied to any particular row size
 
         font, text, bbox = pitch_image._fit_text(self.draw, long_name, pitch_image._FONT_NAME_SIZES, max_width)
 
@@ -138,7 +162,7 @@ class FitTextTests(unittest.TestCase):
 
     def test_text_too_long_for_any_size_is_truncated_with_an_ellipsis_and_still_fits(self):
         absurdly_long_name = "A" * 60 + " (C)"
-        max_width = pitch_image._BOX_W - pitch_image._TEXT_MARGIN
+        max_width = 86 - pitch_image._TEXT_MARGIN  # a representative box width, not tied to any particular row size
 
         font, text, bbox = pitch_image._fit_text(
             self.draw, absurdly_long_name, pitch_image._FONT_NAME_SIZES, max_width,
