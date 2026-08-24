@@ -1,0 +1,233 @@
+{
+  "info": {
+    "name": "FPL Intelligence — External APIs",
+    "_postman_id": "f8b2a5b4-8f0e-4d1a-9d3e-fpl-intel-ext-apis",
+    "description": "Every third-party/external HTTP API the fpl-intelligence repo calls out to (as of 2026-08-24). Internal `/api/*` endpoints served BY this repo's own dashboard server are intentionally excluded — this collection only covers outbound calls this codebase makes to other services.\n\nFolders are organized one-to-one with the source file that makes the calls:\n- `src/fpl_intel/sources/fpl_data.py` — official FPL bootstrap/fixtures/live data\n- `src/fpl_intel/sources/manager_data.py` — public FPL manager entry data\n- `src/fpl_intel/sources/pl_transfers.py` — Premier League transfer-centre playlist API\n- `src/fpl_intel/sources/news_signals.py` — Anthropic Claude API + generic OpenAI-compatible LLM API (Phase 5, gated/not active in production)\n\nNote: the repo also sends email via SMTP (`src/fpl_intel/notifications/*.py`, configured through `FPL_INTEL_SMTP_*` / `FPL_INTEL_SERVER_SMTP_*` env vars). SMTP isn't an HTTP API so it has no Postman request, but it's listed here for completeness.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "team_id", "value": "12345", "description": "Any public FPL manager entry (team) ID" },
+    { "key": "event_id", "value": "1", "description": "Gameweek/event number (1-38)" },
+    { "key": "playlist_id", "value": "4658365", "description": "PL content playlist ID. 4658365 is the master transfer-centre playlist; per-team playlist IDs are discovered from its response." },
+    { "key": "openai_compatible_base", "value": "https://your-llm-host.example.com", "description": "FPL_INTEL_LLM_API_BASE — set to whatever OpenAI-compatible host you're pointing at. Not a real endpoint; placeholder only." }
+  ],
+  "item": [
+    {
+      "name": "fpl_data.py",
+      "description": "Official, unauthenticated FPL API calls for core dataset, fixtures, and live gameweek stats. urllib.request with a descriptive User-Agent, no API key. src/fpl_intel/sources/fpl_data.py",
+      "item": [
+        {
+          "name": "Bootstrap Static (players, teams, events)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "FPL Intelligence local dashboard" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/bootstrap-static/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "bootstrap-static", ""]
+            },
+            "description": "Core FPL dataset: all players (elements), teams, positions (element_types), gameweeks (events), prices, availability. fetch_bootstrap()."
+          }
+        },
+        {
+          "name": "Fixtures",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "FPL Intelligence local dashboard" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/fixtures/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "fixtures", ""]
+            },
+            "description": "All season fixtures with kickoff times and FDR. fetch_fixtures()."
+          }
+        },
+        {
+          "name": "Event (Gameweek) Live Data",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "FPL Intelligence local dashboard" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/event/{{event_id}}/live/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "event", "{{event_id}}", "live", ""]
+            },
+            "description": "Live per-player stats for a single gameweek. fetch_event_live()."
+          }
+        }
+      ]
+    },
+    {
+      "name": "manager_data.py",
+      "description": "Public FPL manager entry data — no credentials required, everything here is publicly exposed by the official API. urllib.request with User-Agent 'fpl-intelligence/1.0'. src/fpl_intel/sources/manager_data.py",
+      "item": [
+        {
+          "name": "Manager Entry (public)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "fpl-intelligence/1.0" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/entry/{{team_id}}/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "entry", "{{team_id}}", ""]
+            },
+            "description": "Public manager profile: name, overall rank/points, current event, bank/value. collect_public_manager()."
+          }
+        },
+        {
+          "name": "Manager History",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "fpl-intelligence/1.0" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/entry/{{team_id}}/history/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "entry", "{{team_id}}", "history", ""]
+            },
+            "description": "Manager's season-by-season and per-gameweek history, plus chips used. collect_public_manager()."
+          }
+        },
+        {
+          "name": "Manager Transfers",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "fpl-intelligence/1.0" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/entry/{{team_id}}/transfers/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "entry", "{{team_id}}", "transfers", ""]
+            },
+            "description": "All transfers a manager has made this season. collect_public_manager()."
+          }
+        },
+        {
+          "name": "Manager Event Picks",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "fpl-intelligence/1.0" }
+            ],
+            "url": {
+              "raw": "https://fantasy.premierleague.com/api/entry/{{team_id}}/event/{{event_id}}/picks/",
+              "protocol": "https",
+              "host": ["fantasy", "premierleague", "com"],
+              "path": ["api", "entry", "{{team_id}}", "event", "{{event_id}}", "picks", ""]
+            },
+            "description": "Manager's published squad picks (11+subs, captain, chip) for one gameweek. Used both for the current event (collect_public_manager()) and any past event (fetch_manager_event_picks())."
+          }
+        }
+      ]
+    },
+    {
+      "name": "pl_transfers.py",
+      "description": "Official Premier League transfer-centre content, used to derive confirmed transfers/loans. urllib.request with User-Agent 'FPL Intelligence local dashboard', no API key. src/fpl_intel/sources/pl_transfers.py",
+      "item": [
+        {
+          "name": "Master Transfer-Centre Playlist",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "FPL Intelligence local dashboard" }
+            ],
+            "url": {
+              "raw": "https://api.premierleague.com/content/premierleague/playlist/en/{{playlist_id}}?detail=DETAILED",
+              "protocol": "https",
+              "host": ["api", "premierleague", "com"],
+              "path": ["content", "premierleague", "playlist", "en", "{{playlist_id}}"],
+              "query": [{ "key": "detail", "value": "DETAILED" }]
+            },
+            "description": "The master playlist (fixed ID 4658365) lists one child playlist per club — 'Transfer Centre' items. fetch_confirmed_transfers()."
+          }
+        },
+        {
+          "name": "Team Transfer-Centre Playlist (detailed)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "User-Agent", "value": "FPL Intelligence local dashboard" }
+            ],
+            "url": {
+              "raw": "https://api.premierleague.com/content/premierleague/playlist/en/{{playlist_id}}?pageSize=100&detail=DETAILED",
+              "protocol": "https",
+              "host": ["api", "premierleague", "com"],
+              "path": ["content", "premierleague", "playlist", "en", "{{playlist_id}}"],
+              "query": [
+                { "key": "pageSize", "value": "100" },
+                { "key": "detail", "value": "DETAILED" }
+              ]
+            },
+            "description": "Per-club playlist of transfer-in/out/loan/release items, each tagged with a movement type and a source link. `{{playlist_id}}` here should be one of the child IDs returned by the master playlist call, not the master ID itself. fetch_confirmed_transfers()."
+          }
+        }
+      ]
+    },
+    {
+      "name": "news_signals.py",
+      "description": "Phase 5 scaffolding (gated, NOT wired into the live refresh pipeline): extracts structured player-availability signals from first-party news text via an LLM. Provider is selected by FPL_INTEL_LLM_PROVIDER ('claude' default, or 'openai_compatible'). src/fpl_intel/sources/news_signals.py",
+      "item": [
+        {
+          "name": "Anthropic Claude Messages API",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{ANTHROPIC_API_KEY}}", "type": "text" },
+              { "key": "anthropic-version", "value": "2023-06-01", "type": "text" },
+              { "key": "content-type", "value": "application/json", "type": "text" }
+            ],
+            "url": {
+              "raw": "https://api.anthropic.com/v1/messages",
+              "protocol": "https",
+              "host": ["api", "anthropic", "com"],
+              "path": ["v1", "messages"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 1024,\n  \"system\": \"You extract player availability signals from official football club and Premier League news for a fantasy football projection tool. ... Respond with only a JSON array, no other text.\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"<first-party news article text>\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Key from ANTHROPIC_API_KEY env var. Model is pinned to claude-haiku-4-5-20251001. _call_claude()."
+          }
+        },
+        {
+          "name": "OpenAI-Compatible Chat Completions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{FPL_INTEL_LLM_API_KEY}}", "type": "text" },
+              { "key": "content-type", "value": "application/json", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{openai_compatible_base}}/chat/completions",
+              "host": ["{{openai_compatible_base}}"],
+              "path": ["chat", "completions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"{{FPL_INTEL_LLM_MODEL}}\",\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"You extract player availability signals from official football club and Premier League news for a fantasy football projection tool. ... Respond with only a JSON array, no other text.\" },\n    { \"role\": \"user\", \"content\": \"<first-party news article text>\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Generic caller for any host implementing the OpenAI Chat Completions shape. Base URL, model, and key all come from env vars (FPL_INTEL_LLM_API_BASE, FPL_INTEL_LLM_MODEL, FPL_INTEL_LLM_API_KEY) — nothing is hardcoded. _call_openai_compatible()."
+          }
+        }
+      ]
+    }
+  ]
+}
