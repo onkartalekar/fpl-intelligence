@@ -841,6 +841,17 @@ function renderManager() {
     value === null || value === ""
       ? "Not yet available"
       : `£${(Number(value) / 10).toFixed(1)}m`;
+  // Mirrors the empty/placeholder handling squad-grid already does in every early-return branch
+  // below -- kept as one helper so the pitch view (added alongside the flat list, issue: pitch
+  // view for My Team) never goes stale independently of squad-grid's own message.
+  const resetSquadPitch = (message) => {
+    byId("squad-pitch").hidden = true;
+    byId("squad-pitch").innerHTML = "";
+    byId("squad-pitch-formation").textContent = "";
+    byId("squad-bench").innerHTML = "";
+    byId("squad-pitch-empty").hidden = false;
+    byId("squad-pitch-empty").textContent = message;
+  };
   if (manager.connection_status === "lookup_failed") {
     const failNote =
       "Team not found, or the official FPL API is temporarily unavailable. Check the team ID and try again.";
@@ -849,6 +860,7 @@ function renderManager() {
     byId("manager-status").textContent = failNote;
     byId("squad-grid").innerHTML =
       '<div class="empty">No public squad is connected.</div>';
+    resetSquadPitch("No public squad is connected.");
     return;
   }
   if (manager.connection_status === "not_configured") {
@@ -859,6 +871,7 @@ function renderManager() {
     byId("manager-status").textContent = setupNote;
     byId("squad-grid").innerHTML =
       '<div class="empty">No public squad is connected.</div>';
+    resetSquadPitch("No public squad is connected.");
     return;
   }
   byId("my-team-summary").innerHTML =
@@ -869,6 +882,9 @@ function renderManager() {
       "Connected to the official public entry. Public GW1 squad is hidden until the deadline, so no draft players are inferred.";
     byId("squad-grid").innerHTML =
       '<div class="empty">Public GW1 squad is hidden until the deadline. The dashboard will load it after official FPL publishes the picks.</div>';
+    resetSquadPitch(
+      "Public GW1 squad is hidden until the deadline. Pitch view appears once official FPL publishes the picks.",
+    );
     return;
   }
   byId("manager-status").className = "status-good";
@@ -880,10 +896,56 @@ function renderManager() {
     3: "Midfielder",
     4: "Forward",
   };
+  const positionShort = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
   byId("squad-grid").innerHTML = manager.squad
     .map(
       (player) =>
         `<div class="player-card"><strong>${esc(player.name)}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}</strong><span>${esc(positions[player.element_type] || "Player")} · ${esc(money(player.price))}</span><span>${player.position <= 11 ? "Starting XI" : `Bench ${player.position - 11}`}</span></div>`,
     )
     .join("");
+  const startingPlayers = manager.squad
+    .filter((player) => player.position <= 11)
+    .slice()
+    .sort((a, b) => a.position - b.position);
+  const benchPlayers = manager.squad
+    .filter((player) => player.position > 11)
+    .slice()
+    .sort((a, b) => a.position - b.position);
+  if (!startingPlayers.length) {
+    resetSquadPitch("Pitch view appears once a public squad is connected.");
+    return;
+  }
+  const counts = { DEF: 0, MID: 0, FWD: 0 };
+  startingPlayers.forEach((player) => {
+    const key = positionShort[player.element_type];
+    if (key === "DEF" || key === "MID" || key === "FWD") counts[key] += 1;
+  });
+  const formationLabel = `${counts.DEF}-${counts.MID}-${counts.FWD}`;
+  byId("squad-pitch-formation").textContent = formationLabel;
+  byId("squad-pitch").setAttribute(
+    "aria-label",
+    `${formationLabel} formation: ${startingPlayers.map((player) => `${player.name}${player.is_captain ? " captain" : player.is_vice_captain ? " vice-captain" : ""}`).join(", ")}`,
+  );
+  byId("squad-pitch").innerHTML = ["FWD", "MID", "DEF", "GKP"]
+    .map(
+      (position) =>
+        `<div class="pitch-row pitch-${position.toLowerCase()}">${startingPlayers
+          .filter(
+            (player) => positionShort[player.element_type] === position,
+          )
+          .map(
+            (player) =>
+              `<div class="pitch-player ${player.is_captain ? "captain" : ""}" title="${esc(player.name)}"><strong>${esc(player.name)}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}</strong><span>${esc(money(player.price))}</span></div>`,
+          )
+          .join("")}</div>`,
+    )
+    .join("");
+  byId("squad-bench").innerHTML = benchPlayers
+    .map(
+      (player, index) =>
+        `<div class="weekly-bench-card"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(positionShort[player.element_type] || "Player")} · ${esc(money(player.price))}</span></div>`,
+    )
+    .join("");
+  byId("squad-pitch-empty").hidden = true;
+  byId("squad-pitch").hidden = false;
 }
