@@ -54,6 +54,44 @@ def js_span(html, snippet, start=0):
     return match.start(), match.end()
 
 
+# dashboard-shell.html went from a hand-minified single-line-per-view file to real,
+# Prettier-formatted multi-line HTML -- the same move dashboard.js and dashboard.css each already
+# made (see `_js_pattern` above and commit 5108610). Prettier's `htmlWhitespaceSensitivity: css`
+# never changes what a browser renders (it only ever inserts whitespace where the adjacent tags'
+# default CSS display already makes whitespace insignificant), but it does two things a raw
+# substring/index() check against the old minified text can't survive: it may put a closing `>`
+# on its own line when a tag's attribute list wraps (splitting e.g. `</button>` into
+# `</button\n          >`), and it word-wraps long text content at the print width (splitting a
+# phrase like "not saved to your account" across a line break). `html_search`/`html_contains`
+# mirror `js_search`/`js_contains` for exactly this: tokenize a snippet into words/quotes/single
+# characters and glue the pieces back together with `\s*`, so the same snippet matches regardless
+# of where the formatter happened to wrap.
+_HTML_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*|['\"]|\S")
+
+
+def _html_pattern(snippet):
+    tokens = _HTML_TOKEN_RE.findall(snippet)
+    parts = []
+    for index, token in enumerate(tokens):
+        if index > 0:
+            parts.append(r"\s*")
+        parts.append(r"['\"]" if token in ("'", '"') else re.escape(token))
+    return "".join(parts)
+
+
+def html_search(html, snippet, start=0):
+    """Whitespace-tolerant equivalent of `html.index(snippet, start)` for HTML markup snippets."""
+    match = re.compile(_html_pattern(snippet)).search(html, start)
+    if match is None:
+        raise ValueError(f"HTML snippet not found: {snippet!r}")
+    return match.start()
+
+
+def html_contains(html, snippet):
+    """Whitespace-tolerant equivalent of `snippet in html` for HTML markup snippets."""
+    return re.search(_html_pattern(snippet), html) is not None
+
+
 class WhatsNewTabRenderTests(unittest.TestCase):
     """Issue #143: the "What's New" tab's markup and embedded data."""
 
@@ -263,7 +301,9 @@ class DashboardRenderTests(unittest.TestCase):
 
         # Initial server-rendered placeholder (dashboard-shell.html).
         placeholder = "Select a result to inspect its source, classification, and FPL reconciliation state."
-        self.assertIn(f'id="inspector" class="empty" aria-live="polite">{placeholder}', html)
+        self.assertTrue(
+            html_contains(html, f'id="inspector" class="empty" aria-live="polite">{placeholder}')
+        )
 
         # `applyFilters()` must reset the inspector to that same placeholder/class on every call,
         # not just leave whatever `inspect(row)` last wrote in place.
@@ -605,8 +645,17 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("Official FPL fixtures", html)
         self.assertIn("Public FPL manager entry", html)
         self.assertIn('id="fixture-congestion-limitation"', html)
-        self.assertIn("Projections use official Premier League fixtures and FPL fixture difficulty", html)
-        self.assertIn("European and domestic-cup schedules are not yet modeled directly", html)
+        self.assertTrue(
+            html_contains(
+                html,
+                "Projections use official Premier League fixtures and FPL fixture difficulty",
+            )
+        )
+        self.assertTrue(
+            html_contains(
+                html, "European and domestic-cup schedules are not yet modeled directly"
+            )
+        )
 
     def test_decision_center_grid_does_not_stretch_short_panels(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
@@ -757,8 +806,10 @@ class DashboardRenderTests(unittest.TestCase):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
         self.assertTrue(js_contains(html, "function renderProfileComparison(profileId=null)"))
-        self.assertIn('id="profile-comparison-heading">Compare risk profiles</h2>', html)
-        self.assertIn('id="profile-comparison-subtitle">', html)
+        self.assertTrue(
+            html_contains(html, 'id="profile-comparison-heading">Compare risk profiles</h2>')
+        )
+        self.assertTrue(html_contains(html, 'id="profile-comparison-subtitle">'))
         comparison_start = js_search(html, "function renderProfileComparison(profileId=null)")
         comparison_end = js_search(
             html, "\nfunction renderDecision(profileId=null){", comparison_start
@@ -981,7 +1032,7 @@ class DashboardRenderTests(unittest.TestCase):
 
         self.assertIn('id="view-squad" class="view active"', html)
         self.assertNotIn('id="view-overview" class="view active"', html)
-        self.assertIn('data-view="squad">My Team</button>', html)
+        self.assertTrue(html_contains(html, 'data-view="squad">My Team</button>'))
         self.assertTrue(js_contains(html, "showView(titles[context.view]?context.view:'squad')"))
 
     def test_renders_manager_profile_form(self):
@@ -989,7 +1040,7 @@ class DashboardRenderTests(unittest.TestCase):
 
         self.assertIn('id="profile-settings"', html)
         self.assertIn('id="view-profile" class="view"', html)
-        self.assertIn('data-view="profile">My Profile</button>', html)
+        self.assertTrue(html_contains(html, 'data-view="profile">My Profile</button>'))
         self.assertIn('id="profile-form"', html)
         self.assertIn('id="profile-team-id"', html)
         self.assertIn('id="profile-timezone"', html)
@@ -1023,18 +1074,28 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertNotIn("Account boundary", html)
         # The genuinely informative half of each subtitle survives -- only the reassurance clause
         # was stripped, not the whole line.
-        self.assertIn('<h2>Look up a team</h2><span class="muted">Nothing is saved</span>', html)
-        self.assertIn(
-            '<h2>Deadline reminders</h2><span class="muted">One email before each gameweek deadline</span>',
-            html,
+        self.assertTrue(
+            html_contains(
+                html, '<h2>Look up a team</h2><span class="muted">Nothing is saved</span>'
+            )
         )
-        self.assertIn(
-            '<h2>Contact Us</h2><span class="muted">Report a bug, request a feature, or leave feedback</span>',
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                '<h2>Deadline reminders</h2><span class="muted">One email before each gameweek deadline</span>',
+            )
         )
-        self.assertIn(
-            'Get release notes by email</h2><span class="muted">One email each time a new entry publishes</span>',
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                '<h2>Contact Us</h2><span class="muted">Report a bug, request a feature, or leave feedback</span>',
+            )
+        )
+        self.assertTrue(
+            html_contains(
+                html,
+                'Get release notes by email</h2><span class="muted">One email each time a new entry publishes</span>',
+            )
         )
         # Issue #27: /api/profile is one of the four endpoints the shared refresh token no
         # longer gates -- the save request must not send it.
@@ -1065,7 +1126,7 @@ class DraftSquadTabRenderTests(unittest.TestCase):
     def test_nav_button_and_view_section_render(self):
         html = render_dashboard(self._STATE)
 
-        self.assertIn('data-view="draft">Draft Squad</button>', html)
+        self.assertTrue(html_contains(html, 'data-view="draft">Draft Squad</button>'))
         self.assertIn('id="view-draft" class="view"', html)
         self.assertIn('<option value="draft">Draft Squad</option>', html)
 
@@ -1085,7 +1146,7 @@ class DraftSquadTabRenderTests(unittest.TestCase):
 
         self.assertIn('id="draft-purpose-banner"', html)
         self.assertIn("Preseason only", html)
-        self.assertIn("baselined off whatever you declare", html)
+        self.assertTrue(html_contains(html, "baselined off whatever you declare"))
 
     def test_draft_health_panel_renders(self):
         html = render_dashboard(self._STATE)
@@ -1105,10 +1166,12 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         # must stay just as visible, not a one-time toast, since the 15-player squad IS persisted.
         html = render_dashboard(self._STATE)
 
-        self.assertIn(
-            '<div id="draft-pitch-session-notice" class="limitation-note" role="note">'
-            "Players land straight on the pitch below",
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                '<div id="draft-pitch-session-notice" class="limitation-note" role="note">'
+                "Players land straight on the pitch below",
+            )
         )
         self.assertIn('id="draft-pitch-empty"', html)
         self.assertIn('id="draft-pitch"', html)
@@ -1263,10 +1326,14 @@ class DraftSquadTabRenderTests(unittest.TestCase):
         html = render_dashboard(self._STATE)
 
         notice_start = html.index('id="draft-pitch-session-notice"')
-        notice_end = html.index("</div>", notice_start)
+        notice_end = html_search(html, "</div>", notice_start)
         notice_text = html[notice_start:notice_end]
-        self.assertIn("not saved to your account", notice_text)
-        self.assertIn("reset if you reload the page or change who's in the squad", notice_text)
+        self.assertTrue(html_contains(notice_text, "not saved to your account"))
+        self.assertTrue(
+            html_contains(
+                notice_text, "reset if you reload the page or change who's in the squad"
+            )
+        )
 
     def test_js_pitch_and_health_helpers_present(self):
         html = render_dashboard(self._STATE)
@@ -1313,23 +1380,29 @@ class ProfileGatedTabsTests(unittest.TestCase):
     def test_empty_states_link_clearly_to_my_profile(self):
         html = render_dashboard({"fpl": {}, "transfers": [], "sources": []})
 
-        self.assertIn(
-            '<button class="refresh-button" type="button" data-go="profile" '
-            'style="margin-top:12px">Go to My Profile</button></div><div id="decisions-content">',
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                '<button class="refresh-button" type="button" data-go="profile" '
+                'style="margin-top:12px">Go to My Profile</button></div><div id="decisions-content">',
+            )
         )
-        self.assertIn(
-            '<button class="refresh-button" type="button" data-go="profile" '
-            'style="margin-top:12px">Go to My Profile</button></div><div id="performance-content">',
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                '<button class="refresh-button" type="button" data-go="profile" '
+                'style="margin-top:12px">Go to My Profile</button></div><div id="performance-content">',
+            )
         )
-        self.assertIn(
-            "Decision Center recommendations are personalized to your team", html,
+        self.assertTrue(
+            html_contains(html, "Decision Center recommendations are personalized to your team")
         )
-        self.assertIn(
-            "Model Performance tracks how this season's recommendations for your team compared "
-            "with real results",
-            html,
+        self.assertTrue(
+            html_contains(
+                html,
+                "Model Performance tracks how this season's recommendations for your team "
+                "compared with real results",
+            )
         )
 
     def test_gate_toggles_the_content_wrapper_off_the_same_not_configured_signal_used_elsewhere(self):
@@ -1505,7 +1578,7 @@ class MobileResponsivePassTests(unittest.TestCase):
     def test_filters_trigger_wraps_the_filter_shell_as_a_sheet(self):
         html = self._render()
 
-        self.assertIn('id="filters-trigger" class="filters-trigger"', html)
+        self.assertTrue(html_contains(html, 'id="filters-trigger" class="filters-trigger"'))
         self.assertIn('id="filters-trigger-count" class="filters-trigger-count" hidden', html)
         self.assertIn('id="filter-shell"', html)
         self.assertTrue(js_contains(html, 'byId("filters-trigger")'))
