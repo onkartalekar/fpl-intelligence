@@ -2414,3 +2414,298 @@ dialog.confirm-sheet {
 .confirm-sheet-confirm:active {
   filter: brightness(.92);
 }
+
+/* ============================================================================================
+   Getting Started onboarding flow (issue 257): sidebar entry, welcome dialog (a wide-viewport
+   override of the shared dialog.sheet primitive above, mounted via mobile-shell.js's mountSheet
+   the same as nav-more-sheet/app-sheet/confirm-sheet), and the floating pill/card tracker.
+   Advisory only, per plans/issue-257-onboarding-wizard.md's B2 decision: nothing here disables
+   [data-view] nav or adds a backdrop outside the welcome dialog itself.
+   ============================================================================================ */
+.onboarding-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 14px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+@media (hover: hover) and (pointer: fine) {
+  .onboarding-entry:hover {
+    border-color: var(--accent);
+  }
+}
+.onboarding-entry-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.onboarding-entry-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+}
+.onboarding-entry-progress {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--tag-neutral-fg);
+  background: var(--tag-neutral-bg);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+/* dialog.sheet's own base rules (above) already give this the mobile bottom-sheet look for
+   free; this override turns it into a centered modal above the 760px breakpoint mobile-shell.js
+   already treats as the mobile/desktop line elsewhere in this file. */
+@media (min-width: 761px) {
+  dialog.onboarding-welcome {
+    inset: 0;
+    margin: auto;
+    width: min(480px,calc(100% - 48px));
+    max-height: min(640px,calc(100% - 48px));
+    border-top: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 24px 64px var(--sheet-shadow);
+    animation: none;
+  }
+  dialog.onboarding-welcome[open] {
+    animation: onboarding-fade-in .16s ease-out;
+  }
+  dialog.onboarding-welcome .sheet-handle {
+    display: none;
+  }
+}
+@keyframes onboarding-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.onboarding-welcome-body {
+  display: grid;
+  gap: 14px;
+}
+.onboarding-heading {
+  font-size: 19px;
+  margin: 0;
+}
+.onboarding-lead {
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+.onboarding-step-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+.onboarding-step-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.onboarding-step-n {
+  flex: 0 0 16px;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 11px;
+}
+.onboarding-step-title {
+  flex: 1;
+  color: var(--text);
+}
+.onboarding-step-tab {
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.onboarding-text-link {
+  background: none;
+  border: 0;
+  color: var(--blue);
+  font-size: 13px;
+  padding: 6px 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.onboarding-footnote {
+  font-size: 11px;
+}
+
+/* Floating tracker: pill and card are mutually exclusive, not a modal -- position:fixed chrome
+   that sits above the page with no backdrop, so [data-view] nav stays clickable throughout. */
+.onboarding-tracker {
+  position: fixed;
+  z-index: 8;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: 320px;
+  max-width: calc(100% - 32px);
+}
+.onboarding-pill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 15px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--panel2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 24px var(--control-shadow);
+}
+.onboarding-pill-dots {
+  display: flex;
+  gap: 3px;
+}
+.onboarding-pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.onboarding-pill-dot.done {
+  background: var(--accent);
+}
+.onboarding-card {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 16px 40px var(--control-shadow);
+  display: grid;
+  gap: 12px;
+}
+.onboarding-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.onboarding-card-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.onboarding-kicker {
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-size: 10px;
+  font-weight: 750;
+  color: var(--accent);
+}
+.onboarding-card-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.onboarding-dots {
+  display: flex;
+  gap: 4px;
+}
+.onboarding-dot {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+.onboarding-dot.current {
+  background: var(--blue);
+}
+.onboarding-dot.done {
+  background: var(--accent);
+}
+.onboarding-card-why {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.onboarding-team-field {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  border: 1px solid var(--line);
+}
+.onboarding-team-field-row {
+  display: flex;
+  gap: 8px;
+}
+.onboarding-team-field-row input {
+  flex: 1;
+  min-width: 0;
+}
+.onboarding-team-field-row button {
+  flex: 0 0 auto;
+}
+.onboarding-team-field-alt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+.onboarding-team-field-alt .onboarding-text-link {
+  font-size: 11.5px;
+  padding: 2px 0;
+}
+.onboarding-team-message {
+  font-size: 11.5px;
+  min-height: 15px;
+}
+.onboarding-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  body.js-mobile-shell .onboarding-tracker {
+    right: 14px;
+    left: 14px;
+    bottom: calc(76px + env(safe-area-inset-bottom) + 12px);
+    width: auto;
+  }
+}
+
+/* Each element above sets an unconditional `display` for its shown state, which -- author CSS
+   always wins over the UA stylesheet's `[hidden] { display: none }`, regardless of specificity,
+   same gotcha dialog.sheet's own comment above already documents -- would otherwise render it
+   permanently, [hidden] attribute or not. These override rules restore the actual toggle. */
+.onboarding-entry[hidden],
+.onboarding-tracker[hidden],
+.onboarding-card[hidden],
+.onboarding-team-field[hidden],
+.onboarding-pill[hidden] {
+  display: none;
+}
