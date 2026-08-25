@@ -1,7 +1,9 @@
 // Getting Started onboarding flow (issue #257): a guided, advisory sequence through the five
-// tabs a first-time visitor actually needs -- Draft Squad, Decision Center, Player Explorer,
-// My Profile (optional), What's New -- laid over the existing shell rather than replacing any of
-// it. See plans/issue-257-onboarding-wizard.md for the design decisions this implements:
+// tabs a first-time visitor actually needs -- step 1 is Draft Squad in preseason or My Profile
+// once the season is underway (see buildOnboardingSteps below), then Decision Center, Player
+// Explorer, My Profile (optional), What's New -- laid over the existing shell rather than
+// replacing any of it. See plans/issue-257-onboarding-wizard.md for the design decisions this
+// implements:
 //   - Advisory, not blocking (B2): nothing here ever disables a [data-view] nav button, matching
 //     applyProfileGates()'s own precedent of swapping content rather than gating navigation.
 //   - Progress persisted client-side (A3), in localStorage like the theme toggle
@@ -10,51 +12,75 @@
 //   - Draft Squad first, not My Profile: neither /api/profile nor /api/draft-squad validates
 //     team_id against a real FPL account (both just persist to profiles.db), so a visitor can
 //     save a placeholder team_id straight from this flow and come back to My Profile later.
+//   - Step 1 itself is gated on the season, not hardcoded to Draft Squad: a saved draft squad
+//     only ever feeds a recommendation while build_transfer_decisions still reports
+//     "waiting_for_gw2" (transfer_decisions.py, event <= 1) -- state.fpl.season_phase is only
+//     "preseason" under that exact same condition (summarize_bootstrap, fpl_data.py: "preseason"
+//     iff next_event.id === 1). Once the season has moved past that window (in_season -- which is
+//     already true today), Draft Squad "stops being used" per its own tab copy
+//     (dashboard-shell.html's #draft-purpose-banner) and recommending it here would send a
+//     first-time visitor to build a squad that feeds nothing. Step 1 becomes "connect your real
+//     team" (My Profile) instead.
 const ONBOARDING_STORAGE_KEY = "fpl-onboarding-progress";
 
-const ONBOARDING_STEPS = [
-  {
-    id: "team",
-    title: "Build a draft squad",
-    view: "draft",
-    tabLabel: "Draft Squad",
-    cta: "Open Draft Squad",
-    why: "Fifteen legal players inside £100.0m. Nothing is published to FPL — this draft is the baseline every recommendation downstream is computed from.",
-  },
-  {
-    id: "read",
-    title: "Read the weekly decision",
-    view: "decisions",
-    tabLabel: "Decision Center",
-    cta: "Open Decision Center",
-    why: "Decision Center returns a recommended XI, a captain, and the model's reasoning. It's a recommendation only — the change is still yours to make in FPL.",
-  },
-  {
-    id: "research",
-    title: "Check prices and confirmed news",
-    view: "players",
-    tabLabel: "Player Explorer",
-    cta: "Open Player Explorer",
-    why: "Player Explorer carries official prices, ownership and availability. Transfers & News carries confirmed first-party records, nothing speculative.",
-  },
-  {
-    id: "tune",
-    title: "Set your profile",
-    view: "profile",
-    tabLabel: "My Profile",
-    optional: true,
-    cta: "Open My Profile",
-    why: "Timezone decides when deadline reminders arrive; risk profile decides how much variance the model accepts. Balanced is a reasonable default.",
-  },
-  {
-    id: "rhythm",
-    title: "Expect a weekly cadence",
-    view: "whats-new",
-    tabLabel: "What's New",
-    cta: "Open What's New",
-    why: "Data refreshes on a weekly cadence and What's New records what changed. This isn't a one-time setup.",
-  },
-];
+function buildOnboardingSteps() {
+  const preseason = (state.fpl || {}).season_phase === "preseason";
+  const connectStep = preseason
+    ? {
+        id: "team",
+        title: "Build a draft squad",
+        view: "draft",
+        tabLabel: "Draft Squad",
+        cta: "Open Draft Squad",
+        requiresTeam: true,
+        why: "Fifteen legal players inside £100.0m. Nothing is published to FPL — this draft is the baseline every recommendation downstream is computed from.",
+      }
+    : {
+        id: "team",
+        title: "Connect your team",
+        view: "profile",
+        tabLabel: "My Profile",
+        cta: "Open My Profile",
+        requiresTeam: true,
+        why: "Enter your FPL team ID (from your FPL entry URL) to see your real squad and unlock Decision Center. Draft Squad is a preseason-only tool — it isn't used once the season is underway.",
+      };
+  return [
+    connectStep,
+    {
+      id: "read",
+      title: "Read the weekly decision",
+      view: "decisions",
+      tabLabel: "Decision Center",
+      cta: "Open Decision Center",
+      why: "Decision Center returns a recommended XI, a captain, and the model's reasoning. It's a recommendation only — the change is still yours to make in FPL.",
+    },
+    {
+      id: "research",
+      title: "Check prices and confirmed news",
+      view: "players",
+      tabLabel: "Player Explorer",
+      cta: "Open Player Explorer",
+      why: "Player Explorer carries official prices, ownership and availability. Transfers & News carries confirmed first-party records, nothing speculative.",
+    },
+    {
+      id: "tune",
+      title: "Set your profile",
+      view: "profile",
+      tabLabel: "My Profile",
+      optional: true,
+      cta: "Open My Profile",
+      why: "Timezone decides when deadline reminders arrive; risk profile decides how much variance the model accepts. Balanced is a reasonable default.",
+    },
+    {
+      id: "rhythm",
+      title: "Expect a weekly cadence",
+      view: "whats-new",
+      tabLabel: "What's New",
+      cta: "Open What's New",
+      why: "Data refreshes on a weekly cadence and What's New records what changed. This isn't a one-time setup.",
+    },
+  ];
+}
 
 function loadOnboardingProgress() {
   try {
@@ -67,6 +93,8 @@ function loadOnboardingProgress() {
 }
 
 function setupOnboarding() {
+  const ONBOARDING_STEPS = buildOnboardingSteps();
+  const connectStep = ONBOARDING_STEPS.find((s) => s.requiresTeam) || ONBOARDING_STEPS[0];
   const welcomeDialog = byId("onboarding-welcome");
   const entryButton = byId("onboarding-entry");
   const entryProgress = byId("onboarding-entry-progress");
@@ -107,8 +135,8 @@ function setupOnboarding() {
     return ONBOARDING_STEPS.find((s) => s.id === onboarding.focus) || ONBOARDING_STEPS[0];
   }
   // Marks a step done and moves focus to the next not-yet-done step (or stays on the last one
-  // once everything's done) -- called on CTA click for every step except "team", which only
-  // completes via an actual saved team_id (see saveTeamId below).
+  // once everything's done) -- called on CTA click for every step except the `requiresTeam` one,
+  // which only completes via an actual saved team_id (see saveTeamId below).
   function advance(id) {
     if (!isDone(id)) onboarding.done = onboarding.done.concat([id]);
     const next = ONBOARDING_STEPS.find((s) => !isDone(s.id));
@@ -159,7 +187,7 @@ function setupOnboarding() {
         }),
       );
 
-    const showTeamField = cur.id === "team" && !hasTeam() && !done;
+    const showTeamField = !!cur.requiresTeam && !hasTeam() && !done;
     byId("onboarding-team-field").hidden = !showTeamField;
     byId("onboarding-card-why").hidden = showTeamField;
     byId("onboarding-card-why").textContent = done
@@ -247,8 +275,8 @@ function setupOnboarding() {
       message.textContent = placeholder
         ? `Saved as ${teamId}. Swap in your real FPL team ID any time from My Profile.`
         : "Saved.";
-      showView("draft");
-      advance("team");
+      showView(connectStep.view);
+      advance(connectStep.id);
     } catch (error) {
       message.textContent = `Save failed: ${error.message}`;
     } finally {
@@ -274,10 +302,10 @@ function setupOnboarding() {
   });
   byId("onboarding-start").addEventListener("click", () => {
     onboarding.phase = "card";
-    onboarding.focus = "team";
+    onboarding.focus = connectStep.id;
     persist();
     closeSheet(welcomeDialog);
-    showView("draft");
+    showView(connectStep.view);
     render();
   });
   byId("onboarding-not-now").addEventListener("click", () => closeSheet(welcomeDialog));
@@ -314,6 +342,7 @@ function setupOnboarding() {
     saveTeamId(placeholderId, true);
   });
 
+  byId("onboarding-start").textContent = `Start with ${connectStep.tabLabel}`;
   mountSheet(welcomeDialog);
   renderWelcomeSteps();
   render();
