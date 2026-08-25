@@ -68,6 +68,7 @@ _DASHBOARD_JS_FILES = [
     "workspace-context.js",
     "profile-forms.js",
     "draft-squad.js",
+    "onboarding.js",
     "gates-and-bootstrap.js",
 ]
 _DASHBOARD_JS = "".join(

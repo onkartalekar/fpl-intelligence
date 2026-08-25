@@ -46,3 +46,4 @@ setupContactForm();
 setupWhatsNew();
 restoreWorkspaceContext();
 setupMobileShell();
+setupOnboarding();

@@ -17,6 +17,14 @@
     <div class="app">
       <aside class="sidebar">
         <div class="brand"><strong>FPL Intelligence</strong><span>2026/27 workspace</span></div>
+        <button type="button" id="onboarding-entry" class="onboarding-entry" hidden>
+          <svg class="onboarding-entry-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 6h11"></path><path d="M9 12h9"></path><path d="M9 18h7"></path>
+            <path d="M3.5 6.5l1.4 1.4L7.5 5"></path>
+          </svg>
+          <span class="onboarding-entry-label">Getting started</span>
+          <span id="onboarding-entry-progress" class="onboarding-entry-progress"></span>
+        </button>
         <nav class="nav" aria-label="Workspace navigation">
           <button data-view="overview">Preseason overview</button>
           <button data-view="decisions">Decision Center</button
@@ -1237,6 +1245,79 @@
         </div>
       </div>
     </dialog>
+    <!-- Getting Started onboarding flow (issue #257): a guided, advisory tour of the five tabs a
+         first-time visitor actually needs, in order. Reuses the mobile-shell.js sheet primitive
+         for the welcome dialog (see onboarding.js) rather than a second overlay mechanism; the
+         floating tracker below it is plain fixed-position chrome, not a dialog, since nav must
+         stay reachable while it's open -- see plans/issue-257-onboarding-wizard.md's B2 decision. -->
+    <dialog id="onboarding-welcome" class="sheet onboarding-welcome" aria-labelledby="onboarding-welcome-title">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span id="onboarding-welcome-title" class="sheet-title">Getting started</span
+        ><button type="button" class="sheet-close" data-sheet-close aria-label="Close">
+          &times;
+        </button>
+      </div>
+      <div class="sheet-body onboarding-welcome-body">
+        <h2 class="onboarding-heading">Five steps, in order</h2>
+        <p class="muted onboarding-lead">
+          This workspace has twelve tabs. These five, in this order, are the path from nothing to
+          a weekly decision. Nothing is required -- every tab stays reachable while you go.
+        </p>
+        <div id="onboarding-welcome-steps" class="onboarding-step-list"></div>
+        <div class="onboarding-actions">
+          <button type="button" id="onboarding-start" class="refresh-button">
+            Start with Draft Squad</button
+          ><button type="button" id="onboarding-not-now" class="onboarding-text-link">
+            Not now
+          </button>
+        </div>
+        <div class="onboarding-footnote muted">
+          Progress is kept in this browser. Reopen it any time from the sidebar.
+        </div>
+      </div>
+    </dialog>
+
+    <div id="onboarding-tracker" class="onboarding-tracker" hidden>
+      <div id="onboarding-card" class="onboarding-card" hidden>
+        <div class="onboarding-card-header">
+          <div class="onboarding-card-heading">
+            <span id="onboarding-card-kicker" class="onboarding-kicker"></span>
+            <span id="onboarding-card-title" class="onboarding-card-title"></span>
+          </div>
+          <button type="button" id="onboarding-collapse" class="sheet-close" aria-label="Collapse">
+            &minus;
+          </button>
+        </div>
+        <div id="onboarding-card-dots" class="onboarding-dots"></div>
+        <div id="onboarding-card-why" class="onboarding-card-why muted"></div>
+        <div id="onboarding-team-field" class="onboarding-team-field field" hidden>
+          <label for="onboarding-team-id">FPL team ID</label>
+          <div class="onboarding-team-field-row">
+            <input id="onboarding-team-id" type="text" inputmode="numeric" placeholder="e.g. 1234567">
+            <button type="button" id="onboarding-team-save" class="refresh-button">Save</button>
+          </div>
+          <div class="onboarding-team-field-alt">
+            <span class="muted">Don't have one yet?</span>
+            <button type="button" id="onboarding-team-skip" class="onboarding-text-link">
+              Continue with a placeholder
+            </button>
+          </div>
+          <div id="onboarding-team-message" class="onboarding-team-message muted"></div>
+        </div>
+        <div class="onboarding-card-actions">
+          <button type="button" id="onboarding-primary" class="refresh-button"></button
+          ><button type="button" id="onboarding-mark-done" class="onboarding-text-link">
+            Mark done
+          </button>
+        </div>
+      </div>
+      <button type="button" id="onboarding-pill" class="onboarding-pill" hidden>
+        <span id="onboarding-pill-dots" class="onboarding-pill-dots"></span>
+        <span id="onboarding-pill-label"></span>
+      </button>
+    </div>
+
     <script id="dashboard-data" type="application/json">
       __DASHBOARD_DATA__
     </script>
