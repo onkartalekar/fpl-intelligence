@@ -160,12 +160,15 @@ No password is stored. Private state is entered manually unless a separately app
 - Free Hit: Compare against the no-chip squad
 - Wildcard: Require a structural five-gameweek case
 - Bench Boost and Triple Captain: Evaluate marginal chip value only
+- Chip timing (issue #256): raise each chip's marginal-value bar the earlier in the season it is, converging to the unmodified profile threshold by Gameweek 10 -- playing a chip early forecloses using it at a possibly better spot later, so the same marginal edge that clears the bar in Gameweek 20 must be larger to clear it in Gameweek 2
 
 ### Weekly transfer and chip contract
 
 Starting with GW2, every explicitly triggered refresh must identify the official next event and project that event plus the following four. For Conservative, Balanced, and Aggressive profiles, compare rolling the transfer against making one transfer through the current official maximum number of banked free transfers (issue #181; previously capped at two regardless of how many transfers were actually available), using the reconstructed free-transfer allowance to determine which of those transfers incur a hit. Use published selling prices and bank; subtract four points for each transfer beyond the reconstructed free-transfer allowance. Rolling is a real scenario with future flexibility value.
 
 The weekly planner uses a receding five-gameweek horizon. It searches legal roll, single-transfer, and double-transfer branches per gameweek step -- issue #181 widened the immediate-gameweek comparison above beyond two transfers, but the planner's own per-step branching remains scoped to roll/single/double for now, a deliberately separate follow-on decision, not yet made. It includes immediate and future hit costs, tracks the actual available free-transfer balance through every state, caps accumulation at the current official maximum, and assigns terminal value to retained squad quality, bank, and transfer flexibility. It recommends only the immediate action. Later transfers are displayed as provisional conditional branches and are rebuilt after every explicit refresh, never as commitments.
+
+Each provisional conditional branch also carries a chip-timing signal (issue #256): a future gameweek whose already-planned squad has an unusually high or low combined fixture count relative to the plan's own other gameweeks (a double- or blank-gameweek shape) is flagged as a heads-up, so a chip decision several gameweeks out is visible now rather than only once it becomes the immediate gameweek. This is informational only -- it never names a chip, a marginal value, or a reshuffled squad, and the planner's own per-step branching still searches roll/single/double transfers exclusively, never a chip action. The exact chip decision, with a legal squad and a modeled marginal value, is still made only once that gameweek is the immediate one, by the chip-recommendation contract below.
 
 The first implemented planner is intentionally transparent about its limits: future market prices are held constant and expected minutes are not yet gameweek-specific. These limitations must be visible in the dashboard.
 
