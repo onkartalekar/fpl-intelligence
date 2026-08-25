@@ -87,7 +87,7 @@ jobs:
           echo "matrix.modules: ${{ matrix.modules }}"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect docs-only changes
         # A PR touching only non-code paths -- release-notes.yml's daily archival commit
@@ -114,12 +114,13 @@ jobs:
         id: scope
         if: github.event_name == 'pull_request'
         run: |
-          # Bug fix, confirmed live: actions/checkout@v4's default shallow checkout for a
+          # Bug fix, confirmed live on actions/checkout@v4: its default shallow checkout for a
           # pull_request event leaves only the synthetic merge commit locally -- base.sha alone
           # (fetched below) isn't enough, head.sha itself isn't a reachable object either, so a
           # diff between them failed outright with "fatal: bad object <head sha>". Fetching both
           # SHAs explicitly (each --depth=1, so this stays cheap) makes both diff endpoints real,
-          # present objects.
+          # present objects. Re-confirmed live on the @v7 bump (issue #260): default fetch depth
+          # is unchanged across majors, so this workaround is still required.
           git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
           git fetch --depth=1 origin "${{ github.event.pull_request.head.sha }}"
           changed_files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
@@ -134,7 +135,7 @@ jobs:
 
       - name: Set up Python
         if: steps.scope.outputs.skip != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
