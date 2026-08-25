@@ -1023,7 +1023,7 @@ class DashboardRenderTests(unittest.TestCase):
         html = render_dashboard(state)
 
         self.assertIn('id="my-team-summary"', html)
-        self.assertIn('id="squad-grid"', html)
+        self.assertIn('id="squad-pitch-empty"', html)
         self.assertIn("Public GW1 squad is hidden until the deadline", html)
         self.assertIn("Team ID", html)
 

@@ -880,24 +880,6 @@ dd {
   color: var(--muted);
   font-size: 12px;
 }
-.squad-grid {
-  display: grid;
-  grid-template-columns: repeat(5,minmax(0,1fr));
-  gap: 8px;
-}
-.player-card {
-  background: var(--panel2);
-  border-radius: 8px;
-  padding: 11px;
-  min-height: 74px;
-}
-.player-card strong,.player-card span {
-  display: block;
-}
-.player-card span {
-  color: var(--muted);
-  font-size: 12px;
-}
 .draft-add,.draft-remove {
   padding: 5px 10px;
   border-radius: 6px;
@@ -2004,7 +1986,7 @@ footer {
     grid-column: 2;
     text-align: left;
   }
-  .metrics,.grid,.transfer-layout,.toolbar,.more-grid,.team-summary,.squad-grid,.player-toolbar,.fixture-toolbar,.decision-layout,.decision-summary,.recommendation-grid,.recommendation-grid.compact,.profile-options,.profile-comparison,.scenario-options,.weekly-plan-summary,.chip-alternatives,.model-summary-grid,.model-detail-grid,.profile-form-grid {
+  .metrics,.grid,.transfer-layout,.toolbar,.more-grid,.team-summary,.player-toolbar,.fixture-toolbar,.decision-layout,.decision-summary,.recommendation-grid,.recommendation-grid.compact,.profile-options,.profile-comparison,.scenario-options,.weekly-plan-summary,.chip-alternatives,.model-summary-grid,.model-detail-grid,.profile-form-grid {
     grid-template-columns: 1fr;
   }
   .weekly-bench {

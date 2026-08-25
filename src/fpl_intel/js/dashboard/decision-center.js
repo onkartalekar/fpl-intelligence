@@ -841,9 +841,9 @@ function renderManager() {
     value === null || value === ""
       ? "Not yet available"
       : `£${(Number(value) / 10).toFixed(1)}m`;
-  // Mirrors the empty/placeholder handling squad-grid already does in every early-return branch
-  // below -- kept as one helper so the pitch view (added alongside the flat list, issue: pitch
-  // view for My Team) never goes stale independently of squad-grid's own message.
+  // The single source of the pitch's empty/placeholder state -- every early-return branch below
+  // funnels through this instead of setting squad-pitch-empty's text inline, so the pitch can
+  // never go stale independently of whichever message actually applies.
   const resetSquadPitch = (message) => {
     byId("squad-pitch").hidden = true;
     byId("squad-pitch").innerHTML = "";
@@ -857,9 +857,6 @@ function renderManager() {
       "Team not found, or the official FPL API is temporarily unavailable. Check the team ID and try again.";
     byId("my-team-summary").innerHTML =
       `<div class="empty">${esc(failNote)}</div>`;
-    byId("manager-status").textContent = failNote;
-    byId("squad-grid").innerHTML =
-      '<div class="empty">No public squad is connected.</div>';
     resetSquadPitch("No public squad is connected.");
     return;
   }
@@ -868,41 +865,18 @@ function renderManager() {
       "Enter your FPL team ID (from your FPL entry URL) in the Manager profile form on the My Profile view, then save.";
     byId("my-team-summary").innerHTML =
       `<div class="empty">No public team ID is configured. ${esc(setupNote)}</div>`;
-    byId("manager-status").textContent = setupNote;
-    byId("squad-grid").innerHTML =
-      '<div class="empty">No public squad is connected.</div>';
     resetSquadPitch("No public squad is connected.");
     return;
   }
   byId("my-team-summary").innerHTML =
     `<div class="team-stat"><b>${esc(manager.team_name || "Unnamed team")}</b><span>${esc(manager.manager_name || "Manager")}</span></div><div class="team-stat"><b>${esc(manager.team_id)}</b><span>Team ID</span></div><div class="team-stat"><b>${esc(value(manager.overall_rank))}</b><span>Overall rank</span></div><div class="team-stat"><b>${esc(value(manager.overall_points))}</b><span>Points</span></div><div class="team-stat"><b>${esc(money(manager.team_value))}</b><span>Team value</span></div><div class="team-stat"><b>${esc(money(manager.bank))}</b><span>Bank</span></div>`;
   if (!manager.squad_publicly_available) {
-    byId("manager-status").className = "empty";
-    byId("manager-status").textContent =
-      "Connected to the official public entry. Public GW1 squad is hidden until the deadline, so no draft players are inferred.";
-    byId("squad-grid").innerHTML =
-      '<div class="empty">Public GW1 squad is hidden until the deadline. The dashboard will load it after official FPL publishes the picks.</div>';
     resetSquadPitch(
       "Public GW1 squad is hidden until the deadline. Pitch view appears once official FPL publishes the picks.",
     );
     return;
   }
-  byId("manager-status").className = "status-good";
-  byId("manager-status").textContent =
-    `Connected · ${manager.squad.length} public picks loaded`;
-  const positions = {
-    1: "Goalkeeper",
-    2: "Defender",
-    3: "Midfielder",
-    4: "Forward",
-  };
   const positionShort = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
-  byId("squad-grid").innerHTML = manager.squad
-    .map(
-      (player) =>
-        `<div class="player-card"><strong>${esc(player.name)}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}</strong><span>${esc(positions[player.element_type] || "Player")} · ${esc(money(player.price))}</span><span>${player.position <= 11 ? "Starting XI" : `Bench ${player.position - 11}`}</span></div>`,
-    )
-    .join("");
   const startingPlayers = manager.squad
     .filter((player) => player.position <= 11)
     .slice()
