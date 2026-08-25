@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 from fpl_intel.modeling.recommendations import build_gw_recommendations
 from fpl_intel.modeling.transfer_decisions import (
+    _EARLY_SEASON_CUTOFF_EVENT,
+    _chip_timing_signals,
     _planner_player_score,
+    _season_stage_effective_threshold,
     build_draft_decisions,
     build_transfer_decisions,
     derive_free_transfers,
@@ -640,6 +643,100 @@ class MultiTransferScenarioTests(unittest.TestCase):
         # outcome, not just that scenarios are generated and never chosen.
         winners = {row["recommendation"]["action"] for row in result["profiles"]}
         self.assertIn("multi_transfer", winners)
+
+
+class ChipTimingTests(unittest.TestCase):
+    """Issue #256: (A1) chip thresholds gain a season-stage adjustment, (B2) the 5-GW plan gains
+    a heads-up fixture-shape signal for a future double/blank-gameweek-looking week."""
+
+    def test_effective_threshold_is_unchanged_at_and_after_the_cutoff(self):
+        for threshold in (18.0, -30.0, 65.0, 9.0):
+            self.assertEqual(_season_stage_effective_threshold(threshold, _EARLY_SEASON_CUTOFF_EVENT), threshold)
+            self.assertEqual(_season_stage_effective_threshold(threshold, _EARLY_SEASON_CUTOFF_EVENT + 20), threshold)
+
+    def test_effective_threshold_raises_the_bar_early_regardless_of_sign(self):
+        # A positive threshold moves further above zero (harder to clear from below).
+        self.assertGreater(_season_stage_effective_threshold(18.0, 2), 18.0)
+        # A negative threshold moves *toward* zero -- also harder to clear (see the function's own
+        # docstring for why a plain `threshold * multiplier` gets this backwards for a negative
+        # base, and issue #256's plan doc for the reasoning in full).
+        self.assertGreater(_season_stage_effective_threshold(-30.0, 2), -30.0)
+        self.assertLessEqual(_season_stage_effective_threshold(-30.0, 2), 0.0)
+
+    def test_effective_threshold_stays_reachable_not_impossible(self):
+        # The adjustment must raise the bar, not put it out of reach -- confirmed generally here
+        # (a marginal value of double the raw threshold always still clears, even at GW1) and
+        # against real squad-quality data at realistic scale in plans/issue-256-chip-timing.md.
+        for threshold in (18.0, 22.0, 65.0):
+            # event 1 is where the doubling is at its strongest (extra == max multiplier exactly),
+            # so equality there is expected, not a bug -- assertLessEqual, not assertLess.
+            self.assertLessEqual(_season_stage_effective_threshold(threshold, 1), threshold * 2)
+
+    def test_gw2_borderline_chip_that_used_to_barely_clear_now_holds(self):
+        # Before issue #256, this exact fixture's aggressive-profile Bench Boost cleared its raw
+        # threshold by only +0.4 (marginal 14.4 vs threshold 14.0) -- a real, already-present
+        # barely-clearing case (bboost/3xc's thresholds are untouched by #184, so this predates
+        # #256 entirely), the same shape of false positive confirmed live on team 364759's real
+        # GW2 data (Free Hit cleared by only +0.4 there). No threshold patching needed to
+        # reproduce it.
+        bootstrap, fixtures, manager = gw2_inputs()
+        result = build_transfer_decisions(bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00")
+        aggressive = next(row for row in result["profiles"] if row["id"] == "aggressive")
+        bboost = next(row for row in aggressive["chip_recommendation"]["alternatives"] if row["chip"] == "bboost")
+        self.assertEqual(bboost["marginal_value"], 14.4)
+        self.assertEqual(bboost["threshold"], 14.0)  # the raw constant -- still disclosed unchanged
+        self.assertGreater(bboost["effective_threshold"], bboost["threshold"])
+        self.assertLess(bboost["value_above_threshold"], 0)
+        self.assertEqual(aggressive["chip_recommendation"]["action"], "hold")
+
+    def test_chip_timing_signals_flags_a_double_gameweek_shaped_spike(self):
+        path = [
+            {"event": 10, "squad_fixture_richness": 54.2},
+            {"event": 11, "squad_fixture_richness": 51.8},
+            {"event": 12, "squad_fixture_richness": 49.0},
+            {"event": 13, "squad_fixture_richness": 52.5},
+            {"event": 14, "squad_fixture_richness": 71.3},
+        ]
+        signals = _chip_timing_signals(path)
+        self.assertEqual(set(signals.keys()), {14})
+        self.assertIn("double gameweek", signals[14])
+        self.assertIn("Gameweek 14", signals[14])
+
+    def test_chip_timing_signals_flags_a_blank_gameweek_shaped_dip(self):
+        path = [
+            {"event": 10, "squad_fixture_richness": 50.0},
+            {"event": 11, "squad_fixture_richness": 52.0},
+            {"event": 12, "squad_fixture_richness": 10.0},
+            {"event": 13, "squad_fixture_richness": 49.0},
+            {"event": 14, "squad_fixture_richness": 51.0},
+        ]
+        signals = _chip_timing_signals(path)
+        self.assertEqual(set(signals.keys()), {12})
+        self.assertIn("blank gameweek", signals[12])
+        self.assertIn("Gameweek 12", signals[12])
+
+    def test_chip_timing_signals_empty_when_no_week_stands_out(self):
+        path = [{"event": event, "squad_fixture_richness": 50.0 + event} for event in range(10, 15)]
+        self.assertEqual(_chip_timing_signals(path), {})
+
+    def test_chip_timing_signals_empty_for_fewer_than_two_weeks(self):
+        self.assertEqual(_chip_timing_signals([]), {})
+        self.assertEqual(_chip_timing_signals([{"event": 10, "squad_fixture_richness": 50.0}]), {})
+
+    def test_conditional_branches_carry_chip_signal_defaulting_to_none(self):
+        # gw2_inputs()'s synthetic fixtures give every team exactly one fixture per event (see
+        # tests/test_recommendations.py's sample_fixtures) -- no double/blank gameweeks by
+        # construction, so nothing should fire here. Confirms the field is always present (so a
+        # frontend can rely on it) even when there's nothing to flag.
+        bootstrap, fixtures, manager = gw2_inputs()
+        result = build_transfer_decisions(bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00")
+        found_any_branch = False
+        for profile in result["profiles"]:
+            for branch in profile["multiweek_plan"]["conditional_branches"]:
+                found_any_branch = True
+                self.assertIn("chip_signal", branch)
+                self.assertIsNone(branch["chip_signal"])
+        self.assertTrue(found_any_branch, "fixture should produce at least one conditional branch to check")
 
 
 if __name__ == "__main__":

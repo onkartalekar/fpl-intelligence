@@ -262,3 +262,42 @@ Two things to confirm with the user before implementation starts:
 
 **Decided (2026-08-24): build A1, A2, and B2.** B1 stays declined, B3 and B4 stay deferred as
 scoped above. Implementation proceeds on this same branch/issue (`issue-256-chip-timing`).
+
+## A1 implementation: formula chosen and verified
+
+**Formula.** `effective_threshold = threshold + abs(threshold) * extra`, where `extra` decays
+linearly from `_EARLY_SEASON_MAX_EXTRA_MULTIPLIER` (1.0, i.e. doubling) at event 1 to `0.0` at
+`_EARLY_SEASON_CUTOFF_EVENT` (10) and beyond. Adding a magnitude-proportional penalty (rather than
+multiplying the signed threshold) was necessary, not stylistic: conservative's freehit threshold is
+negative (-30.0), and multiplying a negative number by something greater than 1 makes it *more*
+negative -- a *lower*, easier-to-clear bar, backwards from the intent. Scaling by the threshold's
+own `abs()` and adding it back raises the bar correctly regardless of sign (implementation and full
+reasoning: `transfer_decisions.py`'s `_season_stage_effective_threshold`).
+
+**Verified (b): the real false-positive is suppressed.** Team 364759's real GW2 numbers now
+compute (balanced profile): Wildcard effective threshold 34.0 vs marginal 33.9 (no longer clears,
+was +15.9 over the raw 18.0); Free Hit effective threshold 28.3 vs marginal 15.4 (no longer clears,
+was +0.4 over the raw 15.0). The exact same shape is already present in the committed unit-test
+fixture (`tests/test_transfer_decisions.py`'s `gw2_inputs()`): aggressive Bench Boost cleared its
+raw threshold by only +0.4 (14.4 vs 14.0) before this change -- now suppressed (effective threshold
+26.4) -- used as this issue's committed regression test since it needs no threshold patching to
+reproduce.
+
+**Verified (a): a genuinely bad squad still clears, at realistic scale.** The unit-test fixture's
+28-player pool is too small to demonstrate this directly (its optimizer has too little room to
+improve a downgraded squad, capping Wildcard's marginal value around ~17 even at maximum downgrade
+severity -- nowhere near the ~34-42 raised bars). Re-ran at `scripts/benchmark_transfer_decisions.py`'s
+realistic 573-player scale instead, downgrading progressively more of a real squad's 15 picks to
+the worst available same-position replacement, at GW2:
+
+| Downgraded picks | conservative best | balanced best | aggressive best |
+|---|---|---|---|
+| 0 | 3xc, -12.7 | 3xc, -10.8 | 3xc, -9.0 |
+| 9/15 | wildcard, -13.0 | freehit, -10.5 | wildcard, -8.1 |
+| 12/15 | wildcard, -11.6 | **wildcard, +9.7** | **wildcard, +33.6** |
+
+(Values are `marginal_value - effective_threshold` for whichever candidate is highest.) At 12/15
+picks downgraded -- a genuinely broken squad -- Wildcard clears the raised GW2 bar comfortably for
+balanced and aggressive. Conservative stays cautious even here, consistent with its existing
+design (already the most reluctant profile to churn pre-#256). Confirms the adjustment raises the
+bar without making it unreachable.

@@ -50,6 +50,49 @@ _THRESHOLDS = {
     "balanced": {"wildcard": 18.0, "freehit": 15.0, "bboost": 16.0, "3xc": 8.0},
     "aggressive": {"wildcard": 20.0, "freehit": 65.0, "bboost": 14.0, "3xc": 7.0},
 }
+# Issue #256 (part A): _THRESHOLDS above has no notion of season stage -- a chip clears its bar
+# in Gameweek 2 on exactly the same terms it would in Gameweek 30, even though playing a chip
+# early forecloses using it at a possibly better spot later in the season. Confirmed live on a
+# real team (364759, GW2, balanced profile): Wildcard cleared its threshold by only +15.9 and
+# Free Hit by only +0.4 -- both barely-qualifying, one gameweek into a 38-gameweek season.
+#
+# _season_stage_threshold_multiplier raises the effective bar for events before
+# _EARLY_SEASON_CUTOFF_EVENT, converging linearly back to *exactly* today's unmodified threshold
+# at and after the cutoff (multiplier's fraction term is 0 there) -- so nothing about
+# post-cutoff behavior changes at all, matching this plan's own scoping
+# (plans/issue-256-chip-timing.md, candidate A1). Not backtest-validated -- same epistemic status
+# as _THRESHOLDS itself (see issue #184's own comment above): a reasoned heuristic, not a fitted
+# parameter. GW10 was picked as the cutoff because that's roughly when squad-affecting preseason
+# uncertainty (price moves, early-season role/form signal, international-break knock-on) has
+# mostly settled in a normal season -- a judgment call, not derived from data.
+_EARLY_SEASON_CUTOFF_EVENT = 10
+_EARLY_SEASON_MAX_EXTRA_MULTIPLIER = 1.0  # threshold's magnitude effectively doubles at event 1
+
+
+def _season_stage_threshold_multiplier(event):
+    """Returns the season-stage `extra` fraction (0 at/after the cutoff, up to
+    _EARLY_SEASON_MAX_EXTRA_MULTIPLIER at event 1) -- callers apply it via
+    _season_stage_effective_threshold, not directly, since the sign of the base threshold
+    matters (see that function's docstring)."""
+    if event >= _EARLY_SEASON_CUTOFF_EVENT:
+        return 0.0
+    fraction = max(0.0, (_EARLY_SEASON_CUTOFF_EVENT - event) / (_EARLY_SEASON_CUTOFF_EVENT - 1))
+    return _EARLY_SEASON_MAX_EXTRA_MULTIPLIER * fraction
+
+
+def _season_stage_effective_threshold(threshold, event):
+    """Raises `threshold`'s magnitude early in the season, always in the direction that makes it
+    *harder* to clear regardless of the base threshold's sign.
+
+    A plain `threshold * multiplier` breaks for a negative threshold (conservative's freehit is
+    -30.0): multiplying a negative number by something > 1 makes it *more* negative, which is a
+    *lower*, easier-to-clear bar -- the opposite of what an early-season penalty should do. Scaling
+    by the threshold's own magnitude and adding it back (rather than multiplying the signed value)
+    keeps the adjustment in the harder-to-clear direction for both a positive threshold (moves
+    further above zero) and a negative one (moves toward zero, e.g. -30.0 -> -3.3 at GW2) --
+    confirmed against both cases in plans/issue-256-chip-timing.md."""
+    extra = _season_stage_threshold_multiplier(event)
+    return threshold + abs(threshold) * extra
 
 
 def derive_free_transfers(next_event, transfers, chips_used, maximum=5):
@@ -553,6 +596,16 @@ def _planner_step(node, candidate, profile, event, relative_event, maximum_free_
     event_points = _planner_event_points(candidate["squad"], profile, relative_event, cache=cache)
     churn_penalty = {"conservative": 0.45, "balanced": 0.2, "aggressive": 0.0}[profile]
     action_value = event_points - point_cost - churn_penalty * transfer_count
+    # Issue #256 (part B2): sum every squad member's own single-event score for this step, not
+    # just the starting XI's (unlike event_points above) -- a double gameweek can matter for a
+    # bench player too (Bench Boost, Free Hit), and project_players already sums every fixture
+    # found for a team in one event (recommendations.py's _fixture_by_team/project_players), so a
+    # double/blank gameweek already shows up as a spike/dip here with no extra computation beyond
+    # calls _planner_action_candidates already made for this same candidate.
+    squad_fixture_richness = sum(
+        _planner_player_score(player, profile, relative_event, relative_event + 1, cache=cache)
+        for player in candidate["squad"]
+    )
     path_row = {
         "event": event,
         "action": candidate["action"],
@@ -561,6 +614,7 @@ def _planner_step(node, candidate, profile, event, relative_event, maximum_free_
         "free_transfers_before": node["free_transfers"],
         "free_transfers_next_event": free_next,
         "projected_event_points": round(event_points, 2),
+        "squad_fixture_richness": round(squad_fixture_richness, 2),
     }
     return {
         "squad": candidate["squad"],
@@ -602,7 +656,55 @@ def _best_planner_continuation(
     return max(beam, key=lambda node: node["plan_value"])
 
 
+# Issue #256 (part B2): how far a planned gameweek's squad_fixture_richness has to stand out from
+# the path's own other weeks before it's flagged as a chip-timing signal. Symmetric (spike and dip
+# use the same magnitude) for simplicity -- a judgment call, not fitted; matches this plan's own
+# worked example (plans/issue-256-chip-timing.md: a squad's own richness running ~28% above its
+# other planned weeks from a 3-player double gameweek).
+_CHIP_SIGNAL_DEVIATION_FRACTION = 0.25
+
+
+def _chip_timing_signals(path):
+    """Flag any future gameweek in `path` whose squad_fixture_richness stands out from the path's
+    own other weeks -- a cheap proxy for a double/blank-gameweek shape, reusing numbers
+    _planner_step already computed for the ordinary roll/single/double search (no additional
+    _optimize_squad or _planner_player_score calls beyond what that search already makes).
+
+    This is a heads-up only, not a chip verdict: it never says which chip, whether it clears that
+    chip's marginal-value threshold, or what the reshuffled squad would look like. The exact chip
+    decision is still made only once a gameweek becomes the *immediate* one, by
+    _chip_recommendation/_exclusive_chip_scenario, unchanged by this function. Consistent with
+    this planner's own disclosed limitation that future prices are held constant (see
+    build_multiweek_plan's `assumptions`) -- a precise far-future chip verdict would be unreliable
+    this far out anyway; an early-warning flag is the honest level of confidence to offer.
+
+    Returns {event: signal_text} for only the events that stand out; an event with nothing
+    unusual is simply absent, not present with a null/false value.
+    """
+    richness_values = [row["squad_fixture_richness"] for row in path]
+    if len(richness_values) < 2:
+        return {}
+    average = sum(richness_values) / len(richness_values)
+    if average <= 0:
+        return {}
+    signals = {}
+    for row in path:
+        deviation = (row["squad_fixture_richness"] - average) / average
+        if deviation >= _CHIP_SIGNAL_DEVIATION_FRACTION:
+            signals[row["event"]] = (
+                f"Your squad's combined fixtures look unusually strong for Gameweek {row['event']} "
+                "(possible double gameweek) -- reconsider your chip timing before then."
+            )
+        elif deviation <= -_CHIP_SIGNAL_DEVIATION_FRACTION:
+            signals[row["event"]] = (
+                f"Your squad's combined fixtures look unusually weak for Gameweek {row['event']} "
+                "(possible blank gameweek) -- reconsider your chip timing before then."
+            )
+    return signals
+
+
 def _conditional_branches(path, current_event):
+    signals = _chip_timing_signals(path)
     branches = []
     for row in path:
         if row["event"] <= current_event:
@@ -630,6 +732,7 @@ def _conditional_branches(path, current_event):
             "free_transfers_next_event": row["free_transfers_next_event"],
             "condition": condition,
             "commitment": False,
+            "chip_signal": signals.get(row["event"]),
         })
     return branches
 
@@ -745,7 +848,7 @@ def _chip_inventory(bootstrap, manager, event):
     return inventory
 
 
-def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas, budget, club_limit, cache=None):
+def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas, budget, club_limit, event, cache=None):
     squad = no_chip_scenario["squad"]
     lineup_view = _lineup_view(squad, profile)
     no_chip_event = lineup_view["projected_event_points_including_captain"]
@@ -791,7 +894,17 @@ def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas,
         })
     for candidate in candidates:
         candidate["threshold"] = _THRESHOLDS[profile][candidate["chip"]]
-        candidate["value_above_threshold"] = round(candidate["marginal_value"] - candidate["threshold"], 1)
+        # Issue #256 (part A): compare against the season-stage-adjusted bar, not the raw
+        # constant -- see _season_stage_effective_threshold's docstring for why this can't be a
+        # plain multiply. `threshold` itself is left unchanged in the payload (still the honest
+        # profile-baseline constant SPECIFICATION.md's chip contract requires disclosing);
+        # `effective_threshold` is the one actually decided against.
+        candidate["effective_threshold"] = round(
+            _season_stage_effective_threshold(candidate["threshold"], event), 1
+        )
+        candidate["value_above_threshold"] = round(
+            candidate["marginal_value"] - candidate["effective_threshold"], 1
+        )
     public = lambda row: {key: value for key, value in row.items() if not key.startswith("_")}
     best = max(candidates, key=lambda row: row["value_above_threshold"], default=None)
     if best and best["value_above_threshold"] > 0:
@@ -1002,7 +1115,7 @@ def build_transfer_decisions(
         scenarios = scenarios + multi_leg_scenarios
         chip = _chip_recommendation(
             profile, ordinary_recommendation, inventory, eligible, quotas, total_sale_budget, club_limit,
-            cache=event_score_cache,
+            event, cache=event_score_cache,
         )
         recommendation = ordinary_recommendation
         if chip.get("action") == "play" and chip.get("chip") in {"wildcard", "freehit"}:

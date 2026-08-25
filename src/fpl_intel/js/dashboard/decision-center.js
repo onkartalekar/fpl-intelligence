@@ -807,14 +807,26 @@ function renderWeeklyDecision(profileId = null) {
     )
     .join("");
   const chip = selected.chip_recommendation || {};
+  // Issue #256 (part A2): Wildcard's marginal_value is a 5-GW cumulative delta (it permanently
+  // rebuilds the squad) while Free Hit/Bench Boost/Triple Captain's is a single-GW delta (their
+  // effect reverts after one gameweek) -- transfer_decisions.py already tags every chip candidate
+  // with its own horizon (1 or 5), but this panel used to print all four marginal_value numbers
+  // side by side with no indication they're on different scales. Label each one explicitly rather
+  // than let a 5-GW total and a 1-GW total read as directly comparable.
+  const chipHorizonLabel = (horizon) =>
+    horizon === 5 ? "cumulative, next 5 GWs" : "this gameweek only";
+  const pickedHorizonLabel =
+    chip.action === "play" && chip.horizon
+      ? ` <span class="muted">(${chipHorizonLabel(chip.horizon)})</span>`
+      : "";
   const alternatives = (chip.alternatives || [])
     .map(
       (item) =>
-        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts<br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
+        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts <span class="muted">(${chipHorizonLabel(item.horizon)})</span><br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
     )
     .join("");
   byId("weekly-chip").innerHTML =
-    `<strong>${esc(chip.label || "Hold all chips")}</strong><p>${esc(chip.reason || "No chip recommendation is available.")}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
+    `<strong>${esc(chip.label || "Hold all chips")}</strong>${pickedHorizonLabel}<p>${esc(chip.reason || "No chip recommendation is available.")}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
   const inventory = (weekly.chip_inventory || [])
     .map(
       (item) =>
