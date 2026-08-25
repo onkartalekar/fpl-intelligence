@@ -113,6 +113,32 @@ Captain) rather than listing all four numbers as if directly comparable. Cheap, 
 and independently worth doing even if A1 is deferred -- it's a factual disclosure fix, not a
 judgment call.
 
+**Worked example.** Today's real GW2 output for team 364759 (balanced profile) renders as:
+
+```
+Wildcard        33.9 marginal xPts   Threshold 18.0
+Free Hit        15.4 marginal xPts   Threshold 15.0
+Bench Boost     10.2 marginal xPts   Threshold 16.0
+Triple Captain   7.0 marginal xPts   Threshold  8.0
+```
+
+Read top to bottom this looks like Wildcard is "roughly twice as good" as Free Hit. It isn't a fair
+comparison: `33.9` is Wildcard's gain **added up across the next 5 gameweeks** (it permanently
+rebuilds the squad, so the gain compounds every week), while `15.4` is Free Hit's gain **for this
+one gameweek only** (it reverts after). Each candidate already carries its own `horizon` field (1
+or 5, set at `transfer_decisions.py:756,759,773,789`) -- it is never rendered. After this change,
+the same numbers render as:
+
+```
+Wildcard        33.9 marginal xPts  (cumulative, next 5 GWs)   Threshold 18.0
+Free Hit        15.4 marginal xPts  (this gameweek only)       Threshold 15.0
+Bench Boost     10.2 marginal xPts  (this gameweek only)       Threshold 16.0
+Triple Captain   7.0 marginal xPts  (this gameweek only)       Threshold  8.0
+```
+
+No backend/scoring change -- `item.horizon` is already present on every candidate object returned
+to the frontend; this only changes what `decision-center.js` prints next to it.
+
 #### A3: Do nothing to scoring, disclosure-only -- DECLINE as the sole fix
 
 **Verdict: decline as sufficient on its own.** A2 alone stops the UI from *implying* an
@@ -154,6 +180,29 @@ is the honest level of confidence to offer that far out.
 **Directly answers the user's concrete example** (GW10 spotting a GW14 opportunity) without any
 horizon extension, since `relative_event=4` is already inside `horizon=5`.
 
+**Worked example.** Say it's GW10, and 3 of the manager's players are at a club whose rearranged
+cup fixture lands them two matches in GW14 (a double gameweek). Summing
+`profile_fixture_xp[profile][relative_event]` across the whole 15-player squad, for the path the
+beam search already picked, at each of the 5 planned weeks:
+
+```
+GW10 (rel 0):  54.2
+GW11 (rel 1):  51.8
+GW12 (rel 2):  49.0
+GW13 (rel 3):  52.5
+GW14 (rel 4):  71.3   <- ~35% above the other 4 planned weeks
+```
+
+GW14 stands out against the path's own other weeks and gets attached to that week's row in
+`conditional_branches` (the same list that already carries "reconsider \[transfer] before GW13"
+text today) as something like: *"GW14 looks fixture-rich for your squad -- reconsider your chip
+timing before then."* The same comparison in the other direction (several owned clubs going blank
+in the same week) would flag a week to avoid a transfer/chip on, not exploit one.
+
+Only arithmetic on numbers already sitting in memory from the existing beam search -- no new
+`_optimize_squad` or `_planner_player_score` calls beyond what today's ordinary-transfer planning
+already makes.
+
 #### B3: A moderate-cost approximate re-optimizer, run only at weeks B2 flags -- worth layering on later, not required for a first version
 
 **What:** At only the handful of `relative_event`s B2's cheap scan flags (not all 5, and not every
@@ -163,10 +212,21 @@ pools, `transfer_decisions.py:472-514`) rather than full simulated annealing -- 
 how the ordinary transfer beam search itself already avoids `_candidate_moves`'s expensive,
 unlimited exact search in favor of a cheaper top-8 approximation at each future step.
 
+**Worked example, continuing GW14 from B2 above.** The squad the path has planned for GW14 projects
+around 54 points that week (already computed by `_planner_event_points`). B3 additionally builds a
+rough "best possible XI that week" from each position's existing top-8 shortlist -- ignoring budget
+and ownership entirely, so it's an optimistic upper bound, not a real purchasable squad -- and that
+sketch comes out around 74. B3 reports the gap: *"~20 points estimated upside if you free-hit around
+GW14 -- rough estimate, refine closer to the week."* It sharpens B2's "something's up here" into "and
+it looks like about this much," without claiming to know the exact squad.
+
 **Verdict: real value, but not needed for a first version.** B2 alone already answers the request
 (surface that a chip decision is coming); B3 would only sharpen "how big" that opportunity looks
-before the gameweek is close enough for the exact evaluator to run. Worth a follow-on if B2's flags
-turn out too noisy (too many/few false positives) to be useful as-is -- not decided or built here.
+before the gameweek is close enough for the exact evaluator to run. The real, exact squad and
+marginal value still only ever get computed by today's `_chip_recommendation`/
+`_exclusive_chip_scenario` once GW14 becomes the *immediate* gameweek -- B3 never replaces that,
+it only previews roughly what those will likely say. Worth a follow-on if B2's flags turn out too
+noisy (too many/few false positives) to be useful as-is -- not decided or built here.
 
 #### B4: Extend the planning horizon beyond 5 gameweeks to catch chip windows further out -- DEFER, out of scope
 
@@ -199,3 +259,6 @@ Two things to confirm with the user before implementation starts:
   "the planner's own per-step branching remains scoped to roll/single/double... a deliberately
   separate follow-on decision, not yet made," adding chip signals there is a product-contract
   change that should be worded and confirmed the way #181's amendment was, before code changes.
+
+**Decided (2026-08-24): build A1, A2, and B2.** B1 stays declined, B3 and B4 stay deferred as
+scoped above. Implementation proceeds on this same branch/issue (`issue-256-chip-timing`).
