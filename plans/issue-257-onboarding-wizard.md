@@ -121,5 +121,80 @@ and avoids trapping existing managers.
   tabs already share `state.profile.team_id`.
 
 None of this requires new server endpoints, schema changes, or modifications to any of the five tabs'
-existing logic -- confirming #257's own "Not in scope" framing holds. Ready to hand off to
-`ship-issue` once confirmed.
+existing logic -- confirming #257's own "Not in scope" framing holds.
+
+## Update (2026-08-24): designed in Claude Design, implemented
+
+A first wireframe pass (low-fi, four artboards) confirmed the shape above was viable, then a second,
+higher-fidelity round -- built and iterated directly in Claude Design as a clickable prototype -- is
+what actually shipped: **`Getting Started Flow v2.dc.html`**, importing **`Onboarding Shell.dc.html`**
+(both mockups committed at
+[`plans/assets/issue-257-onboarding/`](assets/issue-257-onboarding/) -- serve that directory
+(`python3 -m http.server` from inside it) and open `Getting Started Flow v2.dc.html`; verified
+working that way. The component-import mechanism fetches `Onboarding Shell.dc.html` at runtime, so
+it needs http(s), not a bare `file://` double-click). The earlier wireframe pass is superseded and
+not carried forward here.
+
+**What the v2 design settled, beyond questions (a)/(b) above:**
+
+- **Full step order**: Draft Squad ("Build a draft squad") &rarr; Decision Center ("Read the weekly
+  decision") &rarr; Player Explorer ("Check prices and confirmed news") &rarr; My Profile ("Set your
+  profile", optional) &rarr; What's New ("Expect a weekly cadence"). Decision Center moved to step 2,
+  ahead of Player Explorer -- reading the model's own recommendation before doing manual research is
+  closer to what a first-time visitor actually wants to see next than research-first.
+- **Three-phase interaction model**: `welcome` (a one-time intro, auto-shown only for a genuinely
+  unconfigured, never-seen-before visitor) &rarr; `card` (an expanded step card with the current
+  step's "why" text and a CTA) &rarr; `pill` (a small collapsed indicator). Dismissing `welcome` by any
+  path -- "Not now", the close button, Escape, backdrop -- moves straight to `pill` and the flow never
+  auto-reopens itself again; the sidebar entry point and the pill are the only ways back in.
+- **The team-ID step's own inline field**, with a "Continue with a placeholder" option generating a
+  random in-range ID -- direct UI expression of this doc's own "neither entry point validates against
+  a real FPL account" finding above.
+
+**One place the real backend refined the mock's copy.** The v2 prototype's demo state optimistically
+treats any saved `team_id` (real or placeholder) as unlocking a working Decision Center recommendation.
+Tracing the real path (`compute_manager_view`, `refresh.py:489-563`) shows that isn't quite true: it
+calls `collect_public_manager` -- a real fetch against FPL's public API -- *before* ever reaching the
+draft-squad fallback, so a placeholder ID that doesn't correspond to a real FPL entry lands in
+`connection_status: "lookup_failed"` / `weekly_decisions.status: "team_not_found"`, not
+`registered_preseason`. That's already handled gracefully and legibly elsewhere in the app
+(`decision-center.js:663`, `:855` -- "Team not found, or the official FPL API is temporarily
+unavailable"), so nothing needed fixing, but the implementation's placeholder-save copy was written to
+match reality rather than the mock's optimism: *"Saved as `<id>`. Swap in your real FPL team ID any
+time from My Profile"* -- a promise about what's saved, not a claim about what Decision Center will
+show.
+
+**Two implementation-level departures from the mock, both scoped decisions rather than open
+questions:**
+
+- **Pill and card are mutually exclusive**, not simultaneously visible -- the mock's own `renderVals()`
+  never actually sets a `pillVisible` key its markup reads, leaving that ambiguous; exclusive collapse/
+  expand is the standard version of this pattern and avoids two floating elements stacking.
+- **The mobile welcome reuses the existing shared sheet primitive directly** (`mountSheet`/`openSheet`/
+  `closeSheet`, `mobile-shell.js`) rather than a second bespoke overlay, at every viewport width -- one
+  `@media (min-width: 761px)` override turns the same `<dialog>` into a centered modal above the
+  breakpoint mobile-shell.js already treats as the mobile/desktop line elsewhere in this file, exactly
+  as the v2 design's own annotation asked for ("reusing the `mobile-shell.js` sheet pattern rather than
+  a second one").
+
+**A CSS bug worth flagging for whoever touches this next**: every new `hidden`-toggled element here
+needed an explicit `.selector[hidden] { display: none; }` override, because an unconditional `display`
+declaration on the *shown* state (`display: flex`/`grid`) beats the UA stylesheet's own
+`[hidden] { display: none }` regardless of specificity -- author CSS always wins over UA CSS. This is
+the exact same gotcha `dialog.sheet`'s own comment in `dashboard.css` already documents for `[open]`;
+it bit the onboarding entry/tracker/card/pill/team-field elements here too before being caught live in
+the browser (unit tests didn't catch it -- nothing asserts computed `display`, only DOM content).
+
+**Files touched**: `templates/dashboard-shell.html` (sidebar entry, welcome dialog, tracker markup),
+`css/dashboard.css` (styles + the `[hidden]` overrides above), `js/dashboard/onboarding.js` (new),
+`js/dashboard/gates-and-bootstrap.js` (one `setupOnboarding();` call), `dashboard.py`
+(`_DASHBOARD_JS_FILES` gains `"onboarding.js"`). No schema, endpoint, or existing-tab changes --
+`/api/draft-squad`'s existing `{team_id, player_ids: null}` shape (already used by
+`clearDraftSquad`, `draft-squad.js:178`) is reused as-is to register a team_id from the wizard.
+
+Full test suite green (`scripts/run_tests_parallel.py`) and verified live in the browser at both
+desktop and mobile widths: welcome auto-shows once for an unconfigured visitor, "Start with Draft
+Squad" navigates and opens the card, the team-ID save (both a typed ID and the placeholder path)
+correctly updates `state.manager`/`state.profile.team_id` and re-runs `applyProfileGates()`, every
+step advances and persists across reload via `localStorage`, the sidebar entry and pill both reopen
+the card, and nav remained clickable throughout -- advisory, per (b), holds in practice.

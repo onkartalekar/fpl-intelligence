@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="_ds/nocturne-686b6b3d-dc14-446f-8c83-d05a63e8bf22/styles.css">
+<style>
+  html, body { margin: 0; padding: 0; background: #101220; }
+  * { box-sizing: border-box; }
+  a { color: var(--color-accent-300); text-decoration: none; }
+  a:hover { color: var(--color-accent-200); }
+</style>
+</helmet>
+
+<section id="2a" style="padding: 34px 38px 46px; font-family: 'Inter', system-ui, sans-serif; color: var(--color-text); display: flex; flex-direction: column; gap: 20px;">
+  <div style="display: flex; align-items: flex-start; gap: 14px;">
+    <span style="flex: 0 0 auto; padding: 3px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-accent-700); background: var(--color-accent-900); color: var(--color-accent-200); font-size: 11px; font-variant-numeric: tabular-nums;">2a</span>
+    <div style="display: flex; flex-direction: column; gap: 4px; max-width: 720px;">
+      <div style="font-family: var(--font-heading); font-weight: 500; font-size: 20px; letter-spacing: -0.02em;">Welcome modal, then a collapsed tracker</div>
+      <div style="font-size: 12.5px; color: var(--color-neutral-500); line-height: 1.6; text-wrap: pretty;">Full-screen intro over a dimmed workspace on first visit; after that a floating tracker that expands to the current step. Advisory throughout — nav is never disabled, progress lives in <span style="color: var(--color-neutral-300);">localStorage</span>, and step 1 is Draft Squad with a placeholder path for anyone without an FPL team ID. Both frames are live: click through them.</div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start;">
+    <div style="display: flex; flex-direction: column; gap: 9px;">
+      <div style="display: flex; align-items: baseline; gap: 9px;">
+        <span style="font-size: 12.5px; color: var(--color-neutral-200);">Desktop</span>
+        <span style="font-size: 11px; color: var(--color-neutral-600);">1180 × 760 · sidebar shell</span>
+      </div>
+      <div style="width: 1180px; height: 760px; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md);">
+        <dc-import name="Onboarding Shell" layout="desktop" hint-size="1180px,760px"></dc-import>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px;">
+      <div style="display: flex; align-items: baseline; gap: 9px;">
+        <span style="font-size: 12.5px; color: var(--color-neutral-200);">Mobile</span>
+        <span style="font-size: 11px; color: var(--color-neutral-600);">390 × 800 · bottom tab bar, sheet</span>
+      </div>
+      <div style="width: 390px; height: 800px; border-radius: 30px; overflow: hidden; box-shadow: var(--shadow-md);">
+        <dc-import name="Onboarding Shell" layout="mobile" hint-size="390px,800px"></dc-import>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 22px; max-width: 1180px; padding-top: 6px; border-top: 1px solid var(--color-neutral-900);">
+    <div style="flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; padding-top: 14px;">
+      <div style="font-size: 12px; color: var(--color-neutral-200);">Advisory, per the plan's B2</div>
+      <div style="font-size: 11.5px; color: var(--color-neutral-600); line-height: 1.6; text-wrap: pretty;">The dim is presentation only — "Not now" collapses it and every tab stays clickable, matching <span style="color: var(--color-neutral-400);">applyProfileGates()</span>, which swaps content and never disables nav.</div>
+    </div>
+    <div style="flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; padding-top: 14px;">
+      <div style="font-size: 12px; color: var(--color-neutral-200);">Draft Squad first</div>
+      <div style="font-size: 11.5px; color: var(--color-neutral-600); line-height: 1.6; text-wrap: pretty;">Saving a team ID in step 1 flips Decision Center out of its <span style="color: var(--color-neutral-400);">not_configured</span> empty state — the same signal the flow keys off. My Profile is labelled optional.</div>
+    </div>
+    <div style="flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; padding-top: 14px;">
+      <div style="font-size: 12px; color: var(--color-neutral-200);">Mobile follows the existing shell</div>
+      <div style="font-size: 11.5px; color: var(--color-neutral-600); line-height: 1.6; text-wrap: pretty;">Below 760px the intro arrives as a bottom sheet with a drag handle and the tracker sits above the tab bar, reusing the <span style="color: var(--color-neutral-400);">mobile-shell.js</span> sheet pattern rather than a second one.</div>
+    </div>
+  </div>
+</section>
+
+</x-dc>
+</body>
+</html>
