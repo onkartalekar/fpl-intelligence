@@ -145,3 +145,16 @@ building against a diagnosis that's been shown not to hold.
 This needs the user's explicit call, not mine, on which of (c)'s two sub-options to take (narrow
 to the minor differential-term cleanup vs. close outright) -- see the two options presented back
 in chat.
+
+**Decided (2026-08-28): close #265 outright, no code fix.** Confirmed empirically along the way
+(prompted by the user directly asking "have you tried checking if making one or two transfers
+makes a difference") that the real, more consequential finding here isn't about aggressive's
+scoring at all: a single ordinary transfer on this same real squad already nets +65.6 (5-GW), a
+completely normal weekly action; Wildcard's much larger total edge (+280.9 over the original
+squad) mostly reflects that an *unconstrained* full rebuild structurally dominates any
+budget/leg-constrained transfer plan, not that transfers alone are insufficient. That's a
+scarcity/opportunity-cost gap in `_chip_recommendation` itself (no notion of "is this the best of
+the ~36 remaining gameweeks to spend one of two Wildcards"), not an aggressive-profile scoring
+bug -- scoped into #267 instead. #265 closed with this session's full findings; see also
+`IMPLEMENTATION_PLAN.md`'s "Considered and declined -- 'fix' aggressive-profile chip marginal
+value directly (2026-08-28)" entry.

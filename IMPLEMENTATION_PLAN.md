@@ -901,6 +901,56 @@ dominates this option on every criterion.
 
 ---
 
+## Considered and declined — "fix" aggressive-profile chip marginal value directly (2026-08-28)
+
+**Context:** GitHub issue #265 claimed the aggressive profile's
+`differential`/`minutes_penalty` scoring term (rewarding low-ownership
+picks) was the dominant reason aggressive Wildcard/Free Hit cleared
+their marginal-value thresholds by very large margins on a real team
+(364759). Investigated with direct, real-data testing rather than
+building the proposed fix on the strength of the original diagnosis
+alone (see `plans/issue-265-aggressive-chip-bias.md` for the full
+trace).
+
+**Findings:**
+- Patching the differential/minutes_penalty term out entirely (a
+  stronger correction than #265's own request) moved the real squad's
+  Wildcard marginal value by ~2% (53.7 -> 52.8) -- not the structural
+  inflator the issue claimed.
+- A second candidate cause (aggressive's uncertainty-band upside
+  multiplier skewing toward lower-confidence players in the optimized
+  squad) also didn't hold: both the real squad and the optimized squad
+  were 100% "low confidence" this early in the season, so the
+  multiplier applied identically to both and cancelled out.
+- A third apparent bug found along the way -- the chip appearing to
+  override an ordinary transfer plan worth ~4x more without ever being
+  compared against it -- turned out to be correct-by-design once
+  traced through: the chip's reported marginal value is already
+  measured incrementally against the best ordinary scenario already
+  found, not against the original squad.
+- What was left: the real squad had made zero transfers all season,
+  and the model found substantial, real room to improve it under every
+  profile (balanced's own ordinary 5-transfer plan netted +105.4) --
+  aggressive's larger number is consistent with its explicit "upper
+  projection, greater variance" framing applied to the same underlying
+  opportunity, not obviously a scoring bug.
+
+**Decision: declined -- no fix identified that changes the observed
+behavior.** #265 closed with these findings. The real, more
+consequential finding from this investigation was scoped into a new
+issue instead (#267): chip recommendations have no season-long
+scarcity/opportunity-cost model at all (comparing only against "no
+chip this week," never against "is this the best of the ~36 remaining
+opportunities to spend one of exactly two Wildcards") -- confirmed
+directly with the same real squad (a single ordinary transfer alone
+already netted +65.6, a completely normal weekly action, while
+Wildcard's total edge over the original squad, +280.9, mostly reflects
+that an unconstrained full rebuild structurally dominates any
+budget/leg-constrained plan, not that transfers alone are insufficient
+week to week).
+
+---
+
 ## Phase 6 — ICT Index investigation
 
 **Why:** FPL's official bootstrap payload includes an Influence/
