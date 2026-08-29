@@ -612,10 +612,29 @@ function updateDraftLock(weekly) {
         ? "<strong>Your draft squad is no longer active</strong>Your real published squad is now driving recommendations, so the draft you declared above is no longer used."
         : "<strong>Draft squad declarations are preseason-only</strong>Your real published squad is now available, so a declared draft is no longer needed.";
 }
+// Issue #270: Wildcard/Free Hit evaluate a from-scratch, unconstrained squad rebuild that shares
+// as few as 0 of the manager's real 15 players -- Bench Boost/Triple Captain (and the ordinary
+// roll/transfer scenarios) evaluate the manager's real squad, incrementally or as-is. All of these
+// used to render in the same visual language with nothing distinguishing which basis produced a
+// given number; this is the shared wording for both the pitch view and the chip panel below.
+function squadBasisLabel(chipName) {
+  if (chipName === "wildcard")
+    return "from-scratch rebuild: permanently replaces your entire squad";
+  if (chipName === "freehit")
+    return "from-scratch rebuild: replaces your squad for this gameweek only, then reverts";
+  if (chipName === "bboost")
+    return "your real squad as-is: scores your actual bench, no rebuild";
+  if (chipName === "3xc")
+    return "your real squad as-is: triples your actual captain's points, no rebuild";
+  return "incremental: built from your real squad";
+}
 // Issue #272: renders one lineup (the recommendation, or any scenario a manager clicks to
 // preview) onto the shared weekly-pitch/weekly-bench elements. `isPreview` swaps the heading for
 // "Previewing: <label>" and reveals the "Back to recommendation" reset button -- the recommended
 // lineup itself is never labeled as a preview, even when its own card is the one clicked.
+// Issue #270: the meta line always names the lineup's basis (from-scratch rebuild vs incremental
+// from the real squad) -- `lineupSource.chip` is only set on the object built by
+// _exclusive_chip_scenario (transfer_decisions.py), never on an ordinary roll/transfer scenario.
 function renderWeeklyLineup(lineupSource, headingText, metaLabel, isPreview) {
   const captainId = lineupSource.captain && lineupSource.captain.id;
   const viceId = lineupSource.vice_captain && lineupSource.vice_captain.id;
@@ -635,7 +654,8 @@ function renderWeeklyLineup(lineupSource, headingText, metaLabel, isPreview) {
     .join("");
   byId("weekly-lineup").hidden = false;
   byId("weekly-lineup-heading").textContent = headingText;
-  byId("weekly-lineup-meta").textContent = metaLabel;
+  byId("weekly-lineup-meta").textContent =
+    `${metaLabel} · ${squadBasisLabel(lineupSource.chip)}`;
   byId("weekly-lineup-reset").hidden = !isPreview;
   byId("weekly-pitch").setAttribute(
     "aria-label",
@@ -665,10 +685,15 @@ function isSameScenario(a, b) {
 // weekly-scenarios' innerHTML is fully replaced on every renderWeeklyDecision call, so listeners
 // attached here are never leaked, just re-created against the fresh nodes each time).
 function attachScenarioCardHandlers(scenarios, recommendation, recommendationLabel, weekly, profileLabel) {
+  // Issue #270: play_wildcard/play_freehit are the only other action strings a scenario object
+  // can carry (_exclusive_chip_scenario, transfer_decisions.py) -- without these, labelFor fell
+  // through to the raw action string whenever `recommendation` itself was a chip rebuild.
   const actionLabels = {
     roll: "Roll the transfer",
     single_transfer: "Make one transfer",
     double_transfer: "Make two transfers",
+    play_wildcard: "Wildcard",
+    play_freehit: "Free Hit",
   };
   const labelFor = (action, count) =>
     action === "multi_transfer"
@@ -787,10 +812,16 @@ function renderWeeklyDecision(profileId = null) {
   if (!selected) return;
   const recommendation = selected.recommendation;
   const plan = selected.multiweek_plan || {};
+  // Issue #270 (bug fix): recommendation.action is "play_wildcard"/"play_freehit" whenever a
+  // rebuild chip wins (_exclusive_chip_scenario, transfer_decisions.py) -- these weren't in this
+  // map, so labelFor fell through to the raw action string and the pitch heading literally read
+  // "Recommended GW<N> XI · play_wildcard" instead of "· Wildcard".
   const actionLabels = {
     roll: "Roll the transfer",
     single_transfer: "Make one transfer",
     double_transfer: "Make two transfers",
+    play_wildcard: "Wildcard",
+    play_freehit: "Free Hit",
   };
   const labelFor = (action, count) =>
     action === "multi_transfer"
@@ -904,14 +935,23 @@ function renderWeeklyDecision(profileId = null) {
     chip.action === "play" && chip.horizon
       ? ` <span class="muted">(${chipHorizonLabel(chip.horizon)})</span>`
       : "";
+  // Issue #270: disclose what kind of number marginal_value actually is -- Wildcard/Free Hit come
+  // from an unconstrained from-scratch rebuild (_optimize_squad, no initial_squad), Bench Boost/
+  // Triple Captain score the manager's real squad as-is. Both used to render identically with
+  // nothing distinguishing the two computations. Shown on the picked chip (when one is played) and
+  // on every alternative, worded per chip via squadBasisLabel rather than lumped together.
+  const pickedBasisLabel =
+    chip.action === "play" && chip.chip
+      ? `<p class="muted">${esc(squadBasisLabel(chip.chip))}</p>`
+      : "";
   const alternatives = (chip.alternatives || [])
     .map(
       (item) =>
-        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts <span class="muted">(${chipHorizonLabel(item.horizon)})</span><br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
+        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts <span class="muted">(${chipHorizonLabel(item.horizon)})</span><br><span class="muted">${esc(squadBasisLabel(item.chip))}</span><br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
     )
     .join("");
   byId("weekly-chip").innerHTML =
-    `<strong>${esc(chip.label || "Hold all chips")}</strong>${pickedHorizonLabel}<p>${esc(chip.reason || "No chip recommendation is available.")}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
+    `<strong>${esc(chip.label || "Hold all chips")}</strong>${pickedHorizonLabel}<p>${esc(chip.reason || "No chip recommendation is available.")}</p>${pickedBasisLabel}<span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
   const inventory = (weekly.chip_inventory || [])
     .map(
       (item) =>
