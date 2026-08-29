@@ -612,6 +612,111 @@ function updateDraftLock(weekly) {
         ? "<strong>Your draft squad is no longer active</strong>Your real published squad is now driving recommendations, so the draft you declared above is no longer used."
         : "<strong>Draft squad declarations are preseason-only</strong>Your real published squad is now available, so a declared draft is no longer needed.";
 }
+// Issue #272: renders one lineup (the recommendation, or any scenario a manager clicks to
+// preview) onto the shared weekly-pitch/weekly-bench elements. `isPreview` swaps the heading for
+// "Previewing: <label>" and reveals the "Back to recommendation" reset button -- the recommended
+// lineup itself is never labeled as a preview, even when its own card is the one clicked.
+function renderWeeklyLineup(lineupSource, headingText, metaLabel, isPreview) {
+  const captainId = lineupSource.captain && lineupSource.captain.id;
+  const viceId = lineupSource.vice_captain && lineupSource.vice_captain.id;
+  const pitchHtml = ["FWD", "MID", "DEF", "GKP"]
+    .map((position) => {
+      const row = (lineupSource.starting_xi || []).filter(
+        (player) => player.position_short === position,
+      );
+      return `<div class="pitch-row pitch-${position.toLowerCase()}">${row
+        .map((player) => {
+          const role =
+            player.id === captainId ? "C" : player.id === viceId ? "VC" : "";
+          return `<div class="pitch-player ${player.id === captainId ? "captain" : ""}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;
+        })
+        .join("")}</div>`;
+    })
+    .join("");
+  byId("weekly-lineup").hidden = false;
+  byId("weekly-lineup-heading").textContent = headingText;
+  byId("weekly-lineup-meta").textContent = metaLabel;
+  byId("weekly-lineup-reset").hidden = !isPreview;
+  byId("weekly-pitch").setAttribute(
+    "aria-label",
+    `${lineupSource.formation} formation: ${(lineupSource.starting_xi || []).map((player) => `${player.name}${player.id === captainId ? " captain" : player.id === viceId ? " vice-captain" : ""}`).join(", ")}`,
+  );
+  byId("weekly-pitch").innerHTML = pitchHtml;
+  byId("weekly-bench").innerHTML = (lineupSource.bench || [])
+    .map(
+      (player, index) =>
+        `<div class="weekly-bench-card"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span></div>`,
+    )
+    .join("");
+}
+// Issue 272 (found while testing, pre-existing): `action` alone does not uniquely identify a
+// scenario -- every multi-leg scenario (3, 4, and 5 transfers) shares the same "multi_transfer"
+// action, differing only by transfer_count. The original `scenario.action === recommendation.
+// action` check (used for the "recommended" card highlight) silently matched *all* multi-leg
+// cards whenever a multi-leg scenario won, not just the actual recommended one -- confirmed live:
+// with a 5-transfer recommendation, the 3-, 4-, and 5-transfer cards all lit up as "recommended"
+// simultaneously. transfer_count is unique across the whole scenarios list (roll=0, single=1,
+// double=2, and each multi-leg count is distinct), so matching on both together is exact.
+function isSameScenario(a, b) {
+  return !!a && !!b && a.action === b.action && a.transfer_count === b.transfer_count;
+}
+// Issue #272: wires each already-rendered .scenario-card up to preview that scenario's own XI
+// on click (mirrors attachBreakdownHandlers' re-attach-after-every-render pattern above --
+// weekly-scenarios' innerHTML is fully replaced on every renderWeeklyDecision call, so listeners
+// attached here are never leaked, just re-created against the fresh nodes each time).
+function attachScenarioCardHandlers(scenarios, recommendation, recommendationLabel, weekly, profileLabel) {
+  const actionLabels = {
+    roll: "Roll the transfer",
+    single_transfer: "Make one transfer",
+    double_transfer: "Make two transfers",
+  };
+  const labelFor = (action, count) =>
+    action === "multi_transfer"
+      ? `Make ${count} transfers`
+      : actionLabels[action] || action;
+  const showRecommendation = () =>
+    renderWeeklyLineup(
+      recommendation,
+      `Recommended GW${weekly.event} XI · ${recommendationLabel}`,
+      `${recommendation.formation} · ${profileLabel}`,
+      false,
+    );
+  const showScenario = (scenario) =>
+    renderWeeklyLineup(
+      scenario,
+      `Previewing: ${labelFor(scenario.action, scenario.transfer_count)}`,
+      `${scenario.formation} · ${profileLabel} · not the recommended action`,
+      true,
+    );
+  const cards = [...document.querySelectorAll("#weekly-scenarios [data-scenario-index]")];
+  const setActiveCard = (activeNode) => {
+    cards.forEach((node) => node.classList.toggle("previewing", node === activeNode));
+  };
+  cards.forEach((node) => {
+    const scenario = scenarios[Number(node.dataset.scenarioIndex)];
+    if (!scenario) return;
+    const select = () => {
+      setActiveCard(node);
+      if (isSameScenario(scenario, recommendation)) showRecommendation();
+      else showScenario(scenario);
+    };
+    node.addEventListener("click", select);
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        select();
+      }
+    });
+    if (isSameScenario(scenario, recommendation)) setActiveCard(node);
+  });
+  byId("weekly-lineup-reset").onclick = () => {
+    const recommendedCard = cards.find((node) =>
+      isSameScenario(scenarios[Number(node.dataset.scenarioIndex)], recommendation),
+    );
+    if (recommendedCard) setActiveCard(recommendedCard);
+    showRecommendation();
+  };
+}
 function renderWeeklyDecision(profileId = null) {
   const weekly = decision.weekly_decisions || {};
   updateDraftLock(weekly);
@@ -732,7 +837,7 @@ function renderWeeklyDecision(profileId = null) {
   byId("weekly-recommendation").innerHTML =
     `<strong>${esc(actionLabel)}</strong><p>${esc(recommendation.reason)}</p>${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
   byId("weekly-scenarios").innerHTML = (selected.scenarios || [])
-    .map((scenario) => {
+    .map((scenario, index) => {
       const planned = (plan.alternatives || []).find(
         (item) => item.action === scenario.action,
       );
@@ -744,7 +849,14 @@ function renderWeeklyDecision(profileId = null) {
       const nextFtText = weekly.draft
         ? ""
         : ` · ${scenario.free_transfers_next_event} FT next GW`;
-      return `<div class="scenario-card ${scenario.action === recommendation.action ? "recommended" : ""}"><strong>${esc(labelFor(scenario.action, scenario.transfer_count))}</strong><span>${scenario.transfer_count} transfer${scenario.transfer_count === 1 ? "" : "s"} · ${scenario.point_cost ? `−${scenario.point_cost} hit` : "no hit"}</span>${edgeLine}<span>${Number(scenario.net_gain_5gw).toFixed(1)} direct 5-GW net · £${Number(scenario.bank_after).toFixed(1)}m bank${nextFtText}</span></div>`;
+      // Issue #271: name the actual players, not just a count -- "make one transfer" alone gave
+      // no basis to judge the recommendation against. scenario.transfers already carries this
+      // (_move_record, transfer_decisions.py); it just wasn't rendered here before.
+      const transferNames = (scenario.transfers || [])
+        .map((move) => `<span>${esc(move.out.name)} → ${esc(move.in.name)}</span>`)
+        .join("");
+      const cardLabel = labelFor(scenario.action, scenario.transfer_count);
+      return `<div class="scenario-card ${isSameScenario(scenario, recommendation) ? "recommended" : ""}" data-scenario-index="${index}" role="button" tabindex="0" aria-label="Preview the starting XI for: ${esc(cardLabel)}"><strong>${esc(cardLabel)}</strong><span class="previewing-badge">Previewing</span>${transferNames}<span>${scenario.transfer_count} transfer${scenario.transfer_count === 1 ? "" : "s"} · ${scenario.point_cost ? `−${scenario.point_cost} hit` : "no hit"}</span>${edgeLine}<span>${Number(scenario.net_gain_5gw).toFixed(1)} direct 5-GW net · £${Number(scenario.bank_after).toFixed(1)}m bank${nextFtText}</span></div>`;
     })
     .join("");
   const branches = plan.conditional_branches || [];
@@ -766,46 +878,19 @@ function renderWeeklyDecision(profileId = null) {
       .map((item) => `<div class="decision-note">${esc(item)}</div>`)
       .join("");
   }
-  const weeklyCaptainId = recommendation.captain && recommendation.captain.id;
-  const weeklyViceId =
-    recommendation.vice_captain && recommendation.vice_captain.id;
-  const weeklyPitch = (lineup) =>
-    ["FWD", "MID", "DEF", "GKP"]
-      .map((position) => {
-        const row = (lineup || []).filter(
-          (player) => player.position_short === position,
-        );
-        return `<div class="pitch-row pitch-${position.toLowerCase()}">${row
-          .map((player) => {
-            const role =
-              player.id === weeklyCaptainId
-                ? "C"
-                : player.id === weeklyViceId
-                  ? "VC"
-                  : "";
-            return `<div class="pitch-player ${player.id === weeklyCaptainId ? "captain" : ""}" title="${esc(player.name)} · ${esc(player.club)}"><strong>${esc(player.name)}${role ? ` (${role})` : ""}</strong><span>${esc(player.club)}</span><span class="projection projection-full">${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)}</span><span class="projection projection-compact">${Number(player.xp_1).toFixed(1)} xPts</span></div>`;
-          })
-          .join("")}</div>`;
-      })
-      .join("");
-  byId("weekly-lineup").hidden = false;
-  byId("weekly-lineup-heading").textContent =
-    `Recommended GW${weekly.event} XI · ${actionLabel}`;
-  byId("weekly-lineup-meta").textContent =
-    `${recommendation.formation} · ${selected.label}`;
-  byId("weekly-pitch").setAttribute(
-    "aria-label",
-    `${recommendation.formation} post-decision formation: ${(recommendation.starting_xi || []).map((player) => `${player.name}${player.id === weeklyCaptainId ? " captain" : player.id === weeklyViceId ? " vice-captain" : ""}`).join(", ")}`,
+  // Issue #272: the pitch below used to only ever render `recommendation`'s own XI -- extracted
+  // into a standalone function so a click on any scenario card (see attachScenarioCardHandlers
+  // below) can render *that* scenario's XI instead, reusing the exact same markup/aria-label
+  // logic rather than duplicating it. Every scenario already carries the same starting_xi/bench/
+  // captain/vice_captain/formation shape as `recommendation` (both come from _lineup_view via
+  // _scenario(), transfer_decisions.py) -- this only changes which one gets displayed.
+  renderWeeklyLineup(
+    recommendation,
+    `Recommended GW${weekly.event} XI · ${actionLabel}`,
+    `${recommendation.formation} · ${selected.label}`,
+    false,
   );
-  byId("weekly-pitch").innerHTML = weeklyPitch(
-    recommendation.starting_xi || [],
-  );
-  byId("weekly-bench").innerHTML = (recommendation.bench || [])
-    .map(
-      (player, index) =>
-        `<div class="weekly-bench-card"><strong>${index + 1}. ${esc(player.name)}</strong><span>${esc(player.position_short)} · ${esc(player.club)}</span><span>${Number(player.xp_1).toFixed(1)} / ${Number(player.xp_3).toFixed(1)} / ${Number(player.xp_5).toFixed(1)} xPts</span></div>`,
-    )
-    .join("");
+  attachScenarioCardHandlers(selected.scenarios || [], recommendation, actionLabel, weekly, selected.label);
   const chip = selected.chip_recommendation || {};
   // Issue #256 (part A2): Wildcard's marginal_value is a 5-GW cumulative delta (it permanently
   // rebuilds the squad) while Free Hit/Bench Boost/Triple Captain's is a single-GW delta (their
