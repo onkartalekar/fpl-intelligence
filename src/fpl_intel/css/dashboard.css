@@ -1118,6 +1118,29 @@ dd {
   color: var(--blue);
   font-weight: 700;
 }
+/* Issue 272: each scenario card previews that scenario's own XI on the pitch below when
+   clicked -- mirrors the existing [data-player-id] cursor/focus convention (see
+   .recommendation-card[data-player-id],.pitch-player[data-player-id] further down this file). */
+.scenario-card[data-scenario-index] {
+  cursor: pointer;
+}
+.scenario-card[data-scenario-index]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.scenario-card.previewing {
+  background: var(--surface-inset-2);
+}
+.scenario-card .previewing-badge {
+  display: none;
+  color: var(--accent);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.scenario-card.previewing .previewing-badge {
+  display: block;
+}
 .weekly-recommendation,.weekly-chip {
   margin-top: 12px;
   padding: 13px;
