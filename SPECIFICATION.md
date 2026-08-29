@@ -160,7 +160,7 @@ No password is stored. Private state is entered manually unless a separately app
 - Free Hit: Compare against the no-chip squad
 - Wildcard: Require a structural five-gameweek case
 - Bench Boost and Triple Captain: Evaluate marginal chip value only
-- Chip timing (issue #256): raise each chip's marginal-value bar the earlier in the season it is, converging to the unmodified profile threshold by Gameweek 10 -- playing a chip early forecloses using it at a possibly better spot later, so the same marginal edge that clears the bar in Gameweek 20 must be larger to clear it in Gameweek 2
+- Chip timing and scarcity (issue #256, superseded by issue #267): raise each chip candidate's marginal-value bar based on two combined signals -- (1) how much of *that chip's own* remaining half-season window is left (maximum caution at the window's first gameweek, converging to the unmodified profile threshold at its last, and resetting to maximum the moment a new window opens, e.g. Wildcard/Free Hit's second half at Gameweek 20) and (2) a historically-grounded prior for real fixture-congestion double/blank gameweeks, mined from four completed seasons of fixture data, which concentrate heavily from Gameweek 25 through 37 and essentially never occur before Gameweek 19-20. The two signals combine via the larger of the two, not a sum -- playing a chip early forecloses using it at a possibly better spot later, so the same marginal edge that clears the bar late in a chip's window must be larger to clear it early in that window, and especially early in a freshly opened one
 
 ### Weekly transfer and chip contract
 

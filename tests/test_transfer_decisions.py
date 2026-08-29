@@ -3,8 +3,9 @@ from unittest.mock import patch
 
 from fpl_intel.modeling.recommendations import build_gw_recommendations
 from fpl_intel.modeling.transfer_decisions import (
-    _EARLY_SEASON_CUTOFF_EVENT,
     _chip_timing_signals,
+    _chip_window_extra_caution,
+    _historical_opportunity_extra_caution,
     _planner_player_score,
     _season_stage_effective_threshold,
     build_draft_decisions,
@@ -303,7 +304,18 @@ class TransferDecisionTests(unittest.TestCase):
         bootstrap["chips"] = [next(row for row in bootstrap["chips"] if row["name"] == "wildcard")]
         thresholds = {profile: {"wildcard": -999.0} for profile in ("conservative", "balanced", "aggressive")}
 
-        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds):
+        # Issue #267: this test's intent is to isolate the _exclusive_chip_scenario override
+        # mechanism (persists/reverts, multiweek_plan.immediate_action), not the threshold model
+        # -- patching _THRESHOLDS alone used to be enough for that, back when the season-stage
+        # adjustment topped out at a fractional multiplier (never quite reaching its own cap at
+        # GW2). #267's per-chip-window model reaches its cap *exactly* at a window's own opening
+        # gameweek (GW2 here), which for any negative threshold collapses effective_threshold to
+        # exactly 0.0 regardless of the sentinel's magnitude -- too tight for this tiny synthetic
+        # fixture's own near-zero marginal value on some profiles. Neutralize the scarcity signal
+        # directly so this test keeps testing what it's actually about.
+        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds), patch(
+            "fpl_intel.modeling.transfer_decisions._chip_scarcity_extra_caution", return_value=0.0
+        ):
             result = build_transfer_decisions(
                 bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
             )
@@ -323,7 +335,11 @@ class TransferDecisionTests(unittest.TestCase):
         bootstrap["chips"] = [next(row for row in bootstrap["chips"] if row["name"] == "freehit")]
         thresholds = {profile: {"freehit": -999.0} for profile in ("conservative", "balanced", "aggressive")}
 
-        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds):
+        # Issue #267: see the matching comment in test_wildcard_replaces_the_ordinary_primary_
+        # action_and_persists just above -- same reason, same fix.
+        with patch("fpl_intel.modeling.transfer_decisions._THRESHOLDS", thresholds), patch(
+            "fpl_intel.modeling.transfer_decisions._chip_scarcity_extra_caution", return_value=0.0
+        ):
             result = build_transfer_decisions(
                 bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
             )
@@ -647,30 +663,65 @@ class MultiTransferScenarioTests(unittest.TestCase):
 
 class ChipTimingTests(unittest.TestCase):
     """Issue #256: (A1) chip thresholds gain a season-stage adjustment, (B2) the 5-GW plan gains
-    a heads-up fixture-shape signal for a future double/blank-gameweek-looking week."""
+    a heads-up fixture-shape signal for a future double/blank-gameweek-looking week. Issue #267:
+    (A1) is superseded by a per-chip-window scarcity signal (candidate 2) combined with a
+    historically-grounded double/blank-gameweek prior (candidate 1b) -- see
+    plans/issue-267-chip-scarcity.md."""
 
-    def test_effective_threshold_is_unchanged_at_and_after_the_cutoff(self):
+    def test_effective_threshold_converges_to_raw_at_the_windows_own_last_gameweek(self):
+        # Both extra-caution signals are 0 at event == stop_event: _chip_window_extra_caution's
+        # window_fraction reaches exactly 1.0 there, and _remaining_historical_weight(stop_event,
+        # stop_event) sums an empty range -- unlike #256's flat cutoff, this holds at *every*
+        # window's own end, not just once at a shared whole-season GW10 boundary.
         for threshold in (18.0, -30.0, 65.0, 9.0):
-            self.assertEqual(_season_stage_effective_threshold(threshold, _EARLY_SEASON_CUTOFF_EVENT), threshold)
-            self.assertEqual(_season_stage_effective_threshold(threshold, _EARLY_SEASON_CUTOFF_EVENT + 20), threshold)
+            self.assertEqual(_season_stage_effective_threshold(threshold, 19, 2, 19), threshold)
+            self.assertEqual(_season_stage_effective_threshold(threshold, 38, 20, 38), threshold)
 
     def test_effective_threshold_raises_the_bar_early_regardless_of_sign(self):
         # A positive threshold moves further above zero (harder to clear from below).
-        self.assertGreater(_season_stage_effective_threshold(18.0, 2), 18.0)
+        self.assertGreater(_season_stage_effective_threshold(18.0, 2, 2, 19), 18.0)
         # A negative threshold moves *toward* zero -- also harder to clear (see the function's own
         # docstring for why a plain `threshold * multiplier` gets this backwards for a negative
         # base, and issue #256's plan doc for the reasoning in full).
-        self.assertGreater(_season_stage_effective_threshold(-30.0, 2), -30.0)
-        self.assertLessEqual(_season_stage_effective_threshold(-30.0, 2), 0.0)
+        self.assertGreater(_season_stage_effective_threshold(-30.0, 2, 2, 19), -30.0)
+        self.assertLessEqual(_season_stage_effective_threshold(-30.0, 2, 2, 19), 0.0)
 
     def test_effective_threshold_stays_reachable_not_impossible(self):
         # The adjustment must raise the bar, not put it out of reach -- confirmed generally here
-        # (a marginal value of double the raw threshold always still clears, even at GW1) and
-        # against real squad-quality data at realistic scale in plans/issue-256-chip-timing.md.
+        # (a marginal value of double the raw threshold always still clears, even at a window's
+        # own first gameweek) and against real squad-quality data at realistic scale in
+        # plans/issue-256-chip-timing.md and plans/issue-267-chip-scarcity.md.
         for threshold in (18.0, 22.0, 65.0):
-            # event 1 is where the doubling is at its strongest (extra == max multiplier exactly),
-            # so equality there is expected, not a bug -- assertLessEqual, not assertLess.
-            self.assertLessEqual(_season_stage_effective_threshold(threshold, 1), threshold * 2)
+            # A window's own first gameweek is where both extra-caution signals sit at their
+            # individual maximum, so equality there is expected, not a bug -- assertLessEqual.
+            self.assertLessEqual(_season_stage_effective_threshold(threshold, 2, 2, 19), threshold * 2)
+            self.assertLessEqual(_season_stage_effective_threshold(threshold, 20, 20, 38), threshold * 2)
+
+    def test_chip_window_extra_caution_resets_when_a_new_half_season_window_opens(self):
+        # Issue #267's core fix for a real gap in #256's shipped code: a flat whole-season cutoff
+        # (GW10) treated GW19 and GW20 identically, missing that GW20 is a brand-new chip window
+        # opening (Wildcard/Free Hit's second half). Scoped to the window itself, GW19 (the old
+        # window's last gameweek) converges to zero extra caution, while GW20 (the new window's
+        # first gameweek) resets to maximum -- confirmed directly here against
+        # plans/issue-267-chip-scarcity.md's own worked table (candidate 2).
+        self.assertEqual(_chip_window_extra_caution(19, 2, 19), 0.0)
+        self.assertEqual(_chip_window_extra_caution(20, 20, 38), 1.0)
+
+    def test_historical_opportunity_extra_caution_favors_the_real_dgw_bgw_cluster(self):
+        # Issue #267 (candidate 1b): the historical prior is concentrated GW25-37, not spread
+        # evenly across a window -- GW20 (before the cluster) should show more remaining
+        # opportunity than GW30 (past most of it) within the same [20, 38] window, and GW2
+        # (Wildcard-1's own window, which the real historical data shows has comparatively little
+        # DGW/BGW opportunity even at its very start) should show markedly less than GW20 despite
+        # both being their own window's first gameweek.
+        at_window_open = _historical_opportunity_extra_caution(20, 38)
+        past_the_cluster = _historical_opportunity_extra_caution(30, 38)
+        self.assertGreater(at_window_open, past_the_cluster)
+        self.assertGreater(at_window_open, _historical_opportunity_extra_caution(2, 19))
+
+    def test_historical_opportunity_extra_caution_is_zero_at_a_windows_own_last_gameweek(self):
+        self.assertEqual(_historical_opportunity_extra_caution(19, 19), 0.0)
+        self.assertEqual(_historical_opportunity_extra_caution(38, 38), 0.0)
 
     def test_gw2_borderline_chip_that_used_to_barely_clear_now_holds(self):
         # Before issue #256, this exact fixture's aggressive-profile Bench Boost cleared its raw
