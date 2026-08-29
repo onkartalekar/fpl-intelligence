@@ -831,14 +831,30 @@ function renderWeeklyDecision(profileId = null) {
     recommendation.action,
     recommendation.transfer_count,
   );
-  const transferPairs =
-    (recommendation.transfers || [])
-      .map(
-        (move) =>
-          `<div class="transfer-pair"><strong>${esc(move.out.name)} → ${esc(move.in.name)}</strong><span class="muted">Sell £${Number(move.out.selling_price).toFixed(1)}m · buy £${Number(move.in.price).toFixed(1)}m</span></div>`,
-      )
-      .join("") ||
-    '<div class="transfer-pair"><strong>No transfer</strong><span class="muted">Preserve the free transfer for the next deadline.</span></div>';
+  // Issue #270 (bug fix, found via live user feedback): recommendation.transfers is always []
+  // for a chip play (_exclusive_chip_scenario, transfer_decisions.py sets "transfers": []
+  // unconditionally -- a rebuild isn't itemized as swaps), which used to fall through to the
+  // *same* "No transfer / Preserve the free transfer for the next deadline" fallback used for a
+  // genuine roll. That's actively wrong information here -- your whole squad is being rebuilt,
+  // not preserved. It also duplicated the chip's own reason sentence verbatim in two separate
+  // cards (recommendation.reason is chip.reason, copied as-is by _exclusive_chip_scenario), so a
+  // manager saw "Wildcard clears the balanced marginal-value threshold by 0.4 points." printed
+  // twice on the same page. Both are fixed together here: recognize a chip play via
+  // recommendation.chip and give it its own, non-duplicated summary instead of reusing either
+  // the ordinary-transfer reason text or the no-transfer fallback.
+  const isChipPlay = !!recommendation.chip;
+  const chipPlaySummary = isChipPlay
+    ? `<p>Full squad rebuild -- not itemized transfers. ${recommendation.reverts_after_event ? "Reverts to your real squad after this gameweek." : "Persists as your squad going forward."} See the chip panel below for why ${esc(recommendation.label)} was recommended.</p>`
+    : `<p>${esc(recommendation.reason)}</p>`;
+  const transferPairs = isChipPlay
+    ? ""
+    : (recommendation.transfers || [])
+        .map(
+          (move) =>
+            `<div class="transfer-pair"><strong>${esc(move.out.name)} → ${esc(move.in.name)}</strong><span class="muted">Sell £${Number(move.out.selling_price).toFixed(1)}m · buy £${Number(move.in.price).toFixed(1)}m</span></div>`,
+        )
+        .join("") ||
+      '<div class="transfer-pair"><strong>No transfer</strong><span class="muted">Preserve the free transfer for the next deadline.</span></div>';
   byId("decision-section-weekly").classList.remove("collapsed");
   byId("weekly-profile-panel").hidden = false;
   byId("weekly-inactive-reason").hidden = true;
@@ -866,7 +882,7 @@ function renderWeeklyDecision(profileId = null) {
     ? `<div class="decision-metric"><b>No cost</b><span>Every suggested change before Gameweek 1</span></div><div class="decision-metric"><b>£${Number(weekly.bank || 0).toFixed(1)}m</b><span>Unspent budget in your declared draft</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after suggested change</span></div><div class="decision-metric"><b>${Number(recommendation.net_gain_5gw).toFixed(1)}</b><span>5-GW gain vs your declared draft</span></div>`
     : `<div class="decision-metric"><b>${weekly.free_transfers}</b><span>Free transfer${weekly.free_transfers === 1 ? "" : "s"} now · ${weekly.free_transfer_source === "confirmed_local" ? "confirmed locally" : "estimated from public history"}</span></div><div class="decision-metric"><b>${recommendation.free_transfers_next_event}</b><span>Available next GW</span></div><div class="decision-metric"><b>${Number(plan.five_gameweek_advantage_over_roll || 0).toFixed(1)}</b><span>5-GW planner edge over roll</span></div><div class="decision-metric"><b>${recommendation.point_cost ? `−${recommendation.point_cost}` : "0"}</b><span>Immediate transfer cost</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after decision</span></div>`;
   byId("weekly-recommendation").innerHTML =
-    `<strong>${esc(actionLabel)}</strong><p>${esc(recommendation.reason)}</p>${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
+    `<strong>${esc(actionLabel)}</strong>${chipPlaySummary}${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
   byId("weekly-scenarios").innerHTML = (selected.scenarios || [])
     .map((scenario, index) => {
       const planned = (plan.alternatives || []).find(
