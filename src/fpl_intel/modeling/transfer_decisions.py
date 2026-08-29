@@ -166,6 +166,39 @@ def _season_stage_effective_threshold(threshold, event, start_event, stop_event)
     return threshold + abs(threshold) * extra
 
 
+# Issue #278: the ordinary multi-transfer path has no equivalent of the above caution -- paid
+# transfers regenerate weekly and aren't a scarce resource with their own half-season window the
+# way a chip is, so #267's _chip_scarcity_extra_caution doesn't translate directly. The actual risk
+# here is different: paying real, permanent points to act on a signal that's still noisy because
+# not enough of *this season* has been observed yet. Tied to the same constant that's the real
+# source of that noise (projection.py's MID/FWD residual_reliability_denominator=100/cap=0.82,
+# not re-imported here to avoid coupling this margin's shape to that module's private constants,
+# but matched deliberately) rather than an unrelated arbitrary cutoff -- see
+# plans/issue-278-multi-transfer-caution.md for the full derivation and real-data verification.
+_MULTI_TRANSFER_EARLY_SEASON_MARGIN = 10.0  # required net_gain_5gw margin at max caution
+_MULTI_TRANSFER_MARGIN_RELIABILITY_DENOMINATOR = 100.0  # matches projection.py's MID/FWD value
+_MULTI_TRANSFER_MARGIN_RELIABILITY_CAP = 0.82  # matches projection.py's residual_reliability_cap
+
+
+def _multi_transfer_required_margin(event):
+    """How much a 3+-leg multi-transfer override must beat the planner's own roll/single/double
+    pick by (`transfer_decisions.py`'s own `best_multi_leg` comparison) before it's accepted,
+    early in the season -- 0 once enough of the season has been observed for the underlying
+    per-player signal to have stabilized (see this module's docstring above the constants for
+    why this decays at the same rate as MID/FWD's own residual-reliability system, rather than an
+    unrelated cutoff). One full match per completed gameweek is assumed as the observed-minutes
+    estimate; transfers are never recommended before event 2 (see `build_transfer_decisions`), so
+    `event - 1` is always >= 1 wherever this is actually called."""
+    observed_minutes = max(0, event - 1) * 90
+    reliability = (
+        min(_MULTI_TRANSFER_MARGIN_RELIABILITY_CAP, observed_minutes / (observed_minutes + _MULTI_TRANSFER_MARGIN_RELIABILITY_DENOMINATOR))
+        if observed_minutes
+        else 0.0
+    )
+    extra_caution = 1.0 - reliability / _MULTI_TRANSFER_MARGIN_RELIABILITY_CAP
+    return _MULTI_TRANSFER_EARLY_SEASON_MARGIN * extra_caution
+
+
 def derive_free_transfers(next_event, transfers, chips_used, maximum=5):
     """Infer free transfers at the next deadline from published history.
 
@@ -1183,7 +1216,18 @@ def build_transfer_decisions(
                     )
                 )
         best_multi_leg = max(multi_leg_scenarios, key=lambda row: row["net_gain_5gw"], default=None)
-        if best_multi_leg is not None and best_multi_leg["net_gain_5gw"] > ordinary_recommendation["net_gain_5gw"]:
+        # Issue #278: this override used to accept any positive margin, however small -- a -16
+        # point hit for 5 simultaneous transfers could be triggered by an edge as thin as +0.1,
+        # with no regard for how little of the season (and therefore how noisy the per-player
+        # signal driving that edge) has actually been observed yet. required_margin converges to
+        # 0 by ~Gameweek 6-7, restoring exactly today's behavior once the season has settled in;
+        # see _multi_transfer_required_margin's docstring and plans/issue-278-multi-transfer-
+        # caution.md for the full reasoning and real-data verification.
+        required_margin = _multi_transfer_required_margin(event)
+        if (
+            best_multi_leg is not None
+            and best_multi_leg["net_gain_5gw"] > ordinary_recommendation["net_gain_5gw"] + required_margin
+        ):
             ordinary_recommendation = dict(best_multi_leg)
             ordinary_recommendation["reason"] = (
                 f"Making {ordinary_recommendation['transfer_count']} transfers this gameweek projects the strongest "
