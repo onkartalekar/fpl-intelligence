@@ -938,12 +938,10 @@ function renderWeeklyDecision(profileId = null) {
   // Issue #270: disclose what kind of number marginal_value actually is -- Wildcard/Free Hit come
   // from an unconstrained from-scratch rebuild (_optimize_squad, no initial_squad), Bench Boost/
   // Triple Captain score the manager's real squad as-is. Both used to render identically with
-  // nothing distinguishing the two computations. Shown on the picked chip (when one is played) and
-  // on every alternative, worded per chip via squadBasisLabel rather than lumped together.
-  const pickedBasisLabel =
-    chip.action === "play" && chip.chip
-      ? `<p class="muted">${esc(squadBasisLabel(chip.chip))}</p>`
-      : "";
+  // nothing distinguishing the two computations. Worded per chip via squadBasisLabel and shown on
+  // every alternative card below -- including the picked chip's own card, which already appears in
+  // `alternatives` (unfiltered by transfer_decisions.py) -- so it isn't repeated a second time up
+  // here too (caught via live user feedback: the two copies read as redundant, not reinforcing).
   const alternatives = (chip.alternatives || [])
     .map(
       (item) =>
@@ -951,7 +949,7 @@ function renderWeeklyDecision(profileId = null) {
     )
     .join("");
   byId("weekly-chip").innerHTML =
-    `<strong>${esc(chip.label || "Hold all chips")}</strong>${pickedHorizonLabel}<p>${esc(chip.reason || "No chip recommendation is available.")}</p>${pickedBasisLabel}<span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
+    `<strong>${esc(chip.label || "Hold all chips")}</strong>${pickedHorizonLabel}<p>${esc(chip.reason || "No chip recommendation is available.")}</p><span class="muted">No-chip baseline: ${Number(chip.no_chip_projected_points || 0).toFixed(1)} projected GW${weekly.event} points</span>${alternatives ? `<div class="chip-alternatives">${alternatives}</div>` : ""}`;
   const inventory = (weekly.chip_inventory || [])
     .map(
       (item) =>
