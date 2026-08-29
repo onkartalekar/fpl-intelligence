@@ -6,6 +6,7 @@ from fpl_intel.modeling.transfer_decisions import (
     _chip_timing_signals,
     _chip_window_extra_caution,
     _historical_opportunity_extra_caution,
+    _multi_transfer_required_margin,
     _planner_player_score,
     _season_stage_effective_threshold,
     build_draft_decisions,
@@ -601,9 +602,20 @@ class MultiTransferScenarioTests(unittest.TestCase):
         self.assertEqual(swapped, 3, "test fixture must have 3 clearly-worse replacements available")
         manager["squad"] = downgraded
 
-        result = build_transfer_decisions(
-            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
-        )
+        # Issue #278: this fixture's edge (3-leg beats double_transfer by 3.0) is realistic, not
+        # deliberately overwhelming -- it's smaller than GW2's own required margin (~4.2), so
+        # issue #278's new season-stage caution correctly holds it back at this fixture's real
+        # gameweek. This test's actual purpose (issue #181: the search can discover and prefer a
+        # genuine 3+-leg upgrade at all) is orthogonal to season-stage caution, so neutralize that
+        # signal explicitly here rather than let an unrelated, later feature reintroduce flakiness
+        # into an already-established mechanism test -- same isolation pattern used for the
+        # wildcard/freehit override tests above.
+        with patch(
+            "fpl_intel.modeling.transfer_decisions._multi_transfer_required_margin", return_value=0.0
+        ):
+            result = build_transfer_decisions(
+                bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+            )
 
         self.assertEqual(result["status"], "active")
         conservative = next(row for row in result["profiles"] if row["id"] == "conservative")
@@ -659,6 +671,64 @@ class MultiTransferScenarioTests(unittest.TestCase):
         # outcome, not just that scenarios are generated and never chosen.
         winners = {row["recommendation"]["action"] for row in result["profiles"]}
         self.assertIn("multi_transfer", winners)
+
+
+class MultiTransferEarlySeasonCautionTests(unittest.TestCase):
+    """Issue #278: the 3+-leg multi-transfer override used to accept any positive margin over the
+    planner's own roll/single/double pick, however small, with no regard for how little of the
+    season had been observed yet. See plans/issue-278-multi-transfer-caution.md."""
+
+    def test_required_margin_is_at_its_maximum_at_gameweek_2(self):
+        # Gameweek 2 is the earliest transfers are ever recommended for (build_transfer_decisions
+        # returns "waiting_for_gw2" at event <= 1) -- one completed gameweek's worth of observed
+        # minutes (90) is the thinnest real signal this function is ever evaluated against.
+        self.assertAlmostEqual(_multi_transfer_required_margin(2), 4.22, places=2)
+
+    def test_required_margin_shrinks_as_the_season_progresses(self):
+        margins = [_multi_transfer_required_margin(event) for event in (2, 3, 4, 5, 6)]
+        self.assertEqual(margins, sorted(margins, reverse=True))
+        for margin in margins:
+            self.assertGreaterEqual(margin, 0.0)
+
+    def test_required_margin_converges_to_zero_once_the_season_has_settled_in(self):
+        # residual_reliability caps at 0.82 around ~450 observed minutes (~5 completed
+        # gameweeks) -- by Gameweek 7, (event - 1) * 90 = 540 minutes, past that cap, so the
+        # margin should already be at (or extremely close to) zero, restoring today's exact
+        # unmodified `>` comparison.
+        self.assertAlmostEqual(_multi_transfer_required_margin(7), 0.0, places=1)
+        self.assertEqual(_multi_transfer_required_margin(38), 0.0)
+
+    def test_a_thin_multi_leg_edge_is_held_back_at_gameweek_2_but_accepted_once_it_clears_the_margin(self):
+        # Real-data-shaped regression: engineers a squad where a 3-leg upgrade is a *modest*, not
+        # overwhelming, improvement over the planner's own double-transfer pick -- the exact shape
+        # of case this issue is about (a small, easily-noise-explained edge triggering a real,
+        # permanent point-cost commitment in the season's noisiest weeks). Confirmed directly this
+        # fixture's margin (double_transfer 7.9 -> 3-leg 10.9, a 3.0-point edge) sits below GW2's
+        # own required margin (~4.2) -- so the override should NOT fire at GW2, but should once
+        # neutralized (this same margin's job, done, is exactly what
+        # test_recommends_multi_transfer_when_the_hit_is_worth_it above already confirms via
+        # patching -- this test instead confirms the *unpatched*, real GW2 behavior holds it back).
+        bootstrap, fixtures, manager = gw2_inputs()
+        manager["confirmed_free_transfers"] = 3
+        downgraded, swapped = _downgrade_squad_picks(bootstrap, manager["squad"], count=3)
+        self.assertEqual(swapped, 3, "test fixture must have 3 clearly-worse replacements available")
+        manager["squad"] = downgraded
+
+        result = build_transfer_decisions(
+            bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+        )
+
+        conservative = next(row for row in result["profiles"] if row["id"] == "conservative")
+        multi_leg = next(
+            row for row in conservative["scenarios"] if row["action"] == "multi_transfer" and row["transfer_count"] == 3
+        )
+        planner_pick = next(
+            row for row in conservative["scenarios"] if row["action"] == conservative["multiweek_plan"]["immediate_action"]
+        )
+        margin = multi_leg["net_gain_5gw"] - planner_pick["net_gain_5gw"]
+        self.assertLess(margin, _multi_transfer_required_margin(2))
+        # The real, unpatched recommendation holds at the planner's own pick, not the thin 3-leg edge.
+        self.assertNotEqual(conservative["recommendation"]["action"], "multi_transfer")
 
 
 class ChipTimingTests(unittest.TestCase):
