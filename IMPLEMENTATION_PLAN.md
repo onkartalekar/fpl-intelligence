@@ -1340,3 +1340,58 @@ still describing a Manager-profile form field issue #164 had already
 removed) and duplicated what the dashboard itself now shows directly.
 GitHub Pages remains undeployed; revisit only if a real need for a
 second public URL emerges.
+
+## Chip scarcity / opportunity-cost model — issue #267 (2026-08-29)
+
+**Context:** #267 was scoped out of #265's investigation — chip recommendations only ever asked
+"is a chip better than the best transfer-only plan *this* gameweek," never "is this the best of
+the ~36 remaining gameweeks to spend one of exactly two Wildcards." Full investigation, candidate
+evaluation, and worked numbers in `plans/issue-267-chip-scarcity.md`.
+
+**Shipped:** replaced #256's flat, whole-season threshold cutoff (`_EARLY_SEASON_CUTOFF_EVENT`, a
+single event vs. a shared Gameweek 10 boundary) with two combined signals, each scoped to a chip
+candidate's own remaining half-season window rather than the season as a whole:
+- **(2) Per-chip-window scarcity** (`_chip_window_extra_caution`): caution based on how much of
+  *this chip's own* window is left, resetting to maximum the moment a new half-season window
+  opens (e.g. Wildcard/Free Hit's second half at Gameweek 20) — something a single whole-season
+  cutoff could never do, and a real, confirmed gap in #256's shipped code (it treated Gameweek 19
+  and 20 identically).
+- **(1b) Historically-grounded double/blank-gameweek prior** (`_historical_opportunity_extra_caution`):
+  a weight table mined directly from four seasons of real fixture data
+  (`data/history/*/fixtures.csv`), showing real fixture-congestion doubles/blanks concentrate
+  heavily from Gameweek 25 through 37 and essentially never occur before Gameweek 19-20.
+
+The two combine via `max()`, not a sum (`_chip_scarcity_extra_caution`) — both are different views
+of the same "is it wise to wait" question, so summing would double-count agreement between them.
+
+**Confirmed the raw "chip potential vs. transfer potential" comparison itself does not need to
+change** — re-based against a more realistic sustained-weekly baseline (1 free transfer, no hit)
+rather than the best ad-hoc transfer plan that week, Wildcard's real edge on a real squad was
+*larger* (+215.3), not smaller, than the number the existing comparison already produces. The
+judgment about whether *now* is the right time to spend a scarce chip belongs entirely in the
+scarcity/opportunity-cost layer above, not in how potential itself is measured — unchanged by this
+work.
+
+**Candidate (1)** (season-long relative bar built from the *current* season's own not-yet-revealed
+fixture calendar) was superseded by (1b) before implementation — confirmed directly that the
+currently-published fixture calendar has zero known doubles/blanks anywhere (real ones are
+announced progressively through the season, not this far out), so there is nothing in the live
+calendar for (1) to detect yet. (1b) gets the same kind of signal from real historical data
+instead.
+
+**Candidate (3)** (a self-calibrating bar built from each team's own persisted week-over-week
+history) is genuinely promising as the long-term shape of this model, but has a hard dependency
+that doesn't exist yet: no week-over-week persistence of a team's computed chip marginal values
+survives across refreshes today (confirmed while investigating #266: `archive_team_forecast`
+stores lineup/action, never `chip_recommendation`). Deferred until #266 ships and its stored shape
+is known, rather than inventing a second, redundant persistence layer now.
+
+**Honest scope, confirmed with real numbers, not assumed:** this substantially raises the bar for
+an early-second-window evaluation (e.g. Gameweek 20-24, where #256 previously applied zero extra
+caution despite a fresh chip and the real historical DGW/BGW cluster still fully ahead) — a
+genuine, previously-unaddressed gap. It does **not** flip #267's original triggering example
+(aggressive Wildcard clearing its bar in Gameweek 2 of Wildcard-1's own window), because
+Wildcard-1's window has comparatively little historical fixture-driven opportunity to wait for in
+the first place — per the plan doc, that specific case's "play the Wildcard" conclusion is a
+defensible read of a squad with real, immediate room to improve, not a bug this model should try
+to suppress.

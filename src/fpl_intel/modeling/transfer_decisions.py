@@ -56,42 +56,113 @@ _THRESHOLDS = {
 # real team (364759, GW2, balanced profile): Wildcard cleared its threshold by only +15.9 and
 # Free Hit by only +0.4 -- both barely-qualifying, one gameweek into a 38-gameweek season.
 #
-# _season_stage_threshold_multiplier raises the effective bar for events before
-# _EARLY_SEASON_CUTOFF_EVENT, converging linearly back to *exactly* today's unmodified threshold
-# at and after the cutoff (multiplier's fraction term is 0 there) -- so nothing about
-# post-cutoff behavior changes at all, matching this plan's own scoping
-# (plans/issue-256-chip-timing.md, candidate A1). Not backtest-validated -- same epistemic status
-# as _THRESHOLDS itself (see issue #184's own comment above): a reasoned heuristic, not a fitted
-# parameter. GW10 was picked as the cutoff because that's roughly when squad-affecting preseason
-# uncertainty (price moves, early-season role/form signal, international-break knock-on) has
-# mostly settled in a normal season -- a judgment call, not derived from data.
-_EARLY_SEASON_CUTOFF_EVENT = 10
-_EARLY_SEASON_MAX_EXTRA_MULTIPLIER = 1.0  # threshold's magnitude effectively doubles at event 1
+# Issue #267 superseded #256's original flat, whole-season cutoff (a single event vs. a shared
+# GW10 boundary) with two combined signals, each scoped to the chip candidate's *own* remaining
+# half-season window (start_event/stop_event, already computed by _chip_inventory) rather than
+# the season as a whole -- #256's flat cutoff had a real, previously-unnoticed gap: it went to
+# zero extra caution from GW10 onward even when a chip's own window (e.g. Wildcard/Free Hit's
+# first half, GW2-19) still had 9 more gameweeks of runway, and it never reapplied any caution
+# when a chip's *second* half-season window opened at GW20 -- structurally identical to a fresh
+# season start for that chip, but invisible to a cutoff that only ever measured distance from the
+# real season's own GW1. See plans/issue-267-chip-scarcity.md for the full investigation.
+_EARLY_SEASON_MAX_EXTRA_MULTIPLIER = 1.0  # threshold's magnitude effectively doubles at max caution
 
 
-def _season_stage_threshold_multiplier(event):
-    """Returns the season-stage `extra` fraction (0 at/after the cutoff, up to
-    _EARLY_SEASON_MAX_EXTRA_MULTIPLIER at event 1) -- callers apply it via
-    _season_stage_effective_threshold, not directly, since the sign of the base threshold
-    matters (see that function's docstring)."""
-    if event >= _EARLY_SEASON_CUTOFF_EVENT:
+def _chip_window_extra_caution(event, start_event, stop_event):
+    """Candidate (2): per-chip-window scarcity. Returns an extra-caution fraction (0..
+    _EARLY_SEASON_MAX_EXTRA_MULTIPLIER) based on how much of *this chip's own* remaining
+    half-season window is left -- maximum caution at the window's first gameweek, converging
+    linearly to exactly zero at its last, and resetting to maximum the moment a new window opens
+    (e.g. Wildcard/Free Hit's second half starting at GW20), which a single whole-season cutoff
+    can never do. Verified against real per-team data in plans/issue-267-chip-scarcity.md
+    (candidate 2's worked table)."""
+    if stop_event <= start_event:
         return 0.0
-    fraction = max(0.0, (_EARLY_SEASON_CUTOFF_EVENT - event) / (_EARLY_SEASON_CUTOFF_EVENT - 1))
+    window_fraction = (event - start_event) / (stop_event - start_event)
+    window_fraction = min(1.0, max(0.0, window_fraction))
+    return _EARLY_SEASON_MAX_EXTRA_MULTIPLIER * (1.0 - window_fraction)
+
+
+# Issue #267 (candidate 1b): historically-grounded double/blank-gameweek prior, mined directly
+# from data/history/{2022-23,2023-24,2024-25,2025-26}/fixtures.csv -- for each gameweek, the
+# fraction of those 4 seasons with a major fixture-congestion double gameweek (2+ fixtures for a
+# team) or blank gameweek (0 fixtures for a team). One clear one-off anomaly excluded: 2022-23
+# GW7 was a full-round postponement for Queen Elizabeth II's death, not fixture congestion.
+# Gameweeks absent from this table had no such event in any of the 4 seasons (weight 0, not
+# "unknown") -- the pattern is clean and consistent across all 4 seasons: real fixture-driven
+# doubles/blanks essentially never occur before GW19-20 and concentrate heavily from GW25 through
+# GW37. Not backtest-validated -- same epistemic status as _THRESHOLDS itself (issue #184's own
+# comment above): a reasoned heuristic grounded in real historical data, not a fitted parameter.
+# See plans/issue-267-chip-scarcity.md for the full derivation.
+_HISTORICAL_DGW_BGW_WEIGHTS = {
+    2: 0.25, 7: 0.25, 8: 0.25, 12: 0.25, 15: 0.25, 17: 0.25, 18: 0.25, 19: 0.25,
+    20: 0.25, 22: 0.25, 23: 0.25, 24: 0.25, 25: 1.0, 26: 0.5, 27: 0.25, 28: 0.5,
+    29: 0.75, 31: 0.25, 32: 0.5, 33: 0.5, 34: 1.0, 35: 0.25, 36: 0.5, 37: 0.5,
+}
+
+
+def _remaining_historical_weight(event, stop_event):
+    """Sum of _HISTORICAL_DGW_BGW_WEIGHTS strictly after `event` through `stop_event` -- the
+    historical double/blank-gameweek opportunity a chip would still be able to catch if held past
+    `event` through the rest of its own window."""
+    return sum(weight for gw, weight in _HISTORICAL_DGW_BGW_WEIGHTS.items() if event < gw <= stop_event)
+
+
+# The largest remaining-weight any real chip window can ever show, at its own opening -- Wildcard/
+# Free Hit's second half [20, 38] measured from event=20 itself (matching the shape of
+# plans/issue-267-chip-scarcity.md's own worked table, its "largest such sum ever observed across
+# a real window" normalizer). Computed from the table above rather than hand-copied, so it always
+# stays consistent with it. Used to normalize _remaining_historical_weight onto the same 0..1
+# scale _chip_window_extra_caution already uses, so the two "extra caution" signals can be
+# combined via max() without one silently dominating the other by scale alone.
+_HISTORICAL_MAX_REMAINING_WEIGHT = _remaining_historical_weight(20, 38)
+
+
+def _historical_opportunity_extra_caution(event, stop_event):
+    """Candidate (1b): historically-grounded double/blank-gameweek prior. Returns an extra-caution
+    fraction (0.._EARLY_SEASON_MAX_EXTRA_MULTIPLIER) proportional to how much real historical
+    DGW/BGW opportunity (_HISTORICAL_DGW_BGW_WEIGHTS) still lies ahead in this chip's own
+    remaining window -- unlike _chip_window_extra_caution, this doesn't treat every gameweek of a
+    window as equally worth waiting for: a window whose remaining weeks include the GW25-37
+    fixture-congestion cluster produces much stronger caution than one that doesn't, even at the
+    same window-fraction-remaining. Verified against real per-team data in
+    plans/issue-267-chip-scarcity.md (candidate 1b's worked table)."""
+    if _HISTORICAL_MAX_REMAINING_WEIGHT <= 0:
+        return 0.0
+    remaining = _remaining_historical_weight(event, stop_event)
+    fraction = min(1.0, remaining / _HISTORICAL_MAX_REMAINING_WEIGHT)
     return _EARLY_SEASON_MAX_EXTRA_MULTIPLIER * fraction
 
 
-def _season_stage_effective_threshold(threshold, event):
-    """Raises `threshold`'s magnitude early in the season, always in the direction that makes it
-    *harder* to clear regardless of the base threshold's sign.
+def _chip_scarcity_extra_caution(event, start_event, stop_event):
+    """Combines candidates (2) and (1b) via max(), per plans/issue-267-chip-scarcity.md's
+    recommendation, rather than summing them -- both are two different views of the same "is it
+    wise to wait" question (one from calendar position within the window, one from historical
+    fixture-congestion opportunity within it), so summing would double-count agreement between
+    them rather than taking the stronger of two independent cautions."""
+    return max(
+        _chip_window_extra_caution(event, start_event, stop_event),
+        _historical_opportunity_extra_caution(event, stop_event),
+    )
+
+
+def _season_stage_effective_threshold(threshold, event, start_event, stop_event):
+    """Raises `threshold`'s magnitude the more of this chip's own remaining window's worth of
+    scarcity (calendar position and/or real historical DGW/BGW opportunity) still lies ahead,
+    always in the direction that makes it *harder* to clear regardless of the base threshold's
+    sign.
 
     A plain `threshold * multiplier` breaks for a negative threshold (conservative's freehit is
     -30.0): multiplying a negative number by something > 1 makes it *more* negative, which is a
     *lower*, easier-to-clear bar -- the opposite of what an early-season penalty should do. Scaling
     by the threshold's own magnitude and adding it back (rather than multiplying the signed value)
     keeps the adjustment in the harder-to-clear direction for both a positive threshold (moves
-    further above zero) and a negative one (moves toward zero, e.g. -30.0 -> -3.3 at GW2) --
-    confirmed against both cases in plans/issue-256-chip-timing.md."""
-    extra = _season_stage_threshold_multiplier(event)
+    further above zero) and a negative one (moves toward zero, e.g. -30.0 -> -3.3 at max caution)
+    -- confirmed against both cases in plans/issue-256-chip-timing.md. Converges to exactly
+    `threshold` at a window's own last gameweek (both extra-caution signals are 0 there), and
+    never exceeds `threshold * 2` in magnitude (both signals are individually capped at
+    _EARLY_SEASON_MAX_EXTRA_MULTIPLIER, and max() of two such values is too)."""
+    extra = _chip_scarcity_extra_caution(event, start_event, stop_event)
     return threshold + abs(threshold) * extra
 
 
@@ -894,13 +965,20 @@ def _chip_recommendation(profile, no_chip_scenario, inventory, eligible, quotas,
         })
     for candidate in candidates:
         candidate["threshold"] = _THRESHOLDS[profile][candidate["chip"]]
-        # Issue #256 (part A): compare against the season-stage-adjusted bar, not the raw
+        # Issue #256 (part A) / #267: compare against the scarcity-adjusted bar, not the raw
         # constant -- see _season_stage_effective_threshold's docstring for why this can't be a
         # plain multiply. `threshold` itself is left unchanged in the payload (still the honest
         # profile-baseline constant SPECIFICATION.md's chip contract requires disclosing);
-        # `effective_threshold` is the one actually decided against.
+        # `effective_threshold` is the one actually decided against. Issue #267: scoped to this
+        # candidate's *own* remaining half-season window (`available`, built above from
+        # `inventory`), not a single whole-season cutoff -- see _chip_window_extra_caution's
+        # docstring for why that matters (the GW20-reset case #256 missed entirely).
+        window = available[candidate["chip"]]
         candidate["effective_threshold"] = round(
-            _season_stage_effective_threshold(candidate["threshold"], event), 1
+            _season_stage_effective_threshold(
+                candidate["threshold"], event, window["start_event"], window["stop_event"]
+            ),
+            1,
         )
         candidate["value_above_threshold"] = round(
             candidate["marginal_value"] - candidate["effective_threshold"], 1
