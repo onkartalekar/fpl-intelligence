@@ -24,6 +24,12 @@ name: Scheduled refresh
 # reuses this tick's cadence rather than introducing a second independent scheduler. Runs
 # regardless of the refresh step's own outcome (`if: always()`) -- the two are unrelated actions
 # with unrelated failure modes, and one failing must never silently skip the other.
+#
+# Issue #286: the archive step's checkpoint capture is now catch-up-wide -- a checkpoint is
+# archived on the first tick between its lead time and the deadline (first-write-wins per slot),
+# not only inside a single hour. So a delayed or skipped hourly tick from GitHub's best-effort
+# cron no longer permanently loses that gameweek's checkpoint, the way every GW2 checkpoint was
+# lost this season.
 
 on:
   schedule:

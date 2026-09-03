@@ -537,6 +537,35 @@ class ArchiveTeamForecastApiTests(unittest.TestCase):
 
         self.assertEqual(payload["archived"], False)
 
+    def _write_bootstrap_with_gw2_deadline(self, deadline):
+        (self.root / "data" / "fpl-bootstrap-latest.json").write_text(
+            json.dumps({"events": [{"id": 2, "deadline_time": deadline, "is_next": True}]}),
+            encoding="utf-8",
+        )
+
+    def test_pre_deadline_forecast_is_archived_when_the_deadline_is_resolvable(self):
+        """Issue #286: with a real bootstrap present, a forecast generated before its event's
+        deadline still archives normally -- the backstop only rejects post-deadline ones."""
+        self._write_bootstrap_with_gw2_deadline("2026-08-21T17:30:00Z")  # after generated_at 16:00Z
+
+        response = self._post({"team_id": 364759, "lead_hours": 24})
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {"status": "ok", "team_id": 364759, "archived": True})
+        store = json.loads((self.root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+        self.assertIn("gw2:24", store["team_forecasts"]["364759"])
+
+    def test_post_deadline_forecast_is_refused_by_the_server_side_backstop(self):
+        """Issue #286: a decision whose generated_at is past its event deadline is
+        hindsight-contaminated -- the endpoint returns 200 but archives nothing."""
+        self._write_bootstrap_with_gw2_deadline("2026-08-19T00:00:00Z")  # before generated_at 16:00Z
+
+        response = self._post({"team_id": 364759, "lead_hours": 24})
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {"status": "ok", "team_id": 364759, "archived": False})
+        self.assertFalse((self.root / "data" / "model-performance.json").exists())
+
     def test_lookup_failure_is_a_500(self):
         def failing_team_view_action(team_id):
             raise RuntimeError("upstream unavailable")
