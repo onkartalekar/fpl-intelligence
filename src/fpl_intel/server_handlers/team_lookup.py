@@ -236,6 +236,27 @@ def make_handle_registered_teams(root, token):
     return handle_registered_teams
 
 
+def _event_deadline(root, event_id):
+    """The deadline ISO string for `event_id` from the cached bootstrap, or None if it can't be
+    resolved. Issue #286: the archive endpoint uses this only as a server-side pre-deadline
+    backstop for `archive_team_forecast`; `_resolve_team_lookup` has already read (and needs)
+    the same artifact by the time this runs, so a missing/corrupt file here just degrades the
+    backstop to a no-op rather than failing the request.
+    """
+    if event_id is None:
+        return None
+    try:
+        bootstrap = json.loads(
+            resolve_artifact(root, "fpl-bootstrap-latest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return None
+    for event in bootstrap.get("events", []):
+        if event.get("id") == int(event_id):
+            return event.get("deadline_time")
+    return None
+
+
 def make_handle_archive_team_forecast(root):
     """Build the POST /api/archive-team-forecast handler (issue #102): archive one team's real
     weekly decision at one deadline checkpoint into the shared model-performance.json.
@@ -255,6 +276,11 @@ def make_handle_archive_team_forecast(root):
     artifacts) can never silently clobber this endpoint's incremental update, or vice versa.
 
     Token already checked by `do_POST` before dispatch, same as `/api/refresh`.
+
+    Issue #286: passes the event's deadline to `archive_team_forecast` as a server-side
+    pre-deadline backstop -- the archiver script's own capture window is now catch-up-wide (a
+    delayed cron tick no longer loses a checkpoint), so the "never freeze a post-deadline,
+    hindsight-contaminated recommendation" guarantee no longer rests on that window alone.
     """
 
     def handle_archive_team_forecast(self, body):
@@ -281,6 +307,7 @@ def make_handle_archive_team_forecast(root):
         if manager is None:
             self._json(500, {"status": "error", "message": "Team lookup failed"})
             return
+        deadline_time = _event_deadline(root, weekly_decisions.get("event"))
         try:
             with project_refresh_lock(root):
                 store_path = resolve_artifact(root, "model-performance.json")
@@ -288,7 +315,9 @@ def make_handle_archive_team_forecast(root):
                     json.loads(store_path.read_text(encoding="utf-8")) if store_path.exists() else {}
                 )
                 before = json.dumps(store.get("team_forecasts", {}).get(str(team_id), {}), sort_keys=True)
-                archive_team_forecast(store, team_id, weekly_decisions, lead_hours)
+                archive_team_forecast(
+                    store, team_id, weekly_decisions, lead_hours, deadline_time=deadline_time
+                )
                 after = json.dumps(store.get("team_forecasts", {}).get(str(team_id), {}), sort_keys=True)
                 archived = before != after
                 if archived:

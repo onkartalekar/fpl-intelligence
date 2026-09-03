@@ -30,7 +30,7 @@ class RunLoopTests(unittest.TestCase):
     archive_team_forecast mocked -- no real network calls, matching
     trigger_scheduled_refresh.py's own RunLoopTests convention."""
 
-    def test_outside_every_window_exits_quietly(self):
+    def test_before_the_first_checkpoint_exits_quietly(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = _bootstrap_with_deadline(hours_from_now=48, now=now)
 
@@ -43,7 +43,25 @@ class RunLoopTests(unittest.TestCase):
         self.assertEqual(code, 0)
         mock_fetch.assert_not_called()
         mock_archive.assert_not_called()
-        self.assertIn("outside every archive window", out.getvalue())
+        self.assertIn("before the first checkpoint's lead time", out.getvalue())
+
+    def test_after_the_deadline_archives_nothing(self):
+        """Issue #286: the catch-up window widened the capture window, but it must still be
+        firmly shut once the deadline has passed -- otherwise a run between the deadline and FPL
+        flagging the GW finished would archive a hindsight-contaminated recommendation."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = _bootstrap_with_deadline(hours_from_now=-1, now=now)
+
+        with patch.object(atf, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(atf, "fetch_registered_teams") as mock_fetch, \
+             patch.object(atf, "archive_team_forecast") as mock_archive, \
+             patch("sys.stdout", new=io.StringIO()) as out:
+            code = atf.run(dry_run=False, base_url="https://example.com", token="tok", now=now)
+
+        self.assertEqual(code, 0)
+        mock_fetch.assert_not_called()
+        mock_archive.assert_not_called()
+        self.assertIn("the deadline has passed", out.getvalue())
 
     def test_no_upcoming_deadline_exits_quietly(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
@@ -59,11 +77,19 @@ class RunLoopTests(unittest.TestCase):
         mock_fetch.assert_not_called()
         self.assertIn("No upcoming gameweek deadline", out.getvalue())
 
-    def test_each_checkpoint_fetches_teams_and_archives_every_one(self):
-        for lead_hours in (24, 12, 3):
-            with self.subTest(lead_hours=lead_hours):
+    def test_only_the_checkpoints_whose_lead_time_has_passed_are_due(self):
+        """Issue #286: a checkpoint is due from its lead time until the deadline, so `now`'s
+        distance from the deadline decides which of the three fire on this tick -- at 24h out
+        only the 24h checkpoint, at 3h out all three (24h and 12h caught up on this same tick)."""
+        cases = {
+            24: [24],
+            12: [24, 12],
+            3: [24, 12, 3],
+        }
+        for hours_from_now, expected_checkpoints in cases.items():
+            with self.subTest(hours_from_now=hours_from_now):
                 now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-                bootstrap = _bootstrap_with_deadline(hours_from_now=lead_hours, now=now)
+                bootstrap = _bootstrap_with_deadline(hours_from_now=hours_from_now, now=now)
 
                 with patch.object(atf, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
                      patch.object(atf, "fetch_registered_teams", return_value=[1, 2]) as mock_fetch, \
@@ -73,9 +99,30 @@ class RunLoopTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 mock_fetch.assert_called_once_with("https://example.com", "tok")
-                mock_archive.assert_any_call("https://example.com", "tok", 1, lead_hours)
-                mock_archive.assert_any_call("https://example.com", "tok", 2, lead_hours)
-                self.assertEqual(mock_archive.call_count, 2)
+                expected_calls = {
+                    (team_id, lead_hours)
+                    for team_id in (1, 2)
+                    for lead_hours in expected_checkpoints
+                }
+                actual_calls = {
+                    (call.args[2], call.args[3]) for call in mock_archive.call_args_list
+                }
+                self.assertEqual(actual_calls, expected_calls)
+
+    def test_a_later_tick_still_captures_a_checkpoint_whose_exact_hour_was_missed(self):
+        """Issue #286's whole point: cron ran at T-13h and then not again until T-8h, skipping
+        the old (11, 12] send hour entirely -- the 12h checkpoint must still be attempted."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = _bootstrap_with_deadline(hours_from_now=8, now=now)
+
+        with patch.object(atf, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(atf, "fetch_registered_teams", return_value=[1]), \
+             patch.object(atf, "archive_team_forecast", return_value={"status": "ok", "archived": True}) as mock_archive, \
+             patch("sys.stdout", new=io.StringIO()):
+            atf.run(dry_run=False, base_url="https://example.com", token="tok", now=now)
+
+        attempted_checkpoints = {call.args[3] for call in mock_archive.call_args_list}
+        self.assertEqual(attempted_checkpoints, {24, 12})
 
     def test_dry_run_never_fetches_teams_or_archives(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)

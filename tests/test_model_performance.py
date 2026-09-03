@@ -494,6 +494,46 @@ class ArchiveTeamForecastTests(unittest.TestCase):
 
         self.assertNotIn("team_forecasts", store)
 
+    def test_deadline_time_after_generated_at_is_archived(self):
+        """Issue #286: the server-side pre-deadline backstop. `_weekly_decisions`'s
+        generated_at is 2026-08-20T16:00Z -- a later deadline means a genuine pre-deadline
+        forecast, archived normally."""
+        store = {}
+
+        archive_team_forecast(
+            store, 364759, _weekly_decisions(), lead_hours=24, deadline_time="2026-08-21T17:30:00Z",
+        )
+
+        self.assertIn("gw2:24", store["team_forecasts"]["364759"])
+
+    def test_deadline_time_at_or_before_generated_at_blocks_the_archive(self):
+        """Issue #286: a decision generated after its deadline is hindsight-contaminated -- the
+        exact thing issue #102 exists to prevent -- so it is refused even though its status is
+        `active`."""
+        for deadline in ("2026-08-20T16:00:00Z", "2026-08-20T10:00:00Z"):
+            with self.subTest(deadline=deadline):
+                store = {}
+
+                archive_team_forecast(
+                    store, 364759, _weekly_decisions(), lead_hours=24, deadline_time=deadline,
+                )
+
+                self.assertNotIn("team_forecasts", store)
+
+    def test_unparseable_or_naive_deadline_time_fails_closed(self):
+        """Issue #286: if the endpoint supplies a deadline it can't prove the forecast predates
+        (garbage, or a timezone-naive string), refuse rather than archive a possibly-hindsight
+        snapshot."""
+        for deadline in ("not-a-timestamp", "2026-08-21T17:30:00"):
+            with self.subTest(deadline=deadline):
+                store = {}
+
+                archive_team_forecast(
+                    store, 364759, _weekly_decisions(), lead_hours=24, deadline_time=deadline,
+                )
+
+                self.assertNotIn("team_forecasts", store)
+
 
 class ShadowForecastTests(unittest.TestCase):
     """Issue #65: non-champion model_versions are tracked and scored additively, without

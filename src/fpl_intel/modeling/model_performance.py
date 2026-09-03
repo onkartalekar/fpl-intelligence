@@ -149,7 +149,24 @@ def archive_forecast(store, decision, deadline_time=None):
     return store
 
 
-def archive_team_forecast(store, team_id, weekly_decisions, lead_hours):
+def _generated_strictly_before(generated_at, deadline_time):
+    """True only when `generated_at` parses as a tz-aware timestamp strictly before
+    `deadline_time`. Fail-closed: any parse failure, missing value, or naive datetime returns
+    False. Mirrors the pre-deadline gate `archive_forecast` applies inline above; extracted so
+    `archive_team_forecast` can apply the identical check (issue #286) without `archive_forecast`
+    itself changing.
+    """
+    try:
+        generated = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+        deadline = datetime.fromisoformat(str(deadline_time).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if generated.tzinfo is None or deadline.tzinfo is None:
+        return False
+    return generated < deadline
+
+
+def archive_team_forecast(store, team_id, weekly_decisions, lead_hours, deadline_time=None):
     """Archive one team's real weekly transfer/captaincy decision at one deadline checkpoint
     (issue #102).
 
@@ -175,8 +192,19 @@ def archive_team_forecast(store, team_id, weekly_decisions, lead_hours):
     Stores IDs, not full player objects, matching `archive_forecast`'s own minimal-footprint
     style -- the full player catalog is already available elsewhere (`players.json`), so this
     only needs to record which player IDs the recommendation chose.
+
+    `deadline_time` (issue #286): when supplied, a server-side backstop refusing any decision
+    whose `generated_at` is at or after the event deadline -- so a caller bug, or a future
+    change to the archiver's own capture window, can never silently start freezing a
+    hindsight-contaminated recommendation. Optional and defaulting to None only for backward
+    compatibility with existing callers/tests; the `/api/archive-team-forecast` endpoint always
+    passes it. `archive_forecast` above already enforces the equivalent gate inline.
     """
     if weekly_decisions.get("status") != "active" or not weekly_decisions.get("event"):
+        return store
+    if deadline_time is not None and not _generated_strictly_before(
+        weekly_decisions.get("generated_at"), deadline_time
+    ):
         return store
     profiles_in = weekly_decisions.get("profiles") or []
     if not profiles_in:

@@ -72,3 +72,19 @@ def in_send_window(deadline_iso, now, lead_hours):
     """True for exactly one hourly tick per gameweek: `(lead_hours - 1, lead_hours]` hours out."""
     hours_left = hours_until(deadline_iso, now)
     return (lead_hours - 1) < hours_left <= lead_hours
+
+
+def within_capture_window(deadline_iso, now, lead_hours):
+    """True on every tick from `lead_hours` before the deadline until the deadline itself.
+
+    The catch-up counterpart to `in_send_window` (issue #286): that fires for a single hourly
+    tick and permanently misses its checkpoint whenever GitHub's best-effort cron delays that
+    one tick past the hour -- as it did for every GW2 checkpoint this season. This window stays
+    open for the whole run-up, so a later tick still captures the checkpoint. Callers must dedupe
+    (the archiver relies on `archive_team_forecast`'s first-write-wins per `gw{event}:{lead_hours}`
+    slot). The `> 0` lower bound is load-bearing: it keeps the window from reopening after the
+    deadline passes but before FPL flags the gameweek `finished`, which is what stops a widened
+    capture from ever archiving a post-deadline, hindsight-contaminated recommendation.
+    """
+    hours_left = hours_until(deadline_iso, now)
+    return 0 < hours_left <= lead_hours
