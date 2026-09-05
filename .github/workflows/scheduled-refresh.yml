@@ -25,13 +25,18 @@ name: Scheduled refresh
 # regardless of the refresh step's own outcome (`if: always()`) -- the two are unrelated actions
 # with unrelated failure modes, and one failing must never silently skip the other.
 #
+# Issue #286: the archive step's checkpoint capture is now catch-up-wide -- a checkpoint is
+# archived on the first tick between its lead time and the deadline (first-write-wins per slot),
+# not only inside a single hour. So a delayed or skipped hourly tick from GitHub's best-effort
+# cron no longer permanently loses that gameweek's checkpoint, the way every GW2 checkpoint was
+# lost this season.
+#
 # Issue #288 stopgap (option d): GitHub's schedule dispatch degraded to 3-6h gaps for over a week,
-# which the archiver's own checkpoint windows (issue #286, first-tick-after-lead-time,
-# first-write-wins) tolerate, but which still means market-data refreshes and archive attempts
-# were only landing ~4-8 times a day instead of the intended ~24. Cron is widened to every 15
-# minutes so a badly-delayed dispatch still ticks often enough to land inside each checkpoint
-# window and keep refreshes closer to the intended cadence. This is a stopgap, not a fix for the
-# dispatch delay itself -- see #288's option (a)/(c) for that.
+# which #286's catch-up-wide checkpoint capture tolerates, but which still means market-data
+# refreshes and archive attempts were only landing ~4-8 times a day instead of the intended ~24.
+# Cron is widened to every 15 minutes so a badly-delayed dispatch still ticks often enough to
+# land inside each checkpoint window and keep refreshes closer to the intended cadence. This is a
+# stopgap, not a fix for the dispatch delay itself -- see #288's option (a)/(c) for that.
 
 on:
   schedule:

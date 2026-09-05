@@ -16,12 +16,19 @@ by `.github/workflows/scheduled-refresh.yml` (issue #102's own dependency note: 
 workflow's existing hourly tick rather than introducing a second independent scheduler), but takes
 no opinion on what invokes it.
 
-Deadline-window resolution reuses `fpl_intel.sources.deadline_windows` -- the same live-bootstrap-fetch +
-stateless-window-check arithmetic `send_deadline_reminder.py`/`trigger_scheduled_refresh.py`
-already use, checked against all three of `CHECKPOINT_LEAD_HOURS` (the same 3/12/24-hour values
-issue #79 already exposes to visitors as their reminder-timing choice, `server.py`'s
-`_ALLOWED_REMINDER_LEAD_HOURS`) rather than inventing new checkpoint values, instead of the single
-lead_hours value `send_deadline_reminder.py` checks.
+Deadline-window resolution reuses `fpl_intel.sources.deadline_windows` -- the same live-bootstrap-fetch
++ stateless arithmetic `send_deadline_reminder.py`/`trigger_scheduled_refresh.py` already use --
+checked against all three of `CHECKPOINT_LEAD_HOURS` (the same 3/12/24-hour values issue #79 already
+exposes to visitors as their reminder-timing choice, `server.py`'s `_ALLOWED_REMINDER_LEAD_HOURS`)
+rather than inventing new checkpoint values.
+
+Issue #286: this uses `within_capture_window`, not `send_deadline_reminder.py`'s single-hour
+`in_send_window`. A checkpoint is "due" on every tick from its lead time until the deadline, so a
+delayed GitHub cron tick still captures it -- a missed hour used to lose that gameweek's checkpoint
+for the whole user base permanently (every GW2 checkpoint this season). Redundant re-attempts on
+later ticks are harmless: `archive_team_forecast` is first-write-wins per `gw{event}:{lead_hours}`
+slot. Post-deadline capture stays impossible -- `within_capture_window`'s `> 0` lower bound, plus
+a server-side `generated_at < deadline_time` backstop in `archive_team_forecast` itself.
 
 Configuration, entirely environment-variable driven, matching this repo's other scripts:
 
@@ -49,7 +56,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from fpl_intel.sources.deadline_windows import (
-    DeadlineDataError, in_send_window, load_bootstrap_and_fixtures, next_unfinished_event,
+    DeadlineDataError, load_bootstrap_and_fixtures, next_unfinished_event, within_capture_window,
 )
 
 
@@ -119,12 +126,17 @@ def run(dry_run, base_url, token, root=ROOT, now=None):
         print("No upcoming gameweek deadline found -- nothing to check.")
         return 0
 
+    # Issue #286: a checkpoint is "due" from its lead time right up to the deadline, not just in
+    # the single hour `in_send_window` used to gate on -- so a delayed cron tick still captures
+    # it. Re-attempting an already-captured checkpoint on a later tick is a harmless no-op:
+    # `archive_team_forecast` is first-write-wins per `gw{event}:{lead_hours}` slot, and the
+    # endpoint reports it back as `archived: false`.
     matching_checkpoints = [
         lead_hours for lead_hours in CHECKPOINT_LEAD_HOURS
-        if in_send_window(event["deadline_time"], now, lead_hours)
+        if within_capture_window(event["deadline_time"], now, lead_hours)
     ]
     if not matching_checkpoints:
-        print("checked: outside every archive window")
+        print("checked: before the first checkpoint's lead time, or the deadline has passed")
         return 0
 
     if dry_run:
