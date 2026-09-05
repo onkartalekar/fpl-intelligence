@@ -36,6 +36,15 @@ def fetch_manager_event_picks(team_id, event_id, fetch_json=None):
     return fetch_json(f"{_API_ROOT}/entry/{int(team_id)}/event/{int(event_id)}/picks/")
 
 
+def fetch_manager_transfers(team_id, fetch_json=None):
+    """Fetch a manager's full transfer history (issue #285) -- unlike
+    `fetch_manager_event_picks`, FPL's `/transfers/` endpoint already returns every transfer a
+    manager has ever made in one call, kept indefinitely, so backfilling every gameweek needs one
+    fetch per team rather than one per missing event."""
+    fetch_json = fetch_json or _fetch_json
+    return fetch_json(f"{_API_ROOT}/entry/{int(team_id)}/transfers/")
+
+
 def summarize_manager(raw, bootstrap):
     """Create dashboard-safe manager state and map public picks to FPL players."""
     entry = raw.get("entry", {})

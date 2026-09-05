@@ -7,9 +7,11 @@ from fpl_intel.modeling.model_performance import (
     build_performance_report,
     build_shadow_performance_report,
     build_team_model_performance,
+    build_team_transfer_adherence,
     migrate_manager_picks,
     normalize_live_event,
     normalize_manager_picks,
+    normalize_manager_transfers,
 )
 
 
@@ -377,15 +379,19 @@ class ModelPerformanceTests(unittest.TestCase):
         self.assertNotIn("manager_picks", store)
 
 
-def _weekly_decisions(status="active", event=2, action="roll"):
+def _weekly_decisions(status="active", event=2, action="roll", transfers=None):
     """A minimal `build_transfer_decisions`/`build_draft_decisions`-shaped fixture -- the actual
     shape `archive_team_forecast` (issue #102) archives, structurally different from
-    `_decision()`'s `decision_center`-shaped fixture above (`archive_forecast`'s own target)."""
+    `_decision()`'s `decision_center`-shaped fixture above (`archive_forecast`'s own target).
+
+    `transfers` (issue #285): `_move_record`-shaped `{"out": {"id", ...}, "in": {"id", ...}}`
+    entries, matching what `transfer_decisions.py`'s own scenarios actually attach.
+    """
     if status != "active":
         return {"status": status, "event": event, "reason": "not available"}
     recommendation = {
         "action": action,
-        "transfers": [],
+        "transfers": transfers or [],
         "transfer_count": 0 if action == "roll" else 1,
         "point_cost": 0,
         "gross_gain_5gw": 3.2,
@@ -437,6 +443,38 @@ class ArchiveTeamForecastTests(unittest.TestCase):
         self.assertEqual(len(balanced["lineup_player_ids"]), 11)
         self.assertEqual(len(balanced["bench_player_ids"]), 4)
         self.assertEqual(balanced["formation"], "3-4-3")
+
+    def test_freezes_the_recommended_transfer_in_out_pairs(self):
+        """Issue #285: `recommendation["transfers"]` -> `{out_id, in_id}` pairs, needed for a
+        future player-for-player comparison against the manager's actual transfers."""
+        store = {}
+        move = {
+            "out": {"id": 7, "name": "Sold Player", "club": "AAA", "selling_price": 55},
+            "in": {"id": 8, "name": "Bought Player", "club": "BBB", "price": 60},
+        }
+
+        archive_team_forecast(
+            store, 364759,
+            _weekly_decisions(action="single_transfer", transfers=[move]),
+            lead_hours=24,
+        )
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(balanced["transfers"], [{"out_id": 7, "in_id": 8}])
+
+    def test_no_transfers_freezes_an_empty_list_not_a_missing_key(self):
+        store = {}
+
+        archive_team_forecast(store, 364759, _weekly_decisions(action="roll"), lead_hours=24)
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(balanced["transfers"], [])
 
     def test_distinct_checkpoints_are_stored_independently(self):
         store = {}
@@ -640,6 +678,198 @@ class ShadowForecastTests(unittest.TestCase):
             self.assertEqual(with_shadow[key], without_shadow[key])
         self.assertIn("ml-minutes-ridge-v1", with_shadow["shadow_models"])
         self.assertEqual(without_shadow["shadow_models"], {})
+
+
+class NormalizeManagerTransfersTests(unittest.TestCase):
+    """Issue #285: buckets a manager's whole `/transfers/` history by gameweek in one pass."""
+
+    def test_buckets_by_event(self):
+        payload = [
+            {"element_in": 10, "element_out": 20, "event": 2, "element_in_cost": 55, "element_out_cost": 50, "time": "t1"},
+            {"element_in": 11, "element_out": 21, "event": 2, "element_in_cost": 60, "element_out_cost": 45, "time": "t2"},
+            {"element_in": 30, "element_out": 40, "event": 3, "element_in_cost": 50, "element_out_cost": 50, "time": "t3"},
+        ]
+
+        by_event = normalize_manager_transfers(payload)
+
+        self.assertEqual(
+            by_event,
+            {
+                "2": [{"in_id": 10, "out_id": 20}, {"in_id": 11, "out_id": 21}],
+                "3": [{"in_id": 30, "out_id": 40}],
+            },
+        )
+
+    def test_ignores_rows_missing_event_or_player_ids(self):
+        payload = [
+            {"event": 2, "element_in": None, "element_out": 5},
+            {"event": None, "element_in": 1, "element_out": 2},
+        ]
+
+        self.assertEqual(normalize_manager_transfers(payload), {})
+
+    def test_empty_or_missing_payload_is_empty(self):
+        self.assertEqual(normalize_manager_transfers([]), {})
+        self.assertEqual(normalize_manager_transfers(None), {})
+
+
+class TransferAdherenceTests(unittest.TestCase):
+    """Issue #285: "recommended vs performed" transfer-adherence rows."""
+
+    def _base_store(self, event=2, action="roll", lead_hours=24):
+        store = {}
+        archive_team_forecast(store, 364759, _weekly_decisions(event=event, action=action), lead_hours=lead_hours)
+        store["actual_events"] = {str(event): {str(i): 4 for i in range(1, 16)}}
+        store["manager_picks"] = {
+            str(364759): {
+                str(event): [
+                    {"element_id": player_id, "multiplier": 2 if player_id == 1 else 1, "is_captain": player_id == 1}
+                    for player_id in range(1, 12)
+                ]
+            }
+        }
+        return store
+
+    def test_no_row_without_a_finished_gameweek(self):
+        store = self._base_store()
+        del store["actual_events"]["2"]
+        store["manager_transfers"] = {"364759": {"2": []}}
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["status"], "waiting_for_results")
+        self.assertEqual(report["rows"], [])
+
+    def test_no_row_without_backfilled_actual_transfers(self):
+        """A missing `manager_transfers[event]` key means "not backfilled yet," not "zero
+        transfers" -- must not fabricate a row from it."""
+        store = self._base_store()
+        # store["manager_transfers"] deliberately left absent entirely.
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["rows"], [])
+
+    def test_no_row_without_backfilled_actual_picks(self):
+        store = self._base_store()
+        store["manager_transfers"] = {"364759": {"2": []}}
+        del store["manager_picks"]["364759"]["2"]
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["rows"], [])
+
+    def test_followed_yes_when_transfer_counts_match(self):
+        store = self._base_store(action="roll")  # transfer_count 0
+        store["manager_transfers"] = {"364759": {"2": []}}  # manager also rolled
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["status"], "active")
+        balanced = next(row for row in report["rows"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["recommended_transfer_count"], 0)
+        self.assertEqual(balanced["actual_transfer_count"], 0)
+        self.assertEqual(balanced["followed"], "yes")
+
+    def test_followed_no_when_counts_differ(self):
+        store = self._base_store(action="roll")
+        store["manager_transfers"] = {"364759": {"2": [{"in_id": 99, "out_id": 1}]}}
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        balanced = next(row for row in report["rows"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["actual_transfer_count"], 1)
+        self.assertEqual(balanced["followed"], "no")
+
+    def test_not_among_modeled_scenarios_when_actual_exceeds_the_models_own_menu(self):
+        """The model always evaluates roll/1/2/3+ transfers (transfer_decisions.py's own
+        scenarios) -- 4+ actual transfers had no modeled alternative to have followed."""
+        store = self._base_store(action="roll")
+        store["manager_transfers"] = {
+            "364759": {"2": [{"in_id": player_id, "out_id": player_id + 100} for player_id in range(4)]}
+        }
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        balanced = next(row for row in report["rows"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["actual_transfer_count"], 4)
+        self.assertEqual(balanced["followed"], "not among modeled scenarios")
+
+    def test_recommended_and_actual_path_points_and_delta(self):
+        store = self._base_store(action="roll")
+        store["actual_events"]["2"] = {
+            "1": 10, "2": 2, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1, "8": 1, "9": 1, "10": 1, "11": 1,
+        }
+        store["manager_picks"]["364759"]["2"] = [
+            {"element_id": player_id, "multiplier": 2 if player_id == 2 else 1, "is_captain": player_id == 2}
+            for player_id in range(1, 12)
+        ]
+        store["manager_transfers"] = {"364759": {"2": []}}
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        balanced = next(row for row in report["rows"] if row["profile_id"] == "balanced")
+        # Recommended: lineup 1..11 (10 + 2 + nine 1s = 21) plus the recommended captain (id 1,
+        # worth 10) counted again -- 21 + 10 = 31.
+        self.assertEqual(balanced["recommended_path_points"], 31)
+        # Actual: same 11 picks, but the manager's own captain is player 2 (worth 2, doubled) --
+        # 10 + 2*2 + nine 1s = 10 + 4 + 9 = 23.
+        self.assertEqual(balanced["actual_path_points"], 23)
+        self.assertEqual(balanced["delta"], 23 - 31)
+
+    def test_summary_excludes_not_among_modeled_scenarios_from_adherence_rate_but_not_from_mean_delta(self):
+        store = self._base_store(event=2, action="roll", lead_hours=24)
+        archive_team_forecast(store, 364759, _weekly_decisions(event=3, action="roll"), lead_hours=24)
+        store["actual_events"]["3"] = {str(i): 4 for i in range(1, 16)}
+        store["manager_picks"]["364759"]["3"] = [
+            {"element_id": player_id, "multiplier": 2 if player_id == 1 else 1, "is_captain": player_id == 1}
+            for player_id in range(1, 12)
+        ]
+        store["manager_transfers"] = {
+            "364759": {
+                "2": [],  # matches "roll" -> followed
+                "3": [{"in_id": player_id, "out_id": player_id + 100} for player_id in range(4)],  # not modeled
+            }
+        }
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["summary"]["count"], 6)  # 3 profiles x 2 gameweeks
+        # Only the 3 GW2 rows ("yes") count toward the rate; the 3 GW3 "not among modeled
+        # scenarios" rows are excluded rather than scored as failures.
+        self.assertEqual(report["summary"]["adherence_rate"], 1.0)
+        # Every row here has identical recommended/actual picks -> delta 0 for all 6 rows,
+        # including the excluded ones -- mean_delta is NOT adherence-filtered.
+        self.assertEqual(report["summary"]["mean_delta"], 0.0)
+
+    def test_summary_is_none_when_no_rows_are_scored_at_all(self):
+        store = self._base_store()
+        # No manager_transfers backfilled -- zero rows produced.
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["summary"], {"count": 0, "adherence_rate": None, "mean_delta": None})
+
+    def test_gap_in_archived_checkpoints_yields_no_row_for_that_gameweek(self):
+        """A gameweek whose checkpoint archiver never fired (issue #288's cron-reliability gaps)
+        must show as absent, never a hindsight-filled row."""
+        store = {"actual_events": {"5": {"1": 4}}, "manager_picks": {"364759": {"5": []}}}
+        store["manager_transfers"] = {"364759": {"5": []}}
+        # No team_forecasts entry for GW5 at all.
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        self.assertEqual(report["rows"], [])
+        self.assertEqual(report["status"], "waiting_for_results")
+
+    def test_wired_into_build_team_model_performance(self):
+        store = self._base_store(action="roll")
+        store["manager_transfers"] = {"364759": {"2": []}}
+
+        report = build_team_model_performance(store, team_id=364759)
+
+        self.assertIn("transfer_adherence", report)
+        self.assertEqual(report["transfer_adherence"]["status"], "active")
 
 
 if __name__ == "__main__":

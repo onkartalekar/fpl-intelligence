@@ -781,6 +781,76 @@ class RefreshProjectTests(unittest.TestCase):
             self.assertEqual(comparison["modeled_points"], 10.0)
             self.assertEqual(comparison["actual_points"], 6)
 
+    def test_refresh_backfills_manager_transfers_for_a_finished_event(self):
+        """Issue #285: unlike manager_picks (one payload per event), `/transfers/` returns a
+        manager's whole history in one call -- `manager_transfers_payloads` is keyed by team only,
+        not by (team, event)."""
+        bootstrap = {
+            "events": [
+                {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-14T17:30:00Z", "finished": True},
+                {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-21T17:30:00Z", "is_next": True, "finished": False},
+            ],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+        transfers_payload = [
+            {"element_in": 2, "element_out": 1, "event": 1, "element_in_cost": 55, "element_out_cost": 50, "time": "t"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps({"manager": {"team_id": 364759}}), encoding="utf-8"
+            )
+
+            refresh_project(
+                root,
+                bootstrap_payload=bootstrap,
+                manager_transfers_payloads={364759: transfers_payload},
+                generated_at="2026-08-22T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                persisted["manager_transfers"]["364759"]["1"],
+                [{"in_id": 2, "out_id": 1}],
+            )
+
+    def test_a_finished_event_with_no_transfers_records_an_empty_list_not_a_missing_key(self):
+        bootstrap = {
+            "events": [
+                {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-14T17:30:00Z", "finished": True},
+                {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-21T17:30:00Z", "is_next": True, "finished": False},
+            ],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "config").mkdir()
+            (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+            (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+            (root / "config" / "user-profile.json").write_text(
+                json.dumps({"manager": {"team_id": 364759}}), encoding="utf-8"
+            )
+
+            refresh_project(
+                root,
+                bootstrap_payload=bootstrap,
+                manager_transfers_payloads={364759: []},  # the manager has never made a transfer
+                generated_at="2026-08-22T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertIn("1", persisted["manager_transfers"]["364759"])
+            self.assertEqual(persisted["manager_transfers"]["364759"]["1"], [])
+            # GW2 hasn't finished -- no key should be recorded for it either way.
+            self.assertNotIn("2", persisted["manager_transfers"]["364759"])
+
 
 class VolumeShadowedSeedFilesRegressionTests(unittest.TestCase):
     """Regression coverage for the live Railway bug: a volume mounted at `data/` shadows the
@@ -993,6 +1063,109 @@ class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
 
             persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
             self.assertEqual(set(persisted["manager_picks"].keys()), {"100"})
+
+
+class ManagerTransfersMultiTeamCollectionTests(unittest.TestCase):
+    """Issue #285: `manager_transfers` follows manager_picks's own "every saved profile's team,
+    capped per run" discipline (issue #64's C1), but needs only one fetch per team rather than one
+    per missing event -- see `fetch_manager_transfers`'s docstring."""
+
+    def _bootstrap(self):
+        return {
+            "events": [
+                {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-14T17:30:00Z", "finished": True},
+                {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-21T17:30:00Z", "is_next": True, "finished": False},
+            ],
+            "elements": [{"id": 1}],
+            "teams": [{"id": 1}],
+        }
+
+    def _seed_root(self, directory, team_ids):
+        from fpl_intel.storage.profiles import save_profile
+
+        root = Path(directory)
+        (root / "data").mkdir()
+        (root / "config").mkdir()
+        (root / "data" / "confirmed-transfers.json").write_text(json.dumps({"transfers": []}), encoding="utf-8")
+        (root / "config" / "sources.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+        for team_id in team_ids:
+            save_profile(
+                root / "data" / "profiles.db", team_id=team_id, timezone="UTC",
+                risk_profile="balanced", confirmed_free_transfers=None,
+                confirmed_free_transfers_event=None, now="2026-08-08T00:00:00Z",
+            )
+        return root
+
+    def test_refresh_collects_transfers_for_every_saved_profiles_team(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200])
+
+            refresh_project(
+                root,
+                bootstrap_payload=self._bootstrap(),
+                manager_transfers_payloads={100: [], 200: []},
+                generated_at="2026-08-15T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted["manager_transfers"].keys()), {"100", "200"})
+
+    def test_refresh_caps_the_number_of_teams_collected_in_one_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200, 300])
+
+            with patch("fpl_intel.refresh._MANAGER_PICKS_TEAM_CAP", 2), \
+                 patch("fpl_intel.refresh.fetch_bootstrap", return_value=self._bootstrap()), \
+                 patch("fpl_intel.refresh.fetch_fixtures", return_value=[]), \
+                 patch("fpl_intel.refresh.fetch_manager_event_picks", return_value=None), \
+                 patch("fpl_intel.refresh.fetch_manager_transfers", return_value=[]) as mock_fetch:
+                refresh_project(root, generated_at="2026-08-15T12:00:00-04:00")
+
+            called_team_ids = sorted(call.args[0] for call in mock_fetch.call_args_list)
+            self.assertEqual(called_team_ids, [100, 200])
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted["manager_transfers"].keys()), {"100", "200"})
+
+    def test_teams_already_caught_up_do_not_consume_the_cap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 200])
+            (root / "data" / "model-performance.json").write_text(
+                json.dumps({
+                    "forecasts": [], "actual_events": {},
+                    "manager_transfers": {"100": {"1": []}},
+                }),
+                encoding="utf-8",
+            )
+
+            with patch("fpl_intel.refresh._MANAGER_PICKS_TEAM_CAP", 1), \
+                 patch("fpl_intel.refresh.fetch_bootstrap", return_value=self._bootstrap()), \
+                 patch("fpl_intel.refresh.fetch_fixtures", return_value=[]), \
+                 patch("fpl_intel.refresh.fetch_manager_event_picks", return_value=None), \
+                 patch("fpl_intel.refresh.fetch_manager_transfers", return_value=[]) as mock_fetch:
+                refresh_project(root, generated_at="2026-08-15T12:00:00-04:00")
+
+            called_team_ids = sorted(call.args[0] for call in mock_fetch.call_args_list)
+            self.assertEqual(called_team_ids, [200])
+
+    def test_a_transfers_fetch_failure_is_recorded_without_crashing_the_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100])
+
+            with patch("fpl_intel.refresh.fetch_bootstrap", return_value=self._bootstrap()), \
+                 patch("fpl_intel.refresh.fetch_fixtures", return_value=[]), \
+                 patch("fpl_intel.refresh.fetch_manager_event_picks", return_value=None), \
+                 patch("fpl_intel.refresh.fetch_manager_transfers", side_effect=RuntimeError("boom")):
+                state = refresh_project(root, generated_at="2026-08-15T12:00:00-04:00")
+
+            self.assertTrue(
+                any("manager transfers collection failed" in error for error in state["model_performance"]["collection_errors"])
+            )
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            # The failed fetch leaves no event key recorded for this team -- distinct from a
+            # successful backfill, which would record `[]` for every finished event (see
+            # test_a_finished_event_with_no_transfers_records_an_empty_list_not_a_missing_key).
+            self.assertEqual(persisted["manager_transfers"]["100"], {})
 
 
 class ComputeManagerViewTests(unittest.TestCase):
