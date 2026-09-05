@@ -1228,12 +1228,25 @@ def build_transfer_decisions(
             best_multi_leg is not None
             and best_multi_leg["net_gain_5gw"] > ordinary_recommendation["net_gain_5gw"] + required_margin
         ):
+            # Issue #266: `required_margin` itself, and how far above it the winning margin
+            # actually was, are attached to the recommendation before it's overwritten below --
+            # mirrors `_chip_recommendation`'s own `threshold`/`effective_threshold`/
+            # `value_above_threshold` fields, which were already on the payload while this side's
+            # equivalent was a bare local variable invisible to the frontend (confirmed while
+            # investigating #266 -- see its plan doc's finding 4). Computed against the
+            # *pre-override* `ordinary_recommendation`'s own net_gain_5gw, the same baseline the
+            # `if` above just compared against, not the multi-leg scenario's own.
+            margin_above_required = round(
+                best_multi_leg["net_gain_5gw"] - ordinary_recommendation["net_gain_5gw"] - required_margin, 1
+            )
             ordinary_recommendation = dict(best_multi_leg)
             ordinary_recommendation["reason"] = (
                 f"Making {ordinary_recommendation['transfer_count']} transfers this gameweek projects the strongest "
                 "five-gameweek net gain of any option modeled -- an immediate-horizon comparison only, unlike the "
                 "five-gameweek planner's roll/single/double comparison above, which also weighs future flexibility."
             )
+            ordinary_recommendation["required_margin"] = round(required_margin, 1)
+            ordinary_recommendation["margin_above_required"] = margin_above_required
         scenarios = scenarios + multi_leg_scenarios
         chip = _chip_recommendation(
             profile, ordinary_recommendation, inventory, eligible, quotas, total_sale_budget, club_limit,

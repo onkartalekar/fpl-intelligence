@@ -883,6 +883,30 @@ function renderWeeklyDecision(profileId = null) {
     : `<div class="decision-metric"><b>${weekly.free_transfers}</b><span>Free transfer${weekly.free_transfers === 1 ? "" : "s"} now · ${weekly.free_transfer_source === "confirmed_local" ? "confirmed locally" : "estimated from public history"}</span></div><div class="decision-metric"><b>${recommendation.free_transfers_next_event}</b><span>Available next GW</span></div><div class="decision-metric"><b>${Number(plan.five_gameweek_advantage_over_roll || 0).toFixed(1)}</b><span>5-GW planner edge over roll</span></div><div class="decision-metric"><b>${recommendation.point_cost ? `−${recommendation.point_cost}` : "0"}</b><span>Immediate transfer cost</span></div><div class="decision-metric"><b>£${Number(recommendation.bank_after).toFixed(1)}m</b><span>Bank after decision</span></div>`;
   byId("weekly-recommendation").innerHTML =
     `<strong>${esc(actionLabel)}</strong>${chipPlaySummary}${transferPairs}<span class="muted">Captain ${esc(recommendation.captain.name)} · vice-captain ${esc(recommendation.vice_captain.name)} · ${esc(recommendation.formation)} · ${Number(recommendation.projected_event_points_including_captain).toFixed(1)} modeled GW${weekly.event} points</span>`;
+  // Issue #266: "what changed since last week" -- compares this profile's live recommendation
+  // against what the most recent earlier checkpoint's own conditional_branches already
+  // anticipated for this same gameweek (build_team_plan_diff, model_performance.py). Only
+  // rendered when there's something to say; a profile with no matching prior checkpoint (a
+  // cron-gap-missed deadline, or simply the first time this gameweek has ever been planned)
+  // shows nothing here, never a fabricated "nothing changed."
+  const diffEntry = (weekly.plan_diff?.profiles || []).find((row) => row.profile_id === selected.id);
+  const diffNotes = [];
+  if (diffEntry) {
+    if (diffEntry.action_changed) {
+      diffNotes.push(
+        `Last week's plan expected ${esc(labelFor(diffEntry.prior_action, recommendation.transfer_count))} here; this week recommends ${esc(labelFor(diffEntry.current_action, recommendation.transfer_count))} instead.`,
+      );
+    }
+    if (diffEntry.chip_now_recommended) {
+      diffNotes.push(
+        diffEntry.chip_signal_was_flagged
+          ? `This chip signal for Gameweek ${weekly.event} was already flagged last week.`
+          : `This chip signal for Gameweek ${weekly.event} is new since last week.`,
+      );
+    }
+  }
+  byId("weekly-plan-diff").hidden = diffNotes.length === 0;
+  byId("weekly-plan-diff").innerHTML = diffNotes.map((note) => `<div>${note}</div>`).join("");
   byId("weekly-scenarios").innerHTML = (selected.scenarios || [])
     .map((scenario, index) => {
       const planned = (plan.alternatives || []).find(
@@ -917,7 +941,15 @@ function renderWeeklyDecision(profileId = null) {
       branches
         .map((branch) => {
           const branchLabel = actionLabels[branch.action] || branch.action;
-          return `<div class="conditional-branch"><strong>GW${branch.event}: ${esc(branchLabel)} · provisional</strong><span>${esc(branch.condition)}</span><span>${branch.point_cost ? `Potential −${branch.point_cost} hit · ` : ""}${branch.free_transfers_before} FT before · ${branch.free_transfers_next_event} FT next</span></div>`;
+          // Issue #266: chip_signal has been computed since #256 (_conditional_branches,
+          // transfer_decisions.py) but was never rendered here -- confirmed by grepping every
+          // dashboard JS file for the field before this fix. Surfacing it here is also what makes
+          // the "this chip signal was already flagged last week" week-over-week note meaningful:
+          // without it, "already flagged" would refer to a signal a manager was never shown.
+          const chipSignalNote = branch.chip_signal
+            ? `<span class="status-wait">${esc(branch.chip_signal)}</span>`
+            : "";
+          return `<div class="conditional-branch"><strong>GW${branch.event}: ${esc(branchLabel)} · provisional</strong><span>${esc(branch.condition)}</span><span>${branch.point_cost ? `Potential −${branch.point_cost} hit · ` : ""}${branch.free_transfers_before} FT before · ${branch.free_transfers_next_event} FT next</span>${chipSignalNote}</div>`;
         })
         .join("") ||
       '<div class="empty">No future action clears the current hold path. Recalculate after the next explicit refresh.</div>';
@@ -958,10 +990,25 @@ function renderWeeklyDecision(profileId = null) {
   // every alternative card below -- including the picked chip's own card, which already appears in
   // `alternatives` (unfiltered by transfer_decisions.py) -- so it isn't repeated a second time up
   // here too (caught via live user feedback: the two copies read as redundant, not reinforcing).
+  // Issue #266: effective_threshold/value_above_threshold have been on this payload since #267
+  // (the season-stage/scarcity-adjusted bar actually being compared against) but were never
+  // rendered here -- confirmed by grepping every dashboard JS file for both fields before this
+  // fix. Only the static threshold was ever shown, so a manager had no way to see "the bar came
+  // down" (the exact story #266's amendment is about) even for *this* week's own numbers. Shown
+  // only when it actually differs from the raw threshold -- late-season, once decay has settled
+  // to ~0, the two are identical and a second identical number would just be noise.
+  const effectiveThresholdNote = (item) =>
+    item.effective_threshold != null && Math.abs(item.effective_threshold - item.threshold) >= 0.05
+      ? `<br><span class="muted">Currently ${Number(item.effective_threshold).toFixed(1)} (adjusted for season stage/chip scarcity)</span>`
+      : "";
+  const valueAboveThresholdNote = (item) =>
+    item.value_above_threshold != null
+      ? `<br><span class="muted">${item.value_above_threshold >= 0 ? "Clears" : "Below"} by ${Number(item.value_above_threshold).toFixed(1)}</span>`
+      : "";
   const alternatives = (chip.alternatives || [])
     .map(
       (item) =>
-        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts <span class="muted">(${chipHorizonLabel(item.horizon)})</span><br><span class="muted">${esc(squadBasisLabel(item.chip))}</span><br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span></div>`,
+        `<div class="chip-alternative"><strong>${esc(item.label)}</strong><br>${Number(item.marginal_value).toFixed(1)} marginal xPts <span class="muted">(${chipHorizonLabel(item.horizon)})</span><br><span class="muted">${esc(squadBasisLabel(item.chip))}</span><br><span class="muted">Threshold ${Number(item.threshold).toFixed(1)}</span>${effectiveThresholdNote(item)}${valueAboveThresholdNote(item)}</div>`,
     )
     .join("");
   byId("weekly-chip").innerHTML =

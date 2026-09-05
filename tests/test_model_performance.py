@@ -7,6 +7,7 @@ from fpl_intel.modeling.model_performance import (
     build_performance_report,
     build_shadow_performance_report,
     build_team_model_performance,
+    build_team_plan_diff,
     build_team_transfer_adherence,
     migrate_manager_picks,
     normalize_live_event,
@@ -379,13 +380,21 @@ class ModelPerformanceTests(unittest.TestCase):
         self.assertNotIn("manager_picks", store)
 
 
-def _weekly_decisions(status="active", event=2, action="roll", transfers=None):
+def _weekly_decisions(
+    status="active", event=2, action="roll", transfers=None,
+    chip_recommendation=None, conditional_branches=None, required_margin=None, margin_above_required=None,
+):
     """A minimal `build_transfer_decisions`/`build_draft_decisions`-shaped fixture -- the actual
     shape `archive_team_forecast` (issue #102) archives, structurally different from
     `_decision()`'s `decision_center`-shaped fixture above (`archive_forecast`'s own target).
 
     `transfers` (issue #285): `_move_record`-shaped `{"out": {"id", ...}, "in": {"id", ...}}`
     entries, matching what `transfer_decisions.py`'s own scenarios actually attach.
+
+    `chip_recommendation`/`conditional_branches`/`required_margin`/`margin_above_required`
+    (issue #266): applied identically to every profile, same simplification this fixture already
+    makes for `recommendation` itself -- real per-profile divergence isn't needed to exercise the
+    archiving/diffing logic these fixtures feed.
     """
     if status != "active":
         return {"status": status, "event": event, "reason": "not available"}
@@ -407,8 +416,17 @@ def _weekly_decisions(status="active", event=2, action="roll", transfers=None):
         "vice_captain": {"id": 2},
         "projected_event_points_including_captain": 55.0,
     }
+    if required_margin is not None:
+        recommendation["required_margin"] = required_margin
+    if margin_above_required is not None:
+        recommendation["margin_above_required"] = margin_above_required
     profiles = [
-        {"id": profile_id, "recommendation": dict(recommendation, profile_score=score)}
+        {
+            "id": profile_id,
+            "recommendation": dict(recommendation, profile_score=score),
+            "chip_recommendation": chip_recommendation or {"action": "hold", "chip": None},
+            "multiweek_plan": {"conditional_branches": conditional_branches or []},
+        }
         for profile_id, score in (("conservative", 40.0), ("balanced", 44.0), ("aggressive", 48.0))
     ]
     return {
@@ -475,6 +493,100 @@ class ArchiveTeamForecastTests(unittest.TestCase):
             if row["profile_id"] == "balanced"
         )
         self.assertEqual(balanced["transfers"], [])
+
+    def test_freezes_chip_recommendation_scalars(self):
+        """Issue #266: `chip_recommendation`'s threshold/effective_threshold/value_above_threshold
+        -- already on the live payload since #267 -- are frozen as-is, no re-derivation."""
+        store = {}
+        chip = {
+            "action": "play", "chip": "wildcard", "marginal_value": 12.5,
+            "threshold": 8.0, "effective_threshold": 10.2, "value_above_threshold": 2.3,
+            "alternatives": [{"chip": "freehit"}],  # must NOT be frozen (finding: scalars only)
+        }
+
+        archive_team_forecast(store, 364759, _weekly_decisions(chip_recommendation=chip), lead_hours=24)
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(
+            balanced["chip_recommendation"],
+            {
+                "action": "play", "chip": "wildcard", "marginal_value": 12.5,
+                "threshold": 8.0, "effective_threshold": 10.2, "value_above_threshold": 2.3,
+            },
+        )
+        self.assertNotIn("alternatives", balanced["chip_recommendation"])
+
+    def test_no_chip_recommendation_freezes_a_scalar_dict_of_nones_not_a_missing_key(self):
+        store = {}
+
+        archive_team_forecast(store, 364759, _weekly_decisions(), lead_hours=24)
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(balanced["chip_recommendation"]["action"], "hold")
+        self.assertIsNone(balanced["chip_recommendation"]["chip"])
+
+    def test_freezes_conditional_branches_trimmed_to_event_action_chip_signal(self):
+        """Issue #266: `condition`/`point_cost`/free-transfer counts are deliberately dropped --
+        re-derivable narrative text, not needed for a week-over-week diff."""
+        store = {}
+        branches = [
+            {
+                "event": 3, "action": "single_transfer", "chip_signal": "GW3 looks double-shaped",
+                "condition": "some narrative text", "point_cost": 4,
+                "free_transfers_before": 1, "free_transfers_next_event": 1,
+            },
+            {"event": 4, "action": "roll", "chip_signal": None},
+        ]
+
+        archive_team_forecast(
+            store, 364759, _weekly_decisions(conditional_branches=branches), lead_hours=24,
+        )
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(
+            balanced["conditional_branches"],
+            [
+                {"event": 3, "action": "single_transfer", "chip_signal": "GW3 looks double-shaped"},
+                {"event": 4, "action": "roll", "chip_signal": None},
+            ],
+        )
+
+    def test_freezes_required_margin_and_margin_above_required_when_present(self):
+        store = {}
+
+        archive_team_forecast(
+            store, 364759,
+            _weekly_decisions(action="multi_transfer", required_margin=1.2, margin_above_required=3.4),
+            lead_hours=24,
+        )
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertEqual(balanced["required_margin"], 1.2)
+        self.assertEqual(balanced["margin_above_required"], 3.4)
+
+    def test_required_margin_is_none_when_absent_from_the_recommendation(self):
+        store = {}
+
+        archive_team_forecast(store, 364759, _weekly_decisions(action="roll"), lead_hours=24)
+
+        balanced = next(
+            row for row in store["team_forecasts"]["364759"]["gw2:24"]["profiles"]
+            if row["profile_id"] == "balanced"
+        )
+        self.assertIsNone(balanced["required_margin"])
+        self.assertIsNone(balanced["margin_above_required"])
 
     def test_distinct_checkpoints_are_stored_independently(self):
         store = {}
@@ -870,6 +982,181 @@ class TransferAdherenceTests(unittest.TestCase):
 
         self.assertIn("transfer_adherence", report)
         self.assertEqual(report["transfer_adherence"]["status"], "active")
+
+
+def _checkpoint(origin_event, lead_hours, profiles):
+    return {"origin_event": origin_event, "lead_hours": lead_hours, "profiles": profiles}
+
+
+def _archived_profile(profile_id, conditional_branches):
+    return {"profile_id": profile_id, "conditional_branches": conditional_branches}
+
+
+def _live_weekly_decisions(event, action="single_transfer", chip_action="hold"):
+    return {
+        "status": "active",
+        "event": event,
+        "profiles": [
+            {
+                "id": profile_id,
+                "recommendation": {"action": action},
+                "chip_recommendation": {"action": chip_action, "chip": None},
+            }
+            for profile_id in ("conservative", "balanced", "aggressive")
+        ],
+    }
+
+
+class PlanDiffTests(unittest.TestCase):
+    """Issue #266: week-over-week "already flagged last week" vs. "new since last week"."""
+
+    def test_no_comparison_when_weekly_decisions_is_not_active(self):
+        for status in ("waiting_for_gw2", "manager_not_configured"):
+            with self.subTest(status=status):
+                diff = build_team_plan_diff({}, 364759, {"status": status, "event": 3})
+                self.assertEqual(diff, {"event": None, "profiles": []})
+
+    def test_no_entry_when_no_prior_checkpoint_exists_at_all(self):
+        diff = build_team_plan_diff({}, 364759, _live_weekly_decisions(event=3))
+
+        self.assertEqual(diff, {"event": 3, "profiles": []})
+
+    def test_no_entry_when_a_prior_checkpoint_exists_but_names_no_branch_for_this_event(self):
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 5, "action": "roll", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3))
+
+        self.assertEqual(diff["profiles"], [])
+
+    def test_action_changed_true_when_the_branch_action_differs_from_the_live_recommendation(self):
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "roll", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3, action="single_transfer"))
+
+        entry = next(row for row in diff["profiles"] if row["profile_id"] == "balanced")
+        self.assertEqual(entry["prior_action"], "roll")
+        self.assertEqual(entry["current_action"], "single_transfer")
+        self.assertTrue(entry["action_changed"])
+
+    def test_action_changed_false_when_the_branch_action_matches(self):
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "single_transfer", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3, action="single_transfer"))
+
+        entry = next(row for row in diff["profiles"] if row["profile_id"] == "balanced")
+        self.assertFalse(entry["action_changed"])
+
+    def test_chip_signal_confirmed_when_flagged_last_week_and_a_chip_is_recommended_now(self):
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [
+                            {"event": 3, "action": "roll", "chip_signal": "GW3 looks double-shaped"},
+                        ]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3, chip_action="play"))
+
+        entry = next(row for row in diff["profiles"] if row["profile_id"] == "balanced")
+        self.assertTrue(entry["chip_signal_was_flagged"])
+        self.assertTrue(entry["chip_now_recommended"])
+
+    def test_chip_now_recommended_without_a_prior_signal_is_distinguishable_as_new(self):
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "roll", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3, chip_action="play"))
+
+        entry = next(row for row in diff["profiles"] if row["profile_id"] == "balanced")
+        self.assertFalse(entry["chip_signal_was_flagged"])
+        self.assertTrue(entry["chip_now_recommended"])
+
+    def test_uses_the_most_recent_prior_checkpoint_when_several_exist(self):
+        """A GW1 checkpoint might also happen to name GW3 in its own (much longer-range, now
+        stale) branch list -- the nearer GW2 checkpoint's own branch must win, not GW1's."""
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw1:24": _checkpoint(1, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "roll", "chip_signal": None}]),
+                    ]),
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "double_transfer", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3, action="double_transfer"))
+
+        entry = next(row for row in diff["profiles"] if row["profile_id"] == "balanced")
+        self.assertEqual(entry["prior_action"], "double_transfer")
+        self.assertFalse(entry["action_changed"])
+
+    def test_profiles_are_matched_independently(self):
+        """Only 'balanced' has a matching prior branch -- the other two profiles get no entry,
+        not a fabricated one borrowed from a different profile's plan."""
+        store = {
+            "team_forecasts": {
+                "364759": {
+                    "gw2:24": _checkpoint(2, 24, [
+                        _archived_profile("balanced", [{"event": 3, "action": "roll", "chip_signal": None}]),
+                    ]),
+                },
+            },
+        }
+
+        diff = build_team_plan_diff(store, 364759, _live_weekly_decisions(event=3))
+
+        self.assertEqual([row["profile_id"] for row in diff["profiles"]], ["balanced"])
+
+    def test_different_teams_are_kept_fully_independent(self):
+        store = {
+            "team_forecasts": {
+                "1": {"gw2:24": _checkpoint(2, 24, [
+                    _archived_profile("balanced", [{"event": 3, "action": "roll", "chip_signal": None}]),
+                ])},
+            },
+        }
+
+        diff = build_team_plan_diff(store, 2, _live_weekly_decisions(event=3))
+
+        self.assertEqual(diff["profiles"], [])
 
 
 if __name__ == "__main__":

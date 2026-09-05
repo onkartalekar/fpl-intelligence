@@ -625,6 +625,11 @@ class MultiTransferScenarioTests(unittest.TestCase):
         self.assertEqual(recommendation["point_cost"], 0)  # exactly 3 free transfers available
         self.assertIn("3 transfers", recommendation["reason"])
         self.assertIn("immediate-horizon", recommendation["reason"])  # discloses the immediate-only caveat
+        # Issue #266: required_margin/margin_above_required now ride on the recommendation the
+        # same way the chip side's threshold/effective_threshold/value_above_threshold already do
+        # -- patched to 0.0 above, so the winning margin equals the raw net_gain_5gw edge itself.
+        self.assertEqual(recommendation["required_margin"], 0.0)
+        self.assertGreater(recommendation["margin_above_required"], 0.0)
         # A real hit genuinely isn't always worth it: with only 1 free transfer, the same 3-player
         # upgrade must clear a real -4 hit rather than being free -- confirms the search doesn't
         # just always prefer more legs regardless of cost.
@@ -728,7 +733,37 @@ class MultiTransferEarlySeasonCautionTests(unittest.TestCase):
         margin = multi_leg["net_gain_5gw"] - planner_pick["net_gain_5gw"]
         self.assertLess(margin, _multi_transfer_required_margin(2))
         # The real, unpatched recommendation holds at the planner's own pick, not the thin 3-leg edge.
+
         self.assertNotEqual(conservative["recommendation"]["action"], "multi_transfer")
+
+    def test_margin_above_required_is_computed_against_the_pre_override_baseline(self):
+        """Issue #266: `margin_above_required` must reflect how far the winning multi-leg margin
+        cleared `required_margin` by -- computed against the *pre-override* ordinary
+        recommendation's own net_gain_5gw (the same baseline the accept/reject `if` itself
+        compares against), not the multi-leg scenario's own scenario_score or anything else."""
+        bootstrap, fixtures, manager = gw2_inputs()
+        manager["confirmed_free_transfers"] = 3
+        downgraded, swapped = _downgrade_squad_picks(bootstrap, manager["squad"], count=3)
+        self.assertEqual(swapped, 3, "test fixture must have 3 clearly-worse replacements available")
+        manager["squad"] = downgraded
+
+        with patch(
+            "fpl_intel.modeling.transfer_decisions._multi_transfer_required_margin", return_value=1.0
+        ):
+            result = build_transfer_decisions(
+                bootstrap, fixtures, manager, generated_at="2026-08-29T12:00:00-04:00"
+            )
+
+        conservative = next(row for row in result["profiles"] if row["id"] == "conservative")
+        recommendation = conservative["recommendation"]
+        self.assertEqual(recommendation["action"], "multi_transfer")
+        planner_pick = next(
+            row for row in conservative["scenarios"]
+            if row["action"] == conservative["multiweek_plan"]["immediate_action"]
+        )
+        self.assertEqual(recommendation["required_margin"], 1.0)
+        expected = round(recommendation["net_gain_5gw"] - planner_pick["net_gain_5gw"] - 1.0, 1)
+        self.assertAlmostEqual(recommendation["margin_above_required"], expected, places=1)
 
 
 class ChipTimingTests(unittest.TestCase):

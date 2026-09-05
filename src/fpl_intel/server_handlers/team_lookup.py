@@ -19,7 +19,11 @@ import secrets
 
 from ..decision_cache import WeeklyDecisionCache, make_cached_weekly_decisions_builder
 from ..generation import resolve_artifact
-from ..modeling.model_performance import archive_team_forecast, build_team_model_performance
+from ..modeling.model_performance import (
+    archive_team_forecast,
+    build_team_model_performance,
+    build_team_plan_diff,
+)
 from ..refresh import RefreshAlreadyRunning, compute_manager_view, project_refresh_lock
 from ..sources.fpl_data import save_json
 from ..storage import profiles
@@ -119,6 +123,28 @@ def default_model_performance_action(root):
             if performance_path.exists() else {}
         )
         return build_team_model_performance(store, team_id)
+
+    return action
+
+
+def default_plan_diff_action(root):
+    """Build the default per-team week-over-week plan-diff reader (issue #266).
+
+    Unlike `default_model_performance_action`, this needs the just-computed live
+    `weekly_decisions` as well as the store -- it's a live/prior comparison, not a purely
+    retrospective one -- so its `action` takes `weekly_decisions` as a second argument rather than
+    only `team_id`. Reads `model-performance.json` fresh per call, same as
+    `default_model_performance_action`; the two aren't combined into one read because each splice
+    stays independently injectable for tests, matching every other `default_*_action` here.
+    """
+
+    def action(team_id, weekly_decisions):
+        performance_path = resolve_artifact(root, "model-performance.json")
+        store = (
+            json.loads(performance_path.read_text(encoding="utf-8"))
+            if performance_path.exists() else {}
+        )
+        return build_team_plan_diff(store, team_id, weekly_decisions)
 
     return action
 
