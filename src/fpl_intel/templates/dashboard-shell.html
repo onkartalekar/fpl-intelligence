@@ -985,6 +985,34 @@
             </section>
             <section class="panel" style="margin-top:14px">
               <div class="section-heading">
+                <h2>Transfers -- recommended vs performed</h2>
+                <span id="performance-adherence-status" class="status-wait"
+                  >Waiting for completed Gameweeks</span
+                >
+              </div>
+              <div id="performance-adherence-summary" class="decision-summary"></div>
+              <div style="overflow-x:auto">
+                <table class="performance-table">
+                  <thead>
+                    <tr class="performance-head">
+                      <th scope="col">Gameweek</th>
+                      <th scope="col">Profile</th>
+                      <th scope="col">Checkpoint</th>
+                      <th scope="col">Recommended</th>
+                      <th scope="col">Actual</th>
+                      <th scope="col">Followed?</th>
+                      <th scope="col">Recommended points</th>
+                      <th scope="col">Actual points</th>
+                      <th scope="col">Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody id="performance-adherence-history"></tbody>
+                </table>
+              </div>
+              <p id="performance-adherence-method" class="muted" style="margin-bottom:0"></p>
+            </section>
+            <section class="panel" style="margin-top:14px">
+              <div class="section-heading">
                 <h2>Player forecast vs actual</h2>
                 <span class="muted">Squad first, or any forecast player</span>
               </div>

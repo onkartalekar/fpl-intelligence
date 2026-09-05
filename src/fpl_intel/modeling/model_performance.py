@@ -30,6 +30,31 @@ def normalize_manager_picks(payload):
     ]
 
 
+def normalize_manager_transfers(payload):
+    """Bucket a manager's full raw `/transfers/` history (issue #285) by gameweek.
+
+    Unlike `normalize_manager_picks` (one payload per event), FPL's `/transfers/` endpoint
+    returns a manager's *entire* transfer history in a single call, kept indefinitely -- so this
+    takes the whole raw list at once and groups it, rather than being called once per event.
+
+    Returns `{event_key: [{"in_id", "out_id"}, ...]}` -- only events with at least one transfer
+    appear here. A finished event with zero transfers that gameweek is a real, meaningful result
+    ("the manager rolled"), not missing data -- callers backfilling per-event state must
+    explicitly record `[]` for any finished event absent from this dict, the same "checked, found
+    nothing" vs "not yet checked" distinction `manager_picks`'s own backfill already makes.
+    """
+    by_event = {}
+    for row in payload or []:
+        event = row.get("event")
+        if event is None or row.get("element_in") is None or row.get("element_out") is None:
+            continue
+        key = str(int(event))
+        by_event.setdefault(key, []).append(
+            {"in_id": int(row["element_in"]), "out_id": int(row["element_out"])}
+        )
+    return by_event
+
+
 def migrate_manager_picks(store, team_id):
     """Reshape a pre-#64 single-team `manager_picks` store in place, idempotently.
 
@@ -240,6 +265,17 @@ def archive_team_forecast(store, team_id, weekly_decisions, lead_hours, deadline
                 "vice_captain_id": (
                     int(vice_captain["id"]) if vice_captain.get("id") is not None else None
                 ),
+                # Issue #285: the explicit in/out player pairs behind this recommendation --
+                # `transfer_count`/`lineup_player_ids` alone can't say *which* players a "1
+                # transfer" recommendation meant, which a future recommended-vs-performed
+                # comparison needs to compare player-for-player against the manager's actual
+                # transfers. `_move_record` (transfer_decisions.py) always shapes each entry as
+                # `{"out": {"id", ...}, "in": {"id", ...}}`; only the IDs are kept here, matching
+                # this function's existing minimal-footprint style.
+                "transfers": [
+                    {"out_id": int(move["out"]["id"]), "in_id": int(move["in"]["id"])}
+                    for move in recommendation.get("transfers") or []
+                ],
             }
         )
     if not profiles_out:
@@ -578,6 +614,127 @@ def build_performance_report(store):
     }
 
 
+def _published_path_points(picks, actual_points_by_element):
+    """The manager's actually-published XI/captain, scored with official points (issue #285).
+
+    Same multiplier-weighted-sum shape `_team_performance` already computes inline for its own
+    `actual_points` -- factored out here so this module has one definition of "what a manager's
+    published picks actually scored," rather than two independently-maintained copies.
+    """
+    return sum(
+        int(pick.get("multiplier") or 0) * int(actual_points_by_element.get(str(pick.get("element_id")), 0))
+        for pick in picks
+    )
+
+
+def _adherence_label(recommended_transfer_count, actual_transfer_count):
+    """Whether the manager's actual transfer count matches what a profile recommended.
+
+    Issue #285 (direction (a), decided 2026-09-02): scored on transfer *count* alone, not exact
+    player identity -- the frozen `recommendation["transfers"]` in/out pairs exist for a future,
+    richer player-for-player comparison, but "did the manager take the recommended action" is
+    itself the question this panel answers; `recommended_path_points`/`actual_path_points`/`delta`
+    already carry the outcome difference regardless of which specific players were involved.
+
+    A manager who made more transfers than the model's own menu ever considers (roll / 1 / 2 / 3+,
+    `transfer_decisions.py`'s `_scenario`/`_best_double`/`_best_multi`) is flagged distinctly
+    rather than scored "no" -- there was no modeled alternative for them to have followed.
+
+    Known limitation, not addressed by this function: chip usage (`recommended_action` starting
+    with `play_`, always `transfer_count == 0`) is not separately verified on the actual side --
+    `manager_picks`/`manager_transfers` carry no chip signal today, so a chip recommendation and an
+    actual zero-transfer roll are indistinguishable here and both score "yes". A real gap, not
+    hidden: flagged in `build_team_transfer_adherence`'s returned `method` text.
+    """
+    if actual_transfer_count > 3:
+        return "not among modeled scenarios"
+    return "yes" if actual_transfer_count == recommended_transfer_count else "no"
+
+
+def build_team_transfer_adherence(store, team_id):
+    """One team's "recommended vs performed" transfer-adherence rows (issue #285).
+
+    For every frozen `team_forecasts` checkpoint of a *finished* gameweek, compares each profile's
+    single frozen headline recommendation (direction (a), decided 2026-09-02 -- not the full
+    scenario menu, not collapsed to one profile) against what the manager actually did that
+    gameweek, using only already-persisted, never-hindsight-reconstructed data:
+
+    - Recommended side: `store["team_forecasts"][team_id]` (issue #102/#286), frozen pre-deadline.
+    - Actual side: `store["manager_transfers"][team_id]` (issue #285) for the transfer count, and
+      `store["manager_picks"][team_id]` (issue #64) + `store["actual_events"]` for what the
+      manager's own published XI actually scored.
+
+    A row is only produced once BOTH sides exist for that (team, event) -- a gameweek whose
+    checkpoint was never archived (see issue #288's cron-reliability gaps) or whose actual side
+    hasn't backfilled yet simply produces no row for that event, mirroring `_team_performance`'s
+    own "no frozen forecast -> no comparison" rule rather than fabricating one.
+    """
+    team_key = str(team_id)
+    team_forecasts = (store.get("team_forecasts") or {}).get(team_key, {})
+    actual_events = store.get("actual_events", {})
+    manager_picks = (store.get("manager_picks") or {}).get(team_key, {})
+    manager_transfers = (store.get("manager_transfers") or {}).get(team_key, {})
+    rows = []
+    for forecast in team_forecasts.values():
+        event = forecast.get("origin_event")
+        lead_hours = forecast.get("lead_hours")
+        event_key = str(event)
+        if event_key not in actual_events:
+            continue  # gameweek not finished yet
+        if event_key not in manager_transfers:
+            continue  # actual transfers not backfilled for this event yet -- pending, not guessed
+        picks = manager_picks.get(event_key)
+        if not picks:
+            continue  # actual published picks not backfilled for this event yet
+        actual_points_by_element = actual_events[event_key]
+        actual_transfer_count = len(manager_transfers[event_key])
+        actual_path_points = _published_path_points(picks, actual_points_by_element)
+        for profile in forecast.get("profiles", []):
+            recommended_transfer_count = int(profile.get("transfer_count") or 0)
+            recommended_path_points = _actual_points(
+                actual_events, event, 1,
+                profile.get("lineup_player_ids", []), profile.get("captain_id"),
+            )
+            if recommended_path_points is None:
+                continue
+            rows.append(
+                {
+                    "event": event,
+                    "lead_hours": lead_hours,
+                    "profile_id": profile.get("profile_id"),
+                    "recommended_action": profile.get("action"),
+                    "recommended_transfer_count": recommended_transfer_count,
+                    "actual_transfer_count": actual_transfer_count,
+                    "followed": _adherence_label(recommended_transfer_count, actual_transfer_count),
+                    "recommended_path_points": recommended_path_points,
+                    "actual_path_points": actual_path_points,
+                    "delta": actual_path_points - recommended_path_points,
+                }
+            )
+    rows.sort(
+        key=lambda row: (row["event"], row["lead_hours"] or 0, row["profile_id"] or ""),
+        reverse=True,
+    )
+    scored = [row for row in rows if row["followed"] != "not among modeled scenarios"]
+    followed_count = sum(1 for row in scored if row["followed"] == "yes")
+    return {
+        "status": "active" if rows else "waiting_for_results",
+        "rows": rows,
+        "summary": {
+            "count": len(rows),
+            "adherence_rate": _rounded(followed_count / len(scored)) if scored else None,
+            "mean_delta": _rounded(sum(row["delta"] for row in rows) / len(rows)) if rows else None,
+        },
+        "method": (
+            "Each profile's single frozen headline recommendation (not the full scenario menu) "
+            "compared with the manager's actual published XI and transfer count for the same "
+            "gameweek; never recomputed with hindsight. Chip usage is not yet independently "
+            "verified on the actual side, so a chip recommendation matched against a zero-"
+            "transfer actual week is scored as followed even if no chip was played."
+        ),
+    }
+
+
 def build_team_model_performance(store, team_id):
     """Compute one team's request-time model-performance slice (issue #64).
 
@@ -586,8 +743,12 @@ def build_team_model_performance(store, team_id):
     `manager_picks`) and `player_performance` (already team-independent, but grouped here since it
     was previously returned alongside `team_performance` and is just as cheap to compute on
     demand). Mirrors `compute_manager_view`'s per-request role in `refresh.py`.
+
+    Issue #285: `transfer_adherence` joins this same request-time splice -- cheap enough to
+    compute fresh per request, like its two siblings, rather than precomputed at refresh time.
     """
     return {
         "team_performance": _team_performance(store, team_id),
         "player_performance": _player_performance(store),
+        "transfer_adherence": build_team_transfer_adherence(store, team_id),
     }

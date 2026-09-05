@@ -1,11 +1,12 @@
 // Issue #108: Decision Center and Model Performance are both personalized to a manager's own
 // team and have nothing meaningful to show without one. Rather than gating inside each of their
 // several render functions individually (renderDecision/renderWeeklyDecision for Decision
-// Center; renderPerformance/renderShadowModels/renderTeamPerformance/renderPlayerPerformance for
-// Model Performance -- separately, which is how the previous inconsistent, partial per-section
-// messaging arose), this is a single gate applied once at the tab level, run right after the
-// normal render pass: the normal render functions below still run and populate their elements as
-// always, but a shared content wrapper around each tab's markup (#decisions-content /
+// Center; renderPerformance/renderShadowModels/renderTeamPerformance/renderTransferAdherence/
+// renderPlayerPerformance for Model Performance -- separately, which is how the previous
+// inconsistent, partial per-section messaging arose), this is a single gate applied once at the
+// tab level, run right after the normal render pass: the normal render functions below still run
+// and populate their elements as always, but a shared content wrapper around each tab's markup
+// (#decisions-content /
 // #performance-content) is hidden and a static empty-state panel (#decisions-empty-state /
 // #performance-empty-state, dashboard.py) is shown in its place whenever no profile is resolved
 // for this visitor. Uses the exact same signal already used at dashboard.js's renderManager(),
@@ -33,6 +34,7 @@ setupTeamLookup();
 renderPerformance();
 renderShadowModels();
 renderTeamPerformance();
+renderTransferAdherence();
 renderPlayerPerformance();
 renderModel();
 applyProfileGates();

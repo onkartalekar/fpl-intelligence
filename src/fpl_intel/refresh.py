@@ -18,6 +18,7 @@ from .modeling.model_performance import (
     migrate_manager_picks,
     normalize_live_event,
     normalize_manager_picks,
+    normalize_manager_transfers,
 )
 from .modeling.recommendations import build_gw_recommendations
 from .modeling.transfer_decisions import build_draft_decisions, build_transfer_decisions
@@ -28,7 +29,12 @@ from .sources.fpl_data import (
     fetch_fixtures,
     summarize_bootstrap,
 )
-from .sources.manager_data import collect_public_manager, fetch_manager_event_picks, summarize_manager
+from .sources.manager_data import (
+    collect_public_manager,
+    fetch_manager_event_picks,
+    fetch_manager_transfers,
+    summarize_manager,
+)
 from .sources.relevance import enrich_transfers, summarize_clubs
 from .sources.transfers import canonical_club, normalize_transfer
 from .storage import profiles
@@ -173,6 +179,7 @@ def _refresh_project_unlocked(
     fixture_payload=None,
     event_live_payloads=None,
     manager_picks_payloads=None,
+    manager_transfers_payloads=None,
     source_errors=None,
 ):
     root = Path(root)
@@ -297,6 +304,47 @@ def _refresh_project_unlocked(
                     picks_payload = None
             if picks_payload is not None:
                 team_picks[key] = normalize_manager_picks(picks_payload)
+    # Issue #285: `manager_transfers` follows the exact same "every finished event, fill the
+    # gaps" backfill discipline as `manager_picks` just above -- but the underlying endpoint
+    # (`/transfers/`) already returns a manager's entire transfer history in one call, kept
+    # indefinitely, so this is one fetch per team needing *any* missing finished event, not one
+    # fetch per missing event. Reuses `candidate_team_ids`/`finished_event_ids` computed above and
+    # the same `_MANAGER_PICKS_TEAM_CAP` bound for consistency, even though the real cost per team
+    # here is far smaller than the picks backfill's.
+    manager_transfers_store = performance_store.get("manager_transfers", {})
+    teams_needing_transfers = [
+        candidate_team_id for candidate_team_id in candidate_team_ids
+        if any(
+            str(event_id) not in manager_transfers_store.get(str(candidate_team_id), {})
+            for event_id in finished_event_ids
+        )
+    ]
+    manager_transfers_team_ids = teams_needing_transfers[:_MANAGER_PICKS_TEAM_CAP]
+    provided_manager_transfers = manager_transfers_payloads or {}
+    for transfers_team_id in manager_transfers_team_ids:
+        team_key = str(transfers_team_id)
+        team_transfers = performance_store.setdefault("manager_transfers", {}).setdefault(team_key, {})
+        transfers_payload = provided_manager_transfers.get(transfers_team_id)
+        if transfers_payload is None:
+            transfers_payload = provided_manager_transfers.get(team_key)
+        if transfers_payload is None and bootstrap_payload is None:
+            try:
+                transfers_payload = fetch_manager_transfers(transfers_team_id)
+            except Exception:
+                actual_collection_errors.append(
+                    f"manager transfers collection failed for team {transfers_team_id}"
+                )
+                transfers_payload = None
+        if transfers_payload is None:
+            continue
+        transfers_by_event = normalize_manager_transfers(transfers_payload)
+        for event_id in finished_event_ids:
+            key = str(event_id)
+            if key not in team_transfers:
+                # Explicitly records `[]` for a finished event with zero transfers ("the manager
+                # rolled" is a real result) -- must stay distinguishable from "not backfilled yet"
+                # (an absent key), see normalize_manager_transfers's docstring.
+                team_transfers[key] = transfers_by_event.get(key, [])
     manager_raw = None
     manager_state = {"connection_status": "not_configured", "squad": []}
     if team_id:

@@ -1,6 +1,6 @@
 import unittest
 
-from fpl_intel.sources.manager_data import collect_public_manager, summarize_manager
+from fpl_intel.sources.manager_data import collect_public_manager, fetch_manager_transfers, summarize_manager
 
 
 class ManagerDataTests(unittest.TestCase):
@@ -72,6 +72,24 @@ class ManagerDataTests(unittest.TestCase):
         self.assertEqual(summary["bank"], 5)
         self.assertEqual(summary["squad"][0]["purchase_price"], 73)
         self.assertEqual(summary["squad"][0]["selling_price"], 74)
+
+
+    def test_fetch_manager_transfers_hits_the_dedicated_endpoint_once(self):
+        """Issue #285: unlike `fetch_manager_event_picks` (one call per event), this needs no
+        event_id -- FPL's `/transfers/` endpoint always returns the whole history in one call."""
+        payload = [
+            {"element_in": 2, "element_out": 1, "event": 1, "element_in_cost": 55, "element_out_cost": 50, "time": "t"},
+        ]
+        calls = []
+
+        def fetch_json(url):
+            calls.append(url)
+            return payload
+
+        result = fetch_manager_transfers(364759, fetch_json=fetch_json)
+
+        self.assertEqual(calls, ["https://fantasy.premierleague.com/api/entry/364759/transfers/"])
+        self.assertEqual(result, payload)
 
 
 if __name__ == "__main__":

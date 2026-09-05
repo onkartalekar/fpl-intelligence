@@ -121,6 +121,83 @@ function renderTeamPerformance() {
     .join("");
   methodEl.textContent = teamPerformance.method || "";
 }
+// Issue #285: "Transfers -- recommended vs performed" panel. Mirrors renderTeamPerformance's
+// three-tier empty state (not connected / no finished Gameweek / no frozen recommendation yet)
+// since this panel is gated on the exact same two prerequisites (a connected team, a finished
+// Gameweek) plus a third of its own (an archived team_forecasts checkpoint for that Gameweek --
+// see issue #288's cron-reliability gaps for why that can lag behind "the Gameweek finished").
+const CHECKPOINT_LABELS = { 24: "T-24h", 12: "T-12h", 3: "T-3h" };
+// Issue #270/#272 precedent (decision-center.js's own actionLabels/labelFor): these are the only
+// action strings a frozen recommendation can carry -- roll/single/double/multi_transfer from the
+// ordinary transfer path, play_wildcard/play_freehit from `_exclusive_chip_scenario`. Kept as its
+// own small copy rather than a shared export -- both copies are short, static, and independently
+// stable; a divergence in wording here is cosmetic, not a data-shape drift worth coupling files
+// over.
+function transferAdherenceActionLabel(action, count) {
+  const labels = {
+    roll: "Roll",
+    single_transfer: "1 transfer",
+    double_transfer: "2 transfers",
+    play_wildcard: "Wildcard",
+    play_freehit: "Free Hit",
+  };
+  if (action === "multi_transfer") return `${count} transfers`;
+  return labels[action] || action;
+}
+function renderTransferAdherence() {
+  const manager = state.manager || { connection_status: "not_configured" };
+  const adherence = performance.transfer_adherence || { rows: [] };
+  const rows = adherence.rows || [];
+  const statusEl = byId("performance-adherence-status");
+  const summaryEl = byId("performance-adherence-summary");
+  const historyEl = byId("performance-adherence-history");
+  const methodEl = byId("performance-adherence-method");
+  if (manager.connection_status === "not_configured") {
+    statusEl.className = "status-wait";
+    statusEl.textContent = "FPL team not connected";
+    summaryEl.innerHTML = "";
+    historyEl.innerHTML =
+      '<tr><td colspan="9"><div class="empty">Enter your FPL team ID in the Manager profile form on the My Profile view, then save.</div></td></tr>';
+    methodEl.textContent = "";
+    return;
+  }
+  if (!rows.length) {
+    statusEl.className = "status-wait";
+    summaryEl.innerHTML = "";
+    if (!performance.actual_events_collected) {
+      statusEl.textContent = "Waiting for completed Gameweeks";
+      historyEl.innerHTML =
+        '<tr><td colspan="9"><div class="empty">No Gameweek has finished yet. Rows appear after official results are collected.</div></td></tr>';
+    } else {
+      statusEl.textContent = "Waiting for an archived recommendation";
+      historyEl.innerHTML =
+        '<tr><td colspan="9"><div class="empty">No pre-deadline recommendation was archived for a finished Gameweek yet, so no comparison can be shown. A Gameweek whose checkpoint was missed (see the deadline archiver\'s own gap disclosure) stays permanently blank here rather than being filled in with hindsight.</div></td></tr>';
+    }
+    methodEl.textContent = adherence.method || "";
+    return;
+  }
+  statusEl.className = "status-good";
+  statusEl.textContent = `${rows.length} scored row${rows.length === 1 ? "" : "s"}`;
+  const summary = adherence.summary || {};
+  const adherenceRate =
+    summary.adherence_rate == null
+      ? "Awaiting"
+      : `${(Number(summary.adherence_rate) * 100).toFixed(0)}%`;
+  const meanDelta =
+    summary.mean_delta == null ? "Awaiting" : Number(summary.mean_delta).toFixed(1);
+  summaryEl.innerHTML = `<div class="decision-metric"><b>${Number(summary.count || 0)}</b><span>Scored rows</span></div><div class="decision-metric"><b>${adherenceRate}</b><span>Adherence rate</span></div><div class="decision-metric"><b>${meanDelta}</b><span>Mean points delta · actual minus recommended</span></div>`;
+  historyEl.innerHTML = rows
+    .map((row) => {
+      const followedClass =
+        row.followed === "yes" ? "status-good" : row.followed === "no" ? "negative" : "status-wait";
+      const followedLabel =
+        row.followed === "not among modeled scenarios" ? "Not modeled" : row.followed === "yes" ? "Yes" : "No";
+      const delta = Number(row.delta);
+      return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${esc(row.profile_id || "")}</td><td>${esc(CHECKPOINT_LABELS[row.lead_hours] || `T-${row.lead_hours}h`)}</td><td>${esc(transferAdherenceActionLabel(row.recommended_action, row.recommended_transfer_count))}</td><td>${esc(transferAdherenceActionLabel(row.actual_transfer_count === 0 ? "roll" : row.actual_transfer_count === 1 ? "single_transfer" : row.actual_transfer_count === 2 ? "double_transfer" : "multi_transfer", row.actual_transfer_count))}</td><td class="${followedClass}">${followedLabel}</td><td>${Number(row.recommended_path_points).toFixed(1)}</td><td>${Number(row.actual_path_points).toFixed(1)}</td><td class="${delta > 0 ? "positive" : delta < 0 ? "negative" : ""}">${delta > 0 ? "+" : ""}${delta.toFixed(1)}</td></tr>`;
+    })
+    .join("");
+  methodEl.textContent = adherence.method || "";
+}
 function renderPlayerPerformance() {
   const playerPerformance = performance.player_performance || {
     comparisons: [],
