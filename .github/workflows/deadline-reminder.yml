@@ -8,11 +8,20 @@ name: Deadline reminder
 # invokes it (this workflow today; a future #27 host's own scheduler unchanged, later).
 #
 # GitHub's schedule cron is best-effort (documented delays of minutes, occasionally longer, under
-# load); the hourly cadence against a >=3h lead comfortably absorbs that.
-
+# load); the hourly cadence against a >=3h lead was meant to comfortably absorb that.
+#
+# Issue #288 stopgap (option d): GitHub's schedule dispatch degraded to 3-6h gaps for over a week
+# (confirmed via `gh run list`), well past what an hourly tick can absorb against
+# `in_send_window`'s one-hour-wide band -- a gameweek's checkpoint could land entirely inside a
+# gap and get no tick at all, silently skipping the reminder. Cron is widened to every 15 minutes
+# so a badly-delayed dispatch still lands a tick inside a still-open window far more often. This
+# is a stopgap, not a fix for the dispatch delay itself -- see #288's option (a)/(c) for that.
+# Because a *healthy* 15-minute cron can now land several ticks inside one still-open window,
+# `FPL_INTEL_REMINDER_SENT_STATE` below (read before the run, written back after a real send) is
+# what keeps that from re-sending the same reminder on every one of those ticks.
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -20,9 +29,21 @@ on:
         type: boolean
         default: true
 
+# Issue #288 stopgap: with cron every 15 minutes, GitHub can dispatch a burst of queued runs
+# back-to-back once a delayed schedule catches up (the exact scenario that motivated widening the
+# cron in the first place). Without this, two runs could both read REMINDER_SENT_STATE before
+# either writes it back, both conclude "not yet sent," and both send -- a race the dedup marker
+# alone can't close. `cancel-in-progress: false` queues a second run behind the first instead of
+# overlapping (or cancelling it, which would risk cancelling mid-send); it never drops a run.
+concurrency:
+  group: deadline-reminder
+  cancel-in-progress: false
+
 permissions:
   contents: read
-  # actions: write is only used for the best-effort layer-2 dedup marker (gh variable set) below.
+  # actions: write is used for both reading and writing the dedup-state variable (gh variable
+  # get/set) below -- GitHub's Actions permission scopes only have none/read/write levels, and
+  # write already implies read.
   actions: write
 
 jobs:
@@ -64,6 +85,17 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Read reminder dedup state (issue #288 stopgap)
+        # Best-effort by design (matches send_deadline_reminder.py's own parse_sent_state): a
+        # missing/unreadable variable (e.g. the very first run ever, before anything has been
+        # written) just means "no prior send known," not a failure -- `continue-on-error` plus the
+        # `|| true` fallback below both exist so this step can never fail the job.
+        id: sent_state
+        continue-on-error: true
+        run: |
+          VALUE=$(gh variable get REMINDER_SENT_STATE --json value -q .value 2>/dev/null || true)
+          echo "value=$VALUE" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
         # Issue #240: send_deadline_reminder.py now imports notifications/pitch_image.py (to
         # build the reminder email's Starting XI image URL), which imports Pillow -- this
@@ -83,6 +115,10 @@ jobs:
       # local/manual debugging of a workflow_dispatch dry run, not printed inline.
       - name: Run deadline reminder
         id: reminder
+        env:
+          # Issue #288 stopgap: fed straight from the previous step's read, unmerged -- the script
+          # itself (parse_sent_state) is what tolerates it being blank/malformed.
+          FPL_INTEL_REMINDER_SENT_STATE: ${{ steps.sent_state.outputs.value }}
         run: |
           set +e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
@@ -107,17 +143,21 @@ jobs:
           path: reminder-output.log
           retention-days: 7
 
-      # Belt-and-braces dedup marker (layer 2 in the plan doc, on top of the script's own
-      # stateless send-window check which is layer 1 and sufficient on its own). Best-effort and
-      # non-blocking: if GITHUB_TOKEN's actions:write scope turns out to be insufficient for
-      # writing a repo variable when this actually runs on GitHub, this step fails harmlessly
-      # (continue-on-error) and layer 1 alone still prevents duplicate sends. Only runs after a
-      # real (non-dry-run) scheduled send actually happened.
-      - name: Record last-sent gameweek (best-effort dedup marker)
+      # Issue #288 stopgap: this is now the *only* dedup layer that matters once cron ticks every
+      # 15 minutes instead of hourly -- `in_send_window`'s one-hour-wide band can no longer be
+      # trusted to see at most one tick on its own (that assumption is exactly what #288 found
+      # broken the other direction: too few ticks, not too many). The script prints the full new
+      # state (this run's sends already merged with whatever this step last wrote) on a single
+      # `reminder_sent_state: {...}` line, so this step only has to capture and store it verbatim
+      # -- no JSON handling here. Still best-effort/non-blocking: if this write fails (e.g.
+      # `actions: write` turns out insufficient), the next successful write catches up, and the
+      # cost of a missed write is only a duplicate email inside the current still-open window, not
+      # a missed one. Only runs after a real (non-dry-run) scheduled send actually happened.
+      - name: Record sent checkpoints (best-effort dedup marker)
         if: always() && steps.reminder.outputs.exit_code == '0' && github.event_name == 'schedule'
         continue-on-error: true
         run: |
-          SENT_GW=$(grep -oE 'reminder sent for GW[0-9]+' reminder-output.log | grep -oE '[0-9]+' | head -n1 || true)
-          if [ -n "$SENT_GW" ]; then
-            gh variable set REMINDER_LAST_EVENT_ID --body "$SENT_GW"
+          NEW_STATE=$(sed -n 's/^reminder_sent_state: //p' reminder-output.log | tail -n 1)
+          if [ -n "$NEW_STATE" ]; then
+            gh variable set REMINDER_SENT_STATE --body "$NEW_STATE"
           fi
