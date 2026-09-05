@@ -929,6 +929,46 @@ class TransferAdherenceTests(unittest.TestCase):
         self.assertEqual(balanced["actual_path_points"], 23)
         self.assertEqual(balanced["delta"], 23 - 31)
 
+    def test_recommended_transfers_carries_the_frozen_in_out_pairs(self):
+        store = {}
+        archive_team_forecast(
+            store, 364759,
+            _weekly_decisions(action="single_transfer", transfers=[
+                {"out": {"id": 7, "name": "Sold", "club": "AAA", "selling_price": 55},
+                 "in": {"id": 8, "name": "Bought", "club": "BBB", "price": 60}},
+            ]),
+            lead_hours=24,
+        )
+        store["actual_events"] = {"2": {str(i): 4 for i in range(1, 16)}}
+        store["manager_picks"] = {
+            "364759": {"2": [
+                {"element_id": player_id, "multiplier": 2 if player_id == 1 else 1, "is_captain": player_id == 1}
+                for player_id in range(1, 12)
+            ]}
+        }
+        store["manager_transfers"] = {"364759": {"2": [{"in_id": 8, "out_id": 7}]}}
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        balanced = next(row for row in report["rows"] if row["profile_id"] == "balanced")
+        self.assertEqual(balanced["recommended_transfers"], [{"out_id": 7, "in_id": 8}])
+        self.assertEqual(balanced["actual_transfers"], [{"in_id": 8, "out_id": 7}])
+
+    def test_recommended_transfers_is_empty_for_a_checkpoint_archived_before_the_field_existed(self):
+        """A checkpoint archived before archive_team_forecast started freezing `transfers`
+        (issue #285) simply lacks the key entirely -- must degrade to `[]`, never raise."""
+        store = self._base_store(action="single_transfer")
+        del store["team_forecasts"]["364759"]["gw2:24"]["profiles"][0]["transfers"]
+        # Only the first profile is missing the key -- confirms this is a per-profile default,
+        # not something that would mask a real bug by defaulting the whole row.
+        store["manager_transfers"] = {"364759": {"2": []}}
+
+        report = build_team_transfer_adherence(store, 364759)
+
+        missing_profile_id = store["team_forecasts"]["364759"]["gw2:24"]["profiles"][0]["profile_id"]
+        row = next(row for row in report["rows"] if row["profile_id"] == missing_profile_id)
+        self.assertEqual(row["recommended_transfers"], [])
+
     def test_summary_excludes_not_among_modeled_scenarios_from_adherence_rate_but_not_from_mean_delta(self):
         store = self._base_store(event=2, action="roll", lead_hours=24)
         archive_team_forecast(store, 364759, _weekly_decisions(event=3, action="roll"), lead_hours=24)

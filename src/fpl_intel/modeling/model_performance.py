@@ -709,6 +709,13 @@ def build_team_transfer_adherence(store, team_id):
     checkpoint was never archived (see issue #288's cron-reliability gaps) or whose actual side
     hasn't backfilled yet simply produces no row for that event, mirroring `_team_performance`'s
     own "no frozen forecast -> no comparison" rule rather than fabricating one.
+
+    `recommended_transfers`/`actual_transfers` carry the raw `{"out_id", "in_id"}` pairs behind
+    each side's transfer count -- IDs only, matching this store's own minimal-footprint style; the
+    frontend already has the player catalog to resolve names (`renderPlayerPerformance` does the
+    same lookup). `recommended_transfers` is `[]` for a checkpoint archived before
+    `archive_team_forecast` started capturing it (see that function's own docstring) -- a real,
+    permanent gap for anything archived before that field existed, not a bug in this function.
     """
     team_key = str(team_id)
     team_forecasts = (store.get("team_forecasts") or {}).get(team_key, {})
@@ -745,7 +752,9 @@ def build_team_transfer_adherence(store, team_id):
                     "profile_id": profile.get("profile_id"),
                     "recommended_action": profile.get("action"),
                     "recommended_transfer_count": recommended_transfer_count,
+                    "recommended_transfers": profile.get("transfers") or [],
                     "actual_transfer_count": actual_transfer_count,
+                    "actual_transfers": manager_transfers[event_key],
                     "followed": _adherence_label(recommended_transfer_count, actual_transfer_count),
                     "recommended_path_points": recommended_path_points,
                     "actual_path_points": actual_path_points,

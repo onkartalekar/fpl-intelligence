@@ -1625,6 +1625,66 @@ footer {
 .performance-head th {
   border-top: 0;
 }
+/* Player-name detail toggle for the transfer-adherence table's Recommended/Actual cells -- a
+   plain, unstyled <button> reset so it reads as inline text with the rest of the row until
+   hovered/focused, then reveals a compact per-pair list below it in the same cell (never a new
+   table column or an eleventh row) when clicked. Touch-friendly: the whole label is the tap
+   target, not a small icon. */
+.transfer-detail-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-align: left;
+}
+.transfer-detail-toggle:focus-visible {
+  color: var(--link);
+}
+/* Issue 242 precedent (this file's own top-of-file comment): hover latches after a tap on touch
+   and never releases, so the hover-only half of the toggle's affordance is guarded to real
+   hover-capable pointers -- focus-visible above already covers keyboard/touch access. */
+@media (hover: hover) and (pointer: fine) {
+  .transfer-detail-toggle:hover {
+    color: var(--link);
+  }
+}
+.transfer-detail-caret {
+  font-size: 9px;
+  color: var(--muted);
+  transition: transform .15s ease;
+}
+.transfer-detail-toggle[aria-expanded="true"] .transfer-detail-caret {
+  transform: rotate(90deg);
+}
+.transfer-detail-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Same gotcha the onboarding rules above already document: an unconditional `display` here would
+   otherwise beat the UA stylesheet's `[hidden] { display: none }` regardless of specificity, once
+   this element's `hidden` attribute is toggled off/on by the click handler in model-performance.js. */
+.transfer-detail-list[hidden] {
+  display: none;
+}
+.transfer-detail-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+}
+.transfer-detail-arrow {
+  font-size: 11px;
+}
 .performance-row .positive {
   color: var(--accent);
 }

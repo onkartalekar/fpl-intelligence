@@ -144,6 +144,30 @@ function transferAdherenceActionLabel(action, count) {
   if (action === "multi_transfer") return `${count} transfers`;
   return labels[action] || action;
 }
+// Player-name detail, expandable per cell: which players a "5 transfers" recommendation or
+// actual transfer count actually meant. Resolves IDs against the same global `players` catalog
+// `renderPlayerPerformance` below already uses the identical way -- the store only ever persists
+// IDs (`archive_team_forecast`/`normalize_manager_transfers`'s own minimal-footprint style), so
+// name resolution has always belonged on the read side, not baked into the archive.
+//
+// A toggle rather than a new table column, hover tooltip, or always-expanded list: this table
+// already forces horizontal scroll on mobile (`.performance-table`'s own `min-width: 780px`), so
+// a tenth column would only make that worse, and a hover-only tooltip has no equivalent on touch.
+// Collapsed by default and rendered only when there's something to expand -- a plain "Roll" or a
+// pre-#285-vintage checkpoint with no `transfers` recorded shows nothing extra at all.
+function transferPairList(pairs, playerById) {
+  const nameFor = (id) => (playerById[id] ? playerById[id].name : `Player ${id}`);
+  return pairs
+    .map(
+      (pair) =>
+        `<div class="transfer-detail-pair"><span>${esc(nameFor(pair.out_id))}</span><span class="transfer-detail-arrow muted">→</span><span>${esc(nameFor(pair.in_id))}</span></div>`,
+    )
+    .join("");
+}
+function transferAdherenceCell(actionLabel, pairs, playerById, toggleId) {
+  if (!pairs || !pairs.length) return esc(actionLabel);
+  return `<button type="button" class="transfer-detail-toggle" aria-expanded="false" aria-controls="${toggleId}">${esc(actionLabel)}<span class="transfer-detail-caret" aria-hidden="true">▸</span></button><div class="transfer-detail-list" id="${toggleId}" hidden>${transferPairList(pairs, playerById)}</div>`;
+}
 function renderTransferAdherence() {
   const manager = state.manager || { connection_status: "not_configured" };
   const adherence = performance.transfer_adherence || { rows: [] };
@@ -186,16 +210,40 @@ function renderTransferAdherence() {
   const meanDelta =
     summary.mean_delta == null ? "Awaiting" : Number(summary.mean_delta).toFixed(1);
   summaryEl.innerHTML = `<div class="decision-metric"><b>${Number(summary.count || 0)}</b><span>Scored rows</span></div><div class="decision-metric"><b>${adherenceRate}</b><span>Adherence rate</span></div><div class="decision-metric"><b>${meanDelta}</b><span>Mean points delta · actual minus recommended</span></div>`;
+  const playerById = {};
+  players.forEach((player) => {
+    playerById[player.id] = player;
+  });
   historyEl.innerHTML = rows
-    .map((row) => {
+    .map((row, index) => {
       const followedClass =
         row.followed === "yes" ? "status-good" : row.followed === "no" ? "negative" : "status-wait";
       const followedLabel =
         row.followed === "not among modeled scenarios" ? "Not modeled" : row.followed === "yes" ? "Yes" : "No";
       const delta = Number(row.delta);
-      return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${esc(row.profile_id || "")}</td><td>${esc(CHECKPOINT_LABELS[row.lead_hours] || `T-${row.lead_hours}h`)}</td><td>${esc(transferAdherenceActionLabel(row.recommended_action, row.recommended_transfer_count))}</td><td>${esc(transferAdherenceActionLabel(row.actual_transfer_count === 0 ? "roll" : row.actual_transfer_count === 1 ? "single_transfer" : row.actual_transfer_count === 2 ? "double_transfer" : "multi_transfer", row.actual_transfer_count))}</td><td class="${followedClass}">${followedLabel}</td><td>${Number(row.recommended_path_points).toFixed(1)}</td><td>${Number(row.actual_path_points).toFixed(1)}</td><td class="${delta > 0 ? "positive" : delta < 0 ? "negative" : ""}">${delta > 0 ? "+" : ""}${delta.toFixed(1)}</td></tr>`;
+      const recommendedLabel = transferAdherenceActionLabel(row.recommended_action, row.recommended_transfer_count);
+      const actualActionForLabel =
+        row.actual_transfer_count === 0 ? "roll" : row.actual_transfer_count === 1 ? "single_transfer" : row.actual_transfer_count === 2 ? "double_transfer" : "multi_transfer";
+      const actualLabel = transferAdherenceActionLabel(actualActionForLabel, row.actual_transfer_count);
+      const recommendedCell = transferAdherenceCell(recommendedLabel, row.recommended_transfers, playerById, `adherence-rec-${index}`);
+      const actualCell = transferAdherenceCell(actualLabel, row.actual_transfers, playerById, `adherence-act-${index}`);
+      return `<tr class="performance-row"><th scope="row">GW${row.event}</th><td>${esc(row.profile_id || "")}</td><td>${esc(CHECKPOINT_LABELS[row.lead_hours] || `T-${row.lead_hours}h`)}</td><td>${recommendedCell}</td><td>${actualCell}</td><td class="${followedClass}">${followedLabel}</td><td>${Number(row.recommended_path_points).toFixed(1)}</td><td>${Number(row.actual_path_points).toFixed(1)}</td><td class="${delta > 0 ? "positive" : delta < 0 ? "negative" : ""}">${delta > 0 ? "+" : ""}${delta.toFixed(1)}</td></tr>`;
     })
     .join("");
+  // Delegated on the tbody itself (assigned via `.onclick`, not `addEventListener`, so re-running
+  // this function every render never stacks duplicate handlers) rather than re-attached per
+  // button after every render -- the tbody element itself survives the innerHTML replacement
+  // above, only its children are recreated, so one delegated handler here outlives any number of
+  // re-renders.
+  historyEl.onclick = (event) => {
+    const toggle = event.target.closest(".transfer-detail-toggle");
+    if (!toggle) return;
+    const detail = document.getElementById(toggle.getAttribute("aria-controls"));
+    if (!detail) return;
+    const expanded = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!expanded));
+    detail.hidden = expanded;
+  };
   methodEl.textContent = adherence.method || "";
 }
 function renderPlayerPerformance() {
