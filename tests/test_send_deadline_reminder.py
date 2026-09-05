@@ -505,10 +505,11 @@ class RunLoopTests(unittest.TestCase):
         ]
         return bootstrap
 
-    def _run(self, teams, dry_run, smtp_config, now):
+    def _run(self, teams, dry_run, smtp_config, now, already_sent_state=(None, frozenset())):
         return sdr.run(
             teams, dry_run=dry_run, smtp_config=smtp_config, now=now,
             dashboard_base_url=self._DASHBOARD_BASE_URL, refresh_token=self._REFRESH_TOKEN,
+            already_sent_state=already_sent_state,
         )
 
     def test_empty_teams_list_exits_quietly_without_even_checking_the_deadline(self):
@@ -697,6 +698,104 @@ class RunLoopTests(unittest.TestCase):
         mock_send.assert_called_once()
         self.assertEqual(mock_send.call_args.args[1], "three-hour@example.com")
 
+    def test_already_sent_lead_hours_for_current_event_is_skipped_without_sending(self):
+        """Issue #288 stopgap: a second tick landing in the same still-open window, after a real
+        send already recorded this event_id/lead_hours combination, must not resend."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)  # event id 1
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view") as mock_fetch, \
+             patch.object(sdr, "send_email") as mock_send:
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                exit_code = self._run(
+                    teams, dry_run=False, smtp_config=None, now=now,
+                    already_sent_state=(1, {3}),
+                )
+
+        self.assertEqual(exit_code, 0)
+        mock_fetch.assert_not_called()
+        mock_send.assert_not_called()
+        self.assertIn("already sent", captured.getvalue())
+
+    def test_already_sent_state_for_a_different_event_id_is_ignored(self):
+        """A recorded send for last gameweek must not suppress this gameweek's reminder."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)  # event id 1
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+        lookup = {
+            "status": "ok",
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+        smtp_config = {"host": "h", "port": 1, "user": "u", "password": "p"}
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
+             patch.object(sdr, "send_email") as mock_send:
+            with patch("sys.stdout", io.StringIO()):
+                exit_code = self._run(
+                    teams, dry_run=False, smtp_config=smtp_config, now=now,
+                    already_sent_state=(0, {3}),  # a different (prior) event_id
+                )
+
+        self.assertEqual(exit_code, 0)
+        mock_send.assert_called_once()
+
+    def test_new_checkpoint_still_sends_and_the_printed_state_carries_forward_the_earlier_one(self):
+        """A team's T-24h checkpoint was already sent earlier for this same gameweek; now its
+        T-3h checkpoint comes into window. The new checkpoint must still send, and the printed
+        state must carry the earlier checkpoint forward alongside it (not drop it)."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)  # in T-3h's window
+        teams = [{"team_id": 1, "email": "manager@example.com", "lead_hours": 3}]
+        lookup = {
+            "status": "ok",
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+        smtp_config = {"host": "h", "port": 1, "user": "u", "password": "p"}
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
+             patch.object(sdr, "send_email") as mock_send:
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                exit_code = self._run(
+                    teams, dry_run=False, smtp_config=smtp_config, now=now,
+                    already_sent_state=(1, {24}),  # T-24h checkpoint already sent for GW1
+                )
+
+        self.assertEqual(exit_code, 0)
+        mock_send.assert_called_once()
+        state_line = next(line for line in captured.getvalue().splitlines() if line.startswith("reminder_sent_state:"))
+        state = json.loads(state_line.split("reminder_sent_state:", 1)[1])
+        self.assertEqual(state, {"event_id": 1, "lead_hours": [3, 24]})
+
+    def test_dry_run_never_prints_a_sent_state_line(self):
+        """A dry run must never produce a line the workflow's dedup step could mistake for a real
+        send -- it never calls send_email, so it must not update the dedup marker either."""
+        now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+        bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
+        teams = [{"team_id": 42, "email": "manager@example.com", "lead_hours": 3}]
+        lookup = {
+            "status": "ok",
+            "manager": {"connection_status": "connected"},
+            "weekly_decisions": {"status": "manager_not_configured", "reason": "No team configured."},
+        }
+
+        with patch.object(sdr, "load_bootstrap_and_fixtures", return_value=(bootstrap, [], False)), \
+             patch.object(sdr, "fetch_manager_view", return_value=lookup), \
+             patch.object(sdr, "send_email") as mock_send:
+            captured = io.StringIO()
+            with patch("sys.stdout", captured):
+                self._run(teams, dry_run=True, smtp_config=None, now=now)
+
+        mock_send.assert_not_called()
+        self.assertNotIn("reminder_sent_state:", captured.getvalue())
+
     def test_dry_run_prints_composed_email_and_never_calls_smtp(self):
         now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
         bootstrap = self._bootstrap_with_deadline(hours_from_now=2.5, now=now)
@@ -717,6 +816,38 @@ class RunLoopTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_send.assert_not_called()
         self.assertIn("manager@example.com", captured.getvalue())
+
+
+class SentStateParsingTests(unittest.TestCase):
+    """Issue #288 stopgap: `parse_sent_state` is best-effort by design -- anything short of a
+    well-formed `{"event_id": int, "lead_hours": [int, ...]}` object must fall back to "no prior
+    send known" rather than raise, since this is a dedup optimization layered on top of the
+    already-correct `in_send_window` check, not a new hard dependency."""
+
+    def test_unset_or_blank_means_no_prior_state(self):
+        self.assertEqual(sdr.parse_sent_state(None), (None, set()))
+        self.assertEqual(sdr.parse_sent_state(""), (None, set()))
+        self.assertEqual(sdr.parse_sent_state("   "), (None, set()))
+
+    def test_malformed_json_means_no_prior_state(self):
+        self.assertEqual(sdr.parse_sent_state("{not json"), (None, set()))
+
+    def test_non_object_json_means_no_prior_state(self):
+        self.assertEqual(sdr.parse_sent_state("[1, 2, 3]"), (None, set()))
+
+    def test_missing_or_wrong_typed_fields_mean_no_prior_state(self):
+        self.assertEqual(sdr.parse_sent_state(json.dumps({"lead_hours": [3]})), (None, set()))
+        self.assertEqual(sdr.parse_sent_state(json.dumps({"event_id": 1})), (None, set()))
+        self.assertEqual(sdr.parse_sent_state(json.dumps({"event_id": "1", "lead_hours": [3]})), (None, set()))
+        self.assertEqual(sdr.parse_sent_state(json.dumps({"event_id": 1, "lead_hours": "3"})), (None, set()))
+
+    def test_well_formed_state_round_trips(self):
+        raw = json.dumps({"event_id": 3, "lead_hours": [3, 12, 24]})
+        self.assertEqual(sdr.parse_sent_state(raw), (3, {3, 12, 24}))
+
+    def test_non_integer_lead_hours_entries_are_dropped_not_fatal(self):
+        raw = json.dumps({"event_id": 3, "lead_hours": [3, "bogus", None, 12]})
+        self.assertEqual(sdr.parse_sent_state(raw), (3, {3, 12}))
 
 
 class ProfilesDbSourceEnabledTests(unittest.TestCase):
@@ -881,6 +1012,22 @@ class MainCliTests(unittest.TestCase):
         self.assertNotEqual(exit_code, 0)
         self.assertIn("Configuration error", captured_err.getvalue())
         self.assertIn(sdr.REFRESH_TOKEN_ENV_VAR, captured_err.getvalue())
+
+    def test_reminder_sent_state_env_var_is_parsed_and_passed_to_run(self):
+        """Issue #288 stopgap: confirms the wiring end-to-end -- `main()` actually reads
+        FPL_INTEL_REMINDER_SENT_STATE and hands `run()` the parsed `(event_id, {lead_hours})`
+        tuple, not the raw string."""
+        env_updates = {
+            sdr.REMINDER_TEAMS_ENV_VAR: json.dumps([{"team_id": 1, "email": "a@example.com"}]),
+            sdr.DASHBOARD_BASE_URL_ENV_VAR: "https://example.up.railway.app",
+            sdr.REFRESH_TOKEN_ENV_VAR: "test-refresh-token",
+            sdr.REMINDER_SENT_STATE_ENV_VAR: json.dumps({"event_id": 5, "lead_hours": [3, 24]}),
+        }
+        with patch.dict("os.environ", env_updates, clear=False), \
+             patch.object(sdr, "run", return_value=0) as mock_run:
+            sdr.main(["--dry-run"])
+
+        self.assertEqual(mock_run.call_args.kwargs["already_sent_state"], (5, {3, 24}))
 
     def test_malformed_reminder_teams_env_var_exits_non_zero(self):
         with patch.dict("os.environ", {sdr.REMINDER_TEAMS_ENV_VAR: "{not json"}, clear=False):

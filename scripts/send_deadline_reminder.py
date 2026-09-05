@@ -101,6 +101,19 @@ REFRESH_TOKEN_ENV_VAR = "FPL_INTEL_REFRESH_TOKEN"
 # `fetch_reminder_teams`'s docstring for why this is deliberately not a reuse of the refresh token.
 REMINDER_TEAMS_TOKEN_ENV_VAR = "FPL_INTEL_REMINDER_TEAMS_TOKEN"
 
+# Issue #288 stopgap: until now, the only thing preventing a duplicate send was the one-hour-wide
+# `in_send_window` band landing at most one hourly cron tick -- true only while GitHub's schedule
+# cron actually ticks roughly hourly. #288 found it degrading to 3-6h gaps, so the workflow's cron
+# is being widened to `*/15 * * * *` to make sure a tick still lands inside a checkpoint's window
+# even when GitHub's dispatch is badly delayed. That widening means up to ~4 ticks can now land
+# inside one still-open window on a *healthy* schedule -- without this, every one of those ticks
+# would re-send the same reminder. `FPL_INTEL_REMINDER_SENT_STATE` closes that gap: the workflow
+# reads back the GH Actions variable it wrote after the last real send, passes it in here as JSON
+# (`{"event_id": <int>, "lead_hours": [<int>, ...]}`), and `run()` skips any lead_hours already
+# recorded sent for the *current* event_id. A different event_id (next gameweek) is treated as no
+# prior state at all -- nothing to carry over.
+REMINDER_SENT_STATE_ENV_VAR = "FPL_INTEL_REMINDER_SENT_STATE"
+
 _DIVIDER = "-" * 60
 
 
@@ -136,6 +149,35 @@ def parse_reminder_teams(raw_value):
             raise ConfigError(f"{REMINDER_TEAMS_ENV_VAR}[{index}].lead_hours must be a positive integer.")
         teams.append({"team_id": team_id, "email": email, "lead_hours": lead_hours})
     return teams
+
+
+def parse_sent_state(raw_value):
+    """Parse `FPL_INTEL_REMINDER_SENT_STATE` into `(event_id, {lead_hours, ...})`.
+
+    Best-effort by design (issue #288 stopgap): this is a dedup optimization on top of the
+    already-correct `in_send_window` check, not a new correctness requirement, so any way this can
+    fail -- unset, blank, malformed JSON, a GH Actions variable that doesn't exist yet on the very
+    first run -- returns `(None, set())`, i.e. "no prior send known," rather than raising. A false
+    "nothing sent yet" costs at most a duplicate email, exactly the pre-existing failure mode this
+    is layered on top of; raising here would turn a best-effort marker into a hard dependency and
+    could fail an otherwise-good run over a corrupted variable.
+    """
+    if raw_value is None or not raw_value.strip():
+        return None, set()
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None, set()
+    if not isinstance(parsed, dict):
+        return None, set()
+    event_id = parsed.get("event_id")
+    lead_hours = parsed.get("lead_hours")
+    if not isinstance(event_id, int) or isinstance(event_id, bool):
+        return None, set()
+    if not isinstance(lead_hours, list):
+        return None, set()
+    sent = {value for value in lead_hours if isinstance(value, int) and not isinstance(value, bool)}
+    return event_id, sent
 
 
 def profiles_db_source_enabled(raw_value):
@@ -898,7 +940,10 @@ def send_email(smtp_config, to_email, subject, text_body, html_body):
 
 
 
-def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=None, refresh_token=None):
+def run(
+    teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=None, refresh_token=None,
+    already_sent_state=(None, frozenset()),
+):
     """Core run loop, factored out of `main` so tests can inject `now` and avoid argv/env parsing.
 
     Issue #125: `dashboard_base_url`/`refresh_token` are only used for the two live fetches below
@@ -907,6 +952,13 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=Non
     that's answering "how many hours until the next deadline," which can't be answered by asking
     Railway's own (possibly-not-yet-refreshed) state, the same reasoning issue #101's scheduled-
     refresh trigger already established for the identical question.
+
+    Issue #288 stopgap: `already_sent_state` is `(event_id, {lead_hours, ...})` for the last real
+    send this workflow recorded (see `parse_sent_state`) -- any `lead_hours` in that set for the
+    *current* `event_id` is treated as already handled and excluded from this run's in-window set,
+    so a cron tick that lands inside a checkpoint's window a second time (now expected, since
+    #288's fix widens the cron interval to catch up faster after a delayed dispatch) does not
+    re-send. A different `event_id` means a new gameweek -- nothing carries over.
     """
     if not teams:
         # Distinct from "outside window" below -- this means collect_teams() found nobody
@@ -934,10 +986,18 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=Non
         print("checked: outside window")
         return 0
 
+    already_sent_event_id, already_sent_lead_hours = already_sent_state
+    if already_sent_event_id == event_id and already_sent_lead_hours:
+        in_window_lead_hours -= already_sent_lead_hours
+    if not in_window_lead_hours:
+        print(f"checked: in window for GW{event_id} but already sent for every in-window lead_hours, skipping")
+        return 0
+
     in_window_teams = [team for team in teams if team["lead_hours"] in in_window_lead_hours]
     decision_center = None
     decision_center_fetch_attempted = False
     sent_count = 0
+    sent_lead_hours = set()
     for team in in_window_teams:
         try:
             lookup = fetch_manager_view(dashboard_base_url, team["team_id"], refresh_token)
@@ -1003,8 +1063,22 @@ def run(teams, dry_run, smtp_config, root=ROOT, now=None, dashboard_base_url=Non
                     return 1
             send_email(smtp_config, team["email"], subject, body, html_body)
         sent_count += 1
+        sent_lead_hours.add(team["lead_hours"])
 
     if sent_count:
+        if not dry_run:
+            # Machine-parseable for the workflow's dedup-marker step (issue #288 stopgap) --
+            # printed *before* the human-summary line below so the workflow's `tail -n 1` (which
+            # keeps only the last line of this script's output out of the public run log) still
+            # shows the readable summary, not this JSON. Printed as the *full* new state (this
+            # run's sends merged with whatever was already recorded for this same event_id) so the
+            # workflow step can write it back verbatim with no JSON handling of its own -- it
+            # never needs to merge anything itself, just capture this one line.
+            merged_lead_hours = sent_lead_hours | (
+                already_sent_lead_hours if already_sent_event_id == event_id else set()
+            )
+            new_state = {"event_id": event_id, "lead_hours": sorted(merged_lead_hours)}
+            print(f"reminder_sent_state: {json.dumps(new_state)}")
         verb = "printed" if dry_run else "sent"
         print(f"reminder {verb} for GW{event_id} to {sent_count} team(s)")
     else:
@@ -1048,10 +1122,13 @@ def main(argv=None):
     # currently in-window would otherwise fail every single tick until SMTP was configured, even
     # though no send was ever going to be attempted -- the exact same "don't fail for a resource
     # this particular run doesn't need" reasoning already applied to an empty teams list above.
+    already_sent_state = parse_sent_state(os.environ.get(REMINDER_SENT_STATE_ENV_VAR))
+
     try:
         return run(
             teams, args.dry_run, None,
             dashboard_base_url=dashboard_base_url, refresh_token=refresh_token,
+            already_sent_state=already_sent_state,
         )
     except ConfigError as error:
         print(f"Configuration error: {error}", file=sys.stderr)

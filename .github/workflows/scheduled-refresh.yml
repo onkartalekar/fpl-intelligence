@@ -24,16 +24,34 @@ name: Scheduled refresh
 # reuses this tick's cadence rather than introducing a second independent scheduler. Runs
 # regardless of the refresh step's own outcome (`if: always()`) -- the two are unrelated actions
 # with unrelated failure modes, and one failing must never silently skip the other.
+#
+# Issue #288 stopgap (option d): GitHub's schedule dispatch degraded to 3-6h gaps for over a week,
+# which the archiver's own checkpoint windows (issue #286, first-tick-after-lead-time,
+# first-write-wins) tolerate, but which still means market-data refreshes and archive attempts
+# were only landing ~4-8 times a day instead of the intended ~24. Cron is widened to every 15
+# minutes so a badly-delayed dispatch still ticks often enough to land inside each checkpoint
+# window and keep refreshes closer to the intended cadence. This is a stopgap, not a fix for the
+# dispatch delay itself -- see #288's option (a)/(c) for that.
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Dry run: report whether a refresh would trigger, without calling /api/refresh (safe to run any time)."
         type: boolean
         default: true
+
+# Both steps are already safe to run concurrently on their own (the refresh call is a plain
+# idempotent POST, and the archiver is first-write-wins per checkpoint, issue #286) -- this exists
+# to stop a burst of queued runs (the same catch-up-after-a-gap scenario #288 is mitigating) from
+# piling up overlapping 5-minute runs and hammering the live FPL/transfer-source APIs
+# simultaneously. `cancel-in-progress: false` queues a run behind one already in flight rather than
+# dropping or cancelling it.
+concurrency:
+  group: scheduled-refresh
+  cancel-in-progress: false
 
 permissions:
   contents: read
