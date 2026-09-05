@@ -736,6 +736,87 @@ class ModelPerformanceSpliceTests(unittest.TestCase):
             failing_server.server_close()
             thread.join(timeout=2)
 
+class PlanDiffSpliceTests(unittest.TestCase):
+    """Issue #266: the week-over-week plan-diff comparison, spliced onto weekly_decisions itself
+    at request time -- same DI pattern ModelPerformanceSpliceTests above already exercises for
+    model_performance_action, but plan_diff_action additionally receives weekly_decisions."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "data").mkdir()
+        (self.root / "data" / "dashboard-state.json").write_text(
+            json.dumps({"generated_at": "2026-07-18T12:00:00Z"}), encoding="utf-8"
+        )
+        self.plan_diff_calls = []
+
+        def team_view_action(team_id):
+            return {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "active", "event": 3, "profiles": []},
+            }
+
+        def plan_diff_action(team_id, weekly_decisions):
+            self.plan_diff_calls.append((team_id, weekly_decisions.get("event")))
+            return {"event": weekly_decisions.get("event"), "profiles": [{"profile_id": "balanced", "action_changed": True}]}
+
+        self.plan_diff_action = plan_diff_action
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=team_view_action,
+            plan_diff_action=plan_diff_action,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.directory.cleanup()
+
+    def test_splices_plan_diff_onto_weekly_decisions(self):
+        html = urlopen(self.base_url + "/?team_id=111", timeout=3).read().decode()
+
+        self.assertEqual(self.plan_diff_calls, [(111, 3)])
+        self.assertIn('"action_changed": true', html)
+
+    def test_absent_team_id_serves_the_dashboard_without_computing_plan_diff(self):
+        html = urlopen(self.base_url + "/dashboard.html", timeout=3).read().decode()
+
+        self.assertEqual(self.plan_diff_calls, [])
+        # Not a bare `assertNotIn("action_changed", html)` -- that field name also appears as a
+        # plain JS identifier in the page's own inlined decision-center.js bundle regardless of
+        # whether any data was ever computed. The specific *serialized value* this fake action
+        # returns (matching the positive test above) is what actually distinguishes "computed and
+        # embedded" from "never called."
+        self.assertNotIn('"action_changed": true', html)
+
+    def test_plan_diff_failure_is_reported_cleanly_instead_of_a_server_error(self):
+        failing_server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            team_view_action=lambda team_id: {
+                "manager": {"connection_status": "connected", "team_id": team_id, "squad": []},
+                "weekly_decisions": {"status": "active", "event": 3, "profiles": []},
+            },
+            plan_diff_action=lambda team_id, weekly_decisions: (_ for _ in ()).throw(RuntimeError("store corrupt")),
+        )
+        thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            html = urlopen(
+                f"http://127.0.0.1:{failing_server.server_port}/?team_id=364759", timeout=3
+            ).read().decode()
+
+            self.assertIn('"status": "error"', html)
+            self.assertNotIn("store corrupt", html)
+        finally:
+            failing_server.shutdown()
+            failing_server.server_close()
+            thread.join(timeout=2)
+
+
 class CookieResolvedTeamTests(unittest.TestCase):
     """Issue #45: a saved-team cookie is a second source for the per-request team view."""
 

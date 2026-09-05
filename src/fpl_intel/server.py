@@ -83,6 +83,7 @@ def create_server(
     draft_squad_action=None,
     lookup_opt_out_action=None,
     model_performance_action=None,
+    plan_diff_action=None,
     reminder_opt_in_action=None,
     reminder_email_action=None,
     refresh_limiter=None,
@@ -126,6 +127,11 @@ def create_server(
     and the two limiters for its own cooldowns, mirroring `reminder_opt_in_action`/
     `reminder_email_action`'s roles above for the exact same reasons.
 
+    `plan_diff_action` (issue #266), when set, replaces `default_plan_diff_action` -- the
+    week-over-week "already flagged last week" vs. "new since last week" comparison spliced onto
+    `weekly_decisions` alongside the model-performance splices below, same DI pattern as
+    `model_performance_action`.
+
     `reminder_teams_token` (issue #105) gates `/api/reminder-teams` -- a **separate** secret from
     `token`, not another use of the existing operator token. That endpoint returns every opted-in
     manager's email address in bulk, a strictly more sensitive shape of data than anything `token`
@@ -151,6 +157,9 @@ def create_server(
         lambda payload: lookup_opt_out_handlers.default_lookup_opt_out_action(root, payload)
     )
     performance_action = model_performance_action or team_lookup.default_model_performance_action(root)
+    # Issue #266: a live/prior comparison, not a purely retrospective one -- see
+    # default_plan_diff_action's own docstring for why its `action` takes `weekly_decisions` too.
+    resolve_plan_diff = plan_diff_action or team_lookup.default_plan_diff_action(root)
     lookup_limiter = CooldownLimiter(cooldown_seconds=team_lookup.TEAM_LOOKUP_COOLDOWN_SECONDS)
     profile_write_limiter = CooldownLimiter(cooldown_seconds=common.PROFILE_WRITE_COOLDOWN_SECONDS)
     # A separate limiter instance (not the shared profile one) so saving a profile and declaring
@@ -447,6 +456,14 @@ def create_server(
                         weekly = decision_center.get("weekly_decisions")
                         if isinstance(weekly, dict) and weekly.get("profiles"):
                             weekly["default_profile"] = risk
+                    # Issue #266: week-over-week "already flagged last week" vs. "new since last
+                    # week" comparison, spliced directly onto weekly_decisions (not a new
+                    # top-level state key) -- the frontend already reads everything else about the
+                    # live recommendation from there. Independent of the risk-profile branch
+                    # above: computed regardless of whether a default_profile override applies.
+                    weekly = decision_center.get("weekly_decisions")
+                    if isinstance(weekly, dict):
+                        weekly["plan_diff"] = resolve_plan_diff(team_id, weekly)
                     # Issue #64: this team's team_performance/player_performance, computed fresh
                     # from the shared model-performance.json at request time -- same splice
                     # pattern as state["manager"]/state["profile"] above, not precomputed for

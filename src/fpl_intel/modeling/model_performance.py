@@ -224,6 +224,13 @@ def archive_team_forecast(store, team_id, weekly_decisions, lead_hours, deadline
     hindsight-contaminated recommendation. Optional and defaulting to None only for backward
     compatibility with existing callers/tests; the `/api/archive-team-forecast` endpoint always
     passes it. `archive_forecast` above already enforces the equivalent gate inline.
+
+    Issue #266: also freezes each profile's `chip_recommendation` (scalars only) and its
+    `multiweek_plan.conditional_branches` (trimmed to `event`/`action`/`chip_signal`) -- needed so
+    a later refresh can tell "this action/chip signal was already flagged last week" from "this is
+    new since last week" (`build_team_plan_diff`, below). A checkpoint archived before this field
+    existed simply lacks these keys; callers must treat that as "no prior plan data," never
+    reconstruct one.
     """
     if weekly_decisions.get("status") != "active" or not weekly_decisions.get("event"):
         return store
@@ -242,6 +249,7 @@ def archive_team_forecast(store, team_id, weekly_decisions, lead_hours, deadline
     profiles_out = []
     for profile in profiles_in:
         recommendation = profile.get("recommendation") or {}
+        chip_recommendation = profile.get("chip_recommendation") or {}
         captain = recommendation.get("captain") or {}
         vice_captain = recommendation.get("vice_captain") or {}
         starting_xi = recommendation.get("starting_xi") or []
@@ -275,6 +283,39 @@ def archive_team_forecast(store, team_id, weekly_decisions, lead_hours, deadline
                 "transfers": [
                     {"out_id": int(move["out"]["id"]), "in_id": int(move["in"]["id"])}
                     for move in recommendation.get("transfers") or []
+                ],
+                # Issue #266: required_margin/margin_above_required only exist on the
+                # recommendation when a multi-transfer override actually won (see
+                # transfer_decisions.py's own comment where they're attached) -- absent/None here
+                # for every other action, same as any other field this function reads with .get().
+                "required_margin": recommendation.get("required_margin"),
+                "margin_above_required": recommendation.get("margin_above_required"),
+                # Issue #266: the chip verdict and the near-future conditional plan, neither
+                # previously frozen -- both needed for a later refresh to tell "this was already
+                # flagged last week" from "this is new since last week." `chip_recommendation`'s
+                # `threshold`/`effective_threshold`/`value_above_threshold` are the exact fields
+                # #267 added to the live payload; kept as-is rather than re-derived. Trimmed to
+                # scalars only (no `alternatives`, `chip_squad`) -- the archive's minimal-footprint
+                # style, and neither is needed to tell what changed.
+                "chip_recommendation": {
+                    "action": chip_recommendation.get("action"),
+                    "chip": chip_recommendation.get("chip"),
+                    "marginal_value": chip_recommendation.get("marginal_value"),
+                    "threshold": chip_recommendation.get("threshold"),
+                    "effective_threshold": chip_recommendation.get("effective_threshold"),
+                    "value_above_threshold": chip_recommendation.get("value_above_threshold"),
+                },
+                # Trimmed to event/action/chip_signal per the issue's own request (#266) --
+                # `condition`/`point_cost`/free-transfer counts are re-derivable narrative text,
+                # not needed to compute a week-over-week diff, and would only grow this payload
+                # for no comparison benefit.
+                "conditional_branches": [
+                    {
+                        "event": branch.get("event"),
+                        "action": branch.get("action"),
+                        "chip_signal": branch.get("chip_signal"),
+                    }
+                    for branch in (profile.get("multiweek_plan") or {}).get("conditional_branches") or []
                 ],
             }
         )
@@ -733,6 +774,80 @@ def build_team_transfer_adherence(store, team_id):
             "transfer actual week is scored as followed even if no chip was played."
         ),
     }
+
+
+def build_team_plan_diff(store, team_id, weekly_decisions):
+    """Per profile, what this week's live recommendation says that last week's plan already
+    anticipated -- or didn't (issue #266).
+
+    This is a *live*, forward-facing comparison (unlike `build_team_transfer_adherence`'s
+    retrospective scoring) -- `weekly_decisions` is the just-computed live decision
+    (`build_transfer_decisions`/`build_draft_decisions`'s output), not something read from the
+    store. Only the *prior* side comes from the store, which is why this takes both.
+
+    The lookup is a cross-checkpoint search, not a same-key read: `archive_team_forecast` keys
+    each frozen snapshot by the gameweek *being decided* at that checkpoint (`gw{event}:
+    {lead_hours}`), so a future gameweek's provisional action only ever appears inside an
+    *earlier* checkpoint's own `conditional_branches` -- there is no frozen record anywhere of
+    "what did we predict about GW6" independent of when it was predicted. This walks every
+    earlier-event checkpoint for this team, most recent first, and uses the first one whose
+    `conditional_branches` names the current event for that same profile. A checkpoint gap (an
+    unarchived deadline -- see issue #288's cron-reliability history) or a plan that genuinely
+    never looked this far ahead simply yields no entry for that profile, never a guessed one.
+
+    Returns raw comparison data, not composed sentences -- `decision-center.js` already has its
+    own `actionLabels`/`labelFor` for turning an `action` token into display text; duplicating
+    that formatting here in Python would just be a second copy to keep in sync.
+    """
+    if weekly_decisions.get("status") != "active" or not weekly_decisions.get("event"):
+        return {"event": None, "profiles": []}
+    current_event = int(weekly_decisions["event"])
+    team_forecasts = (store.get("team_forecasts") or {}).get(str(team_id), {})
+    prior_checkpoints = sorted(
+        (
+            forecast for forecast in team_forecasts.values()
+            if int(forecast.get("origin_event") or 0) < current_event
+        ),
+        key=lambda forecast: (forecast.get("origin_event") or 0, forecast.get("lead_hours") or 0),
+        reverse=True,
+    )
+    entries = []
+    for profile in weekly_decisions.get("profiles") or []:
+        profile_id = profile.get("id")
+        recommendation = profile.get("recommendation") or {}
+        chip = profile.get("chip_recommendation") or {}
+        prior_branch = None
+        for checkpoint in prior_checkpoints:
+            archived_profile = next(
+                (row for row in checkpoint.get("profiles", []) if row.get("profile_id") == profile_id),
+                None,
+            )
+            if archived_profile is None:
+                continue
+            prior_branch = next(
+                (
+                    branch for branch in archived_profile.get("conditional_branches") or []
+                    if branch.get("event") == current_event
+                ),
+                None,
+            )
+            if prior_branch is not None:
+                break
+        if prior_branch is None:
+            continue
+        prior_action = prior_branch.get("action")
+        current_action = recommendation.get("action")
+        entries.append(
+            {
+                "profile_id": profile_id,
+                "prior_action": prior_action,
+                "current_action": current_action,
+                "action_changed": bool(prior_action) and bool(current_action) and prior_action != current_action,
+                "chip_signal_was_flagged": bool(prior_branch.get("chip_signal")),
+                "chip_now_recommended": chip.get("action") == "play",
+            }
+        )
+    return {"event": current_event, "profiles": entries}
 
 
 def build_team_model_performance(store, team_id):
