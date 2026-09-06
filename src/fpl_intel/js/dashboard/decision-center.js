@@ -922,9 +922,16 @@ function renderWeeklyDecision(profileId = null) {
         : ` · ${scenario.free_transfers_next_event} FT next GW`;
       // Issue #271: name the actual players, not just a count -- "make one transfer" alone gave
       // no basis to judge the recommendation against. scenario.transfers already carries this
-      // (_move_record, transfer_decisions.py); it just wasn't rendered here before.
+      // (_move_record, transfer_decisions.py); it just wasn't rendered here before. Sell/buy
+      // price is attached inline per player (not a separate summary line) so it still reads
+      // unambiguously on a multi-leg scenario with several pairs, matching this card's existing
+      // one-line-per-transfer layout (.scenario-card span's own display:block) rather than adding
+      // a second row per pair.
       const transferNames = (scenario.transfers || [])
-        .map((move) => `<span>${esc(move.out.name)} → ${esc(move.in.name)}</span>`)
+        .map(
+          (move) =>
+            `<span>${esc(move.out.name)} (£${Number(move.out.selling_price).toFixed(1)}m) → ${esc(move.in.name)} (£${Number(move.in.price).toFixed(1)}m)</span>`,
+        )
         .join("");
       const cardLabel = labelFor(scenario.action, scenario.transfer_count);
       return `<div class="scenario-card ${isSameScenario(scenario, recommendation) ? "recommended" : ""}" data-scenario-index="${index}" role="button" tabindex="0" aria-label="Preview the starting XI for: ${esc(cardLabel)}"><strong>${esc(cardLabel)}</strong><span class="previewing-badge">Previewing</span>${transferNames}<span>${scenario.transfer_count} transfer${scenario.transfer_count === 1 ? "" : "s"} · ${scenario.point_cost ? `−${scenario.point_cost} hit` : "no hit"}</span>${edgeLine}<span>${Number(scenario.net_gain_5gw).toFixed(1)} direct 5-GW net · £${Number(scenario.bank_after).toFixed(1)}m bank${nextFtText}</span></div>`;
