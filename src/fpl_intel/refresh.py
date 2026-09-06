@@ -10,6 +10,7 @@ import sys
 from zoneinfo import ZoneInfo
 
 from .generation import publish_generation, resolve_artifact
+from .server_handlers.common import is_synthetic_team_id
 from .modeling import ml_minutes
 from .modeling.model_performance import (
     archive_forecast,
@@ -257,9 +258,17 @@ def _refresh_project_unlocked(
     # _MANAGER_PICKS_TEAM_CAP). config_team_id keeps its historical role too, folded in as "one
     # more team ID that happens to have picks collected" rather than a special case.
     saved_team_ids = profiles.list_team_ids(_profiles_db_path(root))
-    candidate_team_ids = list(dict.fromkeys(
-        ([config_team_id] if config_team_id else []) + list(saved_team_ids)
-    ))
+    # Excludes scripts/live_regression_check.py's own reserved synthetic team IDs (see
+    # is_synthetic_team_id's docstring) -- without this, every one of them ends up here as "a
+    # saved profile with picks/transfers to maintain," and every refresh permanently re-fails
+    # trying to fetch a real FPL manager for an ID that was never real, showing up as recurring
+    # noise in collection_errors on the live dashboard.
+    candidate_team_ids = [
+        candidate_team_id for candidate_team_id in dict.fromkeys(
+            ([config_team_id] if config_team_id else []) + list(saved_team_ids)
+        )
+        if not is_synthetic_team_id(candidate_team_id)
+    ]
     teams_needing_picks = [
         candidate_team_id for candidate_team_id in candidate_team_ids
         if any(
