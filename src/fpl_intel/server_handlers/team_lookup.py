@@ -27,7 +27,7 @@ from ..modeling.model_performance import (
 from ..refresh import RefreshAlreadyRunning, compute_manager_view, project_refresh_lock
 from ..sources.fpl_data import save_json
 from ..storage import profiles
-from .common import ALLOWED_REMINDER_LEAD_HOURS, parse_team_id, profiles_db_path
+from .common import ALLOWED_REMINDER_LEAD_HOURS, is_synthetic_team_id, parse_team_id, profiles_db_path
 
 # Issue #102: same per-run bound `refresh.py`'s `_MANAGER_PICKS_TEAM_CAP` (issue #64) already
 # established for "loop over every registered team from a scheduled trigger" -- reused here
@@ -256,7 +256,16 @@ def make_handle_registered_teams(root, token):
         if not secrets.compare_digest(self.headers.get("X-Refresh-Token", ""), token):
             self._json(403, {"status": "error", "message": "Invalid refresh token"})
             return
-        team_ids = profiles.list_team_ids(profiles_db_path(root))[:_REGISTERED_TEAMS_CAP]
+        # Excludes scripts/live_regression_check.py's own reserved synthetic team IDs (see
+        # is_synthetic_team_id's docstring) -- otherwise the archiver would waste a live FPL
+        # lookup, every run, on an ID that was never real. Filtered before capping (though
+        # `list_team_ids`'s ascending sort already pushes these numerically-huge IDs to the tail
+        # in practice) so this stays correct regardless of that ordering detail.
+        all_team_ids = [
+            team_id for team_id in profiles.list_team_ids(profiles_db_path(root))
+            if not is_synthetic_team_id(team_id)
+        ]
+        team_ids = all_team_ids[:_REGISTERED_TEAMS_CAP]
         self._json(200, {"status": "ok", "team_ids": team_ids})
 
     return handle_registered_teams

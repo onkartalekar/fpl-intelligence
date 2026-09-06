@@ -952,6 +952,31 @@ class ManagerPicksMultiTeamCollectionTests(unittest.TestCase):
             self.assertEqual(persisted["manager_picks"]["200"]["1"][0]["element_id"], 1)
             self.assertNotIn("team_performance", state["model_performance"])
 
+    def test_refresh_excludes_live_regression_checks_own_synthetic_team_ids(self):
+        """scripts/live_regression_check.py's SYNTHETIC_TEAM_ID_PROFILE (90000001) saves a real
+        profiles.db row on every live-check run -- must never be treated as a team needing
+        season-long manager_picks tracking, or every refresh permanently re-fails trying to fetch
+        a real FPL manager for an ID that was never real."""
+        live = {"elements": [{"id": 1, "stats": {"total_points": 3}}]}
+        picks = {"picks": [{"element": 1, "multiplier": 1, "is_captain": False, "is_vice_captain": False}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._seed_root(directory, [100, 90000001])
+
+            state = refresh_project(
+                root,
+                bootstrap_payload=self._bootstrap(),
+                event_live_payloads={1: live},
+                manager_picks_payloads={100: {1: picks}},
+                generated_at="2026-08-15T12:00:00-04:00",
+            )
+
+            persisted = json.loads((root / "data" / "model-performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(persisted.get("manager_picks", {}).keys()), {"100"})
+            self.assertEqual(
+                state["model_performance"]["collection_errors"], [],
+                "the synthetic team must never even be attempted, so no failed-fetch error either",
+            )
+
     def test_refresh_caps_the_number_of_teams_collected_in_one_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._seed_root(directory, [100, 200, 300])

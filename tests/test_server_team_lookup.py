@@ -436,6 +436,18 @@ class RegisteredTeamsApiTests(unittest.TestCase):
 
         self.assertEqual(payload, {"status": "ok", "team_ids": []})
 
+    def test_excludes_live_regression_checks_own_synthetic_team_ids(self):
+        """scripts/live_regression_check.py's SYNTHETIC_TEAM_ID_PROFILE (90000001) saves a real
+        profile row on every live-check run -- must never be treated as a real registered team
+        needing season-long forecast tracking or an archiver lookup."""
+        save_profile(self.db_path, 100, "America/New_York", "balanced", None, None, self.now)
+        save_profile(self.db_path, 90000001, "America/New_York", "balanced", None, None, self.now)
+
+        response = self._get()
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {"status": "ok", "team_ids": [100]})
+
     def test_caps_at_the_registered_teams_limit(self):
         for team_id in range(1, 30):
             save_profile(self.db_path, team_id, "America/New_York", "balanced", None, None, self.now)

@@ -38,6 +38,18 @@ ALLOWED_REMINDER_LEAD_HOURS = {3, 12, 24}
 # bounding automated abuse of an open write endpoint, not correctness.
 PROFILE_WRITE_COOLDOWN_SECONDS = 5
 
+# `scripts/live_regression_check.py` (issue #119) writes real rows to profiles.db under reserved,
+# obviously-synthetic team IDs (its own `SYNTHETIC_TEAM_ID_*` constants, 90000001 and up) -- chosen
+# "comfortably outside FPL's real team ID space" specifically so they'd never be mistaken for a
+# real visitor's. Every consumer that treats "every team with a saved profile" as "every real
+# registered team to maintain season-long tracking for" (refresh.py's manager_picks/
+# manager_transfers backfill; /api/registered-teams, which feeds the archiver) must exclude them --
+# otherwise each one keeps trying, and permanently failing, to fetch a real FPL manager for an ID
+# that was never real, on every single refresh, forever, surfacing as permanent noise in
+# collection_errors. Kept as one shared threshold rather than duplicating the literal in each
+# consumer, so a future addition to that script's own constants never needs a second update here.
+SYNTHETIC_TEAM_ID_THRESHOLD = 90_000_000
+
 
 def coerce_team_id(raw):
     """Validate a raw team-ID string (from a query param or cookie), or None if invalid."""
@@ -47,6 +59,11 @@ def coerce_team_id(raw):
     if not (1 <= team_id <= 99_999_999):
         return None
     return team_id
+
+
+def is_synthetic_team_id(team_id):
+    """True for a reserved live-regression-check team ID -- see SYNTHETIC_TEAM_ID_THRESHOLD."""
+    return team_id is not None and team_id >= SYNTHETIC_TEAM_ID_THRESHOLD
 
 
 def parse_team_id(query_string):
