@@ -180,6 +180,15 @@ jobs:
         # below doesn't need it -- that already works fine with the default token, confirmed live
         # (only PR creation was ever the blocked step).
         #
+        # --label "automated:release-notes-archival" (issue #305): the primary signal
+        # publish_release_notes._is_own_archival_pr uses to keep the next day's run from feeding
+        # on this PR. The label is a repo-level definition created once (not per-run -- the PAT's
+        # "Pull requests: write" can attach an existing label during `gh pr create` but can't
+        # define a new one); if it's ever missing, `gh pr create` fails loudly here rather than
+        # opening an unlabelled PR, and _is_own_archival_pr's title+body fallback still catches it.
+        # test_publish_release_notes.py's ArchivalPrFilterCouplingTests asserts this flag, the
+        # title, and the body all still match what that script expects.
+        #
         # Branch name includes github.run_id: confirmed live -- a date-only branch name
         # (release-notes-archive-<date>) collided with a leftover branch from an earlier run that
         # had failed *after* pushing but *before* merging (the PR-creation-permission failure this
@@ -203,6 +212,7 @@ jobs:
             git push -u origin "$BRANCH"
             gh pr create --title "Archive $DATE release notes" \
               --body "Automated archival commit from release-notes.yml -- issue #143." \
+              --label "automated:release-notes-archival" \
               --base main --head "$BRANCH"
             gh pr merge "$BRANCH" --squash --delete-branch --auto
           else
