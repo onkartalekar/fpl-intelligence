@@ -72,7 +72,8 @@ GROUPS = {
         "tests.test_fpl_data", "tests.test_live_regression_check", "tests.test_manager_data",
         "tests.test_minutes", "tests.test_ml_minutes", "tests.test_model_performance",
         "tests.test_news_signals", "tests.test_pl_transfers", "tests.test_profiles",
-        "tests.test_projection", "tests.test_publish_release_notes", "tests.test_rate_limit",
+        "tests.test_projection", "tests.test_publish_release_notes",
+        "tests.test_purge_release_notes_entries", "tests.test_rate_limit",
         # Issue #229: the refresh *script*'s output contract (the pipeline itself is
         # tests.test_refresh, in another group).
         "tests.test_refresh_dashboard_script",

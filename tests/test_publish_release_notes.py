@@ -495,6 +495,43 @@ class GenerateEntryTests(unittest.TestCase):
         self.assertEqual(source, "llm")
 
 
+class IsOwnArchivalPrTests(unittest.TestCase):
+    """Issue #300: the daily job must not treat release-notes.yml's own release-notes/<date>.md
+    archival PR as a shipped change -- doing so generated a "we archived the release notes" entry
+    every quiet day, which opened the next archival PR, forever."""
+
+    _ARCHIVAL_BODY = "Automated archival commit from release-notes.yml -- issue #143."
+
+    def test_matches_the_workflows_own_archival_pr(self):
+        self.assertTrue(prn._is_own_archival_pr(
+            {"title": "Archive 2026-09-04 release notes", "body": self._ARCHIVAL_BODY}
+        ))
+
+    def test_matches_even_with_surrounding_whitespace(self):
+        self.assertTrue(prn._is_own_archival_pr(
+            {"title": "  Archive 2026-09-04 release notes  ", "body": "\n" + self._ARCHIVAL_BODY + "\n"}
+        ))
+
+    def test_title_alone_is_not_enough(self):
+        # A human PR that happens to be titled this way, with a real body, is kept.
+        self.assertFalse(prn._is_own_archival_pr(
+            {"title": "Archive 2026-09-04 release notes", "body": "Reworking how we archive these."}
+        ))
+
+    def test_body_alone_is_not_enough(self):
+        self.assertFalse(prn._is_own_archival_pr(
+            {"title": "Fix the archival PR body wording", "body": self._ARCHIVAL_BODY}
+        ))
+
+    def test_a_normal_feature_pr_is_not_matched(self):
+        self.assertFalse(prn._is_own_archival_pr(
+            {"title": "Add week-over-week recommendation diff", "body": "## Summary\nAdds a diff."}
+        ))
+
+    def test_missing_title_or_body_keys_do_not_raise(self):
+        self.assertFalse(prn._is_own_archival_pr({}))
+
+
 class FetchMergedPrsTests(unittest.TestCase):
     def test_returns_items_from_the_search_response(self):
         def fake_urlopen(request, timeout=None):
@@ -514,6 +551,33 @@ class FetchMergedPrsTests(unittest.TestCase):
             prs = prn.fetch_merged_prs("owner/repo", date(2026, 8, 11))
 
         self.assertEqual(prs, [])
+
+    def test_the_workflows_own_archival_pr_is_filtered_out(self):
+        # Issue #300: a day whose only merged PR is yesterday's archival PR must look empty,
+        # so run() takes its quiet no-op path and the loop terminates.
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse({"items": [
+                {"title": "Archive 2026-09-04 release notes",
+                 "body": "Automated archival commit from release-notes.yml -- issue #143."},
+            ]})
+
+        with patch.object(prn, "urlopen", fake_urlopen):
+            prs = prn.fetch_merged_prs("owner/repo", date(2026, 9, 5))
+
+        self.assertEqual(prs, [])
+
+    def test_real_prs_survive_alongside_a_filtered_archival_pr(self):
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse({"items": [
+                {"title": "Archive 2026-09-04 release notes",
+                 "body": "Automated archival commit from release-notes.yml -- issue #143."},
+                {"title": "Add transfers panel to Model Performance", "body": "## Summary\nNew panel."},
+            ]})
+
+        with patch.object(prn, "urlopen", fake_urlopen):
+            prs = prn.fetch_merged_prs("owner/repo", date(2026, 9, 5))
+
+        self.assertEqual([pr["title"] for pr in prs], ["Add transfers panel to Model Performance"])
 
 
 class WriteArchiveFileTests(unittest.TestCase):

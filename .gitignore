@@ -236,6 +236,12 @@ data/profiles.db
 data/profiles.db-wal
 data/profiles.db-shm
 
+# "What's New" runtime state (issue #143): the live entry store and the email-subscriber DB,
+# both written only on the Railway volume via /api/release-notes and /api/release-notes-subscribe.
+# The git-tracked half of the feature is release-notes/<date>.md, not these.
+data/release-notes.json
+data/release-notes-subscribers.db
+
 # Generated per-user dashboard state (run scripts/refresh_dashboard.py to create these)
 dashboard.html
 data/dashboard-state.json

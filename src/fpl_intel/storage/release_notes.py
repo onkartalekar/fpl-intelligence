@@ -161,6 +161,57 @@ def upsert_entry(root, payload):
     return cleaned
 
 
+_MAX_DELETE_DATES = _MAX_ENTRIES_KEPT  # a purge can't name more dates than can ever be stored
+
+
+def validate_delete_payload(payload):
+    """Validate a `POST /api/release-notes` *deletion* request body: `{"delete": ["YYYY-MM-DD",
+    ...]}`. Returns the de-duplicated, sorted list of dates. Raises `ReleaseNotesValidationError`
+    on any problem -- operator-only endpoint, same as `validate_entry_payload`, so precise
+    messages are fine.
+
+    Deletion shares the `/api/release-notes` path rather than getting its own -- the same way
+    `/api/reminder-opt-in` carries both its "enable" and "disable" actions on one path. Its
+    reason to exist is issue #300's one-time cleanup of the self-archival junk entries that same
+    issue stops at the source (`publish_release_notes._is_own_archival_pr`).
+    """
+    if not isinstance(payload, dict):
+        raise ReleaseNotesValidationError("payload must be an object")
+    raw_dates = payload.get("delete")
+    if not isinstance(raw_dates, list) or not raw_dates or len(raw_dates) > _MAX_DELETE_DATES:
+        raise ReleaseNotesValidationError(
+            f"delete must be a non-empty list of at most {_MAX_DELETE_DATES} dates"
+        )
+    for raw_date in raw_dates:
+        if not isinstance(raw_date, str):
+            raise ReleaseNotesValidationError("every delete entry must be a YYYY-MM-DD string")
+        try:
+            _date.fromisoformat(raw_date)
+        except ValueError as error:
+            raise ReleaseNotesValidationError(f"'{raw_date}' is not a valid YYYY-MM-DD date") from error
+    return sorted(set(raw_dates))
+
+
+def delete_entries(root, dates):
+    """Remove the entries for `dates` from `data/release-notes.json`, in place. Returns
+    `{"deleted": [...], "not_found": [...]}` -- which requested dates had a stored entry and
+    which didn't, both sorted. A no-op (file missing, or none of `dates` present) is success,
+    not an error: this is operator cleanup (issue #300), safe to re-run.
+    """
+    wanted = sorted(set(dates))
+    entries = load_entries(root)
+    present = {entry.get("date") for entry in entries}
+    deleted = [wanted_date for wanted_date in wanted if wanted_date in present]
+    not_found = [wanted_date for wanted_date in wanted if wanted_date not in present]
+    if deleted:
+        kept = [entry for entry in entries if entry.get("date") not in set(deleted)]
+        kept.sort(key=lambda entry: entry.get("date", ""), reverse=True)
+        path = release_notes_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"entries": kept}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {"deleted": deleted, "not_found": not_found}
+
+
 def render_entry_markdown(entry):
     """Render one entry as the Markdown archived to the git-tracked `release-notes/` folder
     (issue #143's plan doc, Candidate C3 -- "important piece of documentation" alongside the
