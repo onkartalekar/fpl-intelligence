@@ -180,14 +180,16 @@ jobs:
         # below doesn't need it -- that already works fine with the default token, confirmed live
         # (only PR creation was ever the blocked step).
         #
-        # --label "automated:release-notes-archival" (issue #305): the primary signal
-        # publish_release_notes._is_own_archival_pr uses to keep the next day's run from feeding
-        # on this PR. The label is a repo-level definition created once (not per-run -- the PAT's
-        # "Pull requests: write" can attach an existing label during `gh pr create` but can't
-        # define a new one); if it's ever missing, `gh pr create` fails loudly here rather than
-        # opening an unlabelled PR, and _is_own_archival_pr's title+body fallback still catches it.
-        # test_publish_release_notes.py's ArchivalPrFilterCouplingTests asserts this flag, the
-        # title, and the body all still match what that script expects.
+        # The archival PR is labelled "automated:release-notes-archival" (issue #305): the primary
+        # signal publish_release_notes._is_own_archival_pr uses to keep the next day's run from
+        # feeding on this PR. Applied as a separate `gh pr edit` step, not a `gh pr create --label`
+        # flag, and with the default github.token rather than the PAT: adding a label to a PR is
+        # squarely within this workflow's `permissions: pull-requests: write` for that token,
+        # whereas the fine-grained PAT is only documented for creating the PR itself. Best-effort
+        # (`|| echo ::warning::`) -- the label is a repo-level definition that must already exist,
+        # and if it's gone or the call fails, _is_own_archival_pr's title+body fallback still
+        # catches the PR and ArchivalPrFilterCouplingTests still guards those strings, so a missing
+        # label degrades rather than silently reopening issue #300.
         #
         # Branch name includes github.run_id: confirmed live -- a date-only branch name
         # (release-notes-archive-<date>) collided with a leftover branch from an earlier run that
@@ -212,8 +214,10 @@ jobs:
             git push -u origin "$BRANCH"
             gh pr create --title "Archive $DATE release notes" \
               --body "Automated archival commit from release-notes.yml -- issue #143." \
-              --label "automated:release-notes-archival" \
               --base main --head "$BRANCH"
+            GH_TOKEN="${{ github.token }}" gh pr edit "$BRANCH" \
+              --add-label "automated:release-notes-archival" \
+              || echo "::warning::could not label the archival PR; publish_release_notes._is_own_archival_pr's title/body fallback still applies (issue #305)"
             gh pr merge "$BRANCH" --squash --delete-branch --auto
           else
             echo "Nothing new to archive."

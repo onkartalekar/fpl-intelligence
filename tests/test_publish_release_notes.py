@@ -565,36 +565,38 @@ class ArchivalPrFilterCouplingTests(unittest.TestCase):
 
     _WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release-notes.yml"
 
-    def _gh_pr_create_args(self):
-        """The --title / --body / --label values from the workflow's `gh pr create`, with $DATE
-        resolved to a concrete date. Regex over the raw file (not a YAML parse): the repo is
-        stdlib-only, and the flags are a stable single invocation."""
+    def _archival_pr_strings(self):
+        """The title/body the workflow's `gh pr create` writes and the label its `gh pr edit
+        --add-label` applies, with $DATE resolved to a concrete date. Regex over the raw file
+        (not a YAML parse): the repo is stdlib-only, and these are stable single invocations."""
         text = self._WORKFLOW.read_text(encoding="utf-8")
         create = re.search(r"gh pr create .*?--head \"\$BRANCH\"", text, re.DOTALL)
         self.assertIsNotNone(create, "could not find the `gh pr create` invocation in release-notes.yml")
-        block = create.group(0)
         found = {}
-        for flag in ("title", "body", "label"):
-            match = re.search(rf'--{flag} "([^"]*)"', block)
+        for flag in ("title", "body"):
+            match = re.search(rf'--{flag} "([^"]*)"', create.group(0))
             self.assertIsNotNone(match, f"`gh pr create` has no --{flag} in release-notes.yml")
             found[flag] = match.group(1).replace("$DATE", "2026-09-04")
+        label = re.search(r'--add-label "([^"]*)"', text)
+        self.assertIsNotNone(label, "release-notes.yml no longer applies a label to the archival PR")
+        found["label"] = label.group(1)
         return found
 
-    def test_workflow_label_flag_is_the_constant_the_filter_checks(self):
-        self.assertEqual(self._gh_pr_create_args()["label"], prn._OWN_ARCHIVAL_PR_LABEL)
+    def test_workflow_label_is_the_constant_the_filter_checks(self):
+        self.assertEqual(self._archival_pr_strings()["label"], prn._OWN_ARCHIVAL_PR_LABEL)
 
     def test_label_from_the_workflow_alone_makes_the_filter_match(self):
-        args = self._gh_pr_create_args()
+        args = self._archival_pr_strings()
         self.assertTrue(prn._is_own_archival_pr({
             "title": "unrelated", "body": "unrelated", "labels": [{"name": args["label"]}],
         }))
 
     def test_title_and_body_from_the_workflow_alone_make_the_filter_match(self):
-        args = self._gh_pr_create_args()
+        args = self._archival_pr_strings()
         self.assertTrue(prn._is_own_archival_pr({"title": args["title"], "body": args["body"]}))
 
     def test_all_three_signals_from_the_workflow_together_match(self):
-        args = self._gh_pr_create_args()
+        args = self._archival_pr_strings()
         self.assertTrue(prn._is_own_archival_pr({
             "title": args["title"], "body": args["body"], "labels": [{"name": args["label"]}],
         }))
