@@ -130,6 +130,48 @@ class ReleaseNotesApiTests(unittest.TestCase):
         self.assertIn(self._VALID_PAYLOAD["headline"], html)
         self.assertIn('data-view="whats-new"', html)
 
+    def test_delete_payload_removes_named_entries(self):
+        # Issue #300: `{"delete": [...]}` on the same path purges junk entries.
+        self._post({**self._VALID_PAYLOAD, "date": "2026-08-20"})
+        self._post({**self._VALID_PAYLOAD, "date": "2026-08-21"})
+
+        response = self._post({"delete": ["2026-08-20"]})
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"status": "ok", "deleted": ["2026-08-20"], "not_found": []})
+        stored = json.loads((self.root / "data" / "release-notes.json").read_text(encoding="utf-8"))
+        self.assertEqual([entry["date"] for entry in stored["entries"]], ["2026-08-21"])
+
+    def test_delete_payload_requires_the_token(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"delete": ["2026-08-20"]}, token=None)
+        self.assertEqual(error.exception.code, 403)
+
+    def test_malformed_delete_payload_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"delete": []})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_delete_does_not_notify_subscribers(self):
+        sent = []
+        # Rebuild the server with a notify spy -- the delete branch must never reach it.
+        self.server.shutdown()
+        self.thread.join(timeout=2)
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            release_notes_notify_email_action=lambda email, entry, url: sent.append(email),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+        self._post({**self._VALID_PAYLOAD, "date": "2026-08-20"})
+        sent.clear()
+        self._post({"delete": ["2026-08-20"]})
+
+        self.assertEqual(sent, [])
+
 class ReleaseNotesSubscribeEndpointTests(unittest.TestCase):
     """Issue #143: POST /api/release-notes-subscribe -- double opt-in, same shape as
     /api/reminder-opt-in's "enable" path. All SMTP sending is mocked via an injected

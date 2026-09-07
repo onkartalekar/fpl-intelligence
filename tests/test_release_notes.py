@@ -7,10 +7,12 @@ from fpl_intel.storage.release_notes import (
     AUDIENCES,
     CATEGORIES,
     ReleaseNotesValidationError,
+    delete_entries,
     load_entries,
     release_notes_path,
     render_entry_markdown,
     upsert_entry,
+    validate_delete_payload,
     validate_entry_payload,
 )
 
@@ -141,6 +143,90 @@ class UpsertEntryTests(unittest.TestCase):
             upsert_entry(self.root, {**_VALID_PAYLOAD, "headline": ""})
 
         self.assertFalse(release_notes_path(self.root).exists())
+
+
+class ValidateDeletePayloadTests(unittest.TestCase):
+    """Issue #300: `{"delete": [...]}` on POST /api/release-notes -- operator cleanup path."""
+
+    def test_accepts_and_sorts_and_dedupes(self):
+        self.assertEqual(
+            validate_delete_payload({"delete": ["2026-08-23", "2026-08-20", "2026-08-23"]}),
+            ["2026-08-20", "2026-08-23"],
+        )
+
+    def test_rejects_non_dict(self):
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_delete_payload(["2026-08-20"])
+
+    def test_rejects_empty_list(self):
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_delete_payload({"delete": []})
+
+    def test_rejects_non_list(self):
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_delete_payload({"delete": "2026-08-20"})
+
+    def test_rejects_a_non_string_date(self):
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_delete_payload({"delete": ["2026-08-20", 20260821]})
+
+    def test_rejects_a_malformed_date(self):
+        with self.assertRaises(ReleaseNotesValidationError):
+            validate_delete_payload({"delete": ["2026-8-20"]})
+
+
+class DeleteEntriesTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _seed(self, *dates):
+        for entry_date in dates:
+            upsert_entry(self.root, {**_VALID_PAYLOAD, "date": entry_date})
+
+    def test_removes_named_entries_and_reports_what_it_did(self):
+        self._seed("2026-08-20", "2026-08-21", "2026-08-22")
+
+        result = delete_entries(self.root, ["2026-08-20", "2026-08-22"])
+
+        self.assertEqual(result, {"deleted": ["2026-08-20", "2026-08-22"], "not_found": []})
+        self.assertEqual([entry["date"] for entry in load_entries(self.root)], ["2026-08-21"])
+
+    def test_unknown_dates_are_reported_not_raised(self):
+        self._seed("2026-08-21")
+
+        result = delete_entries(self.root, ["2026-08-20", "2026-08-21"])
+
+        self.assertEqual(result, {"deleted": ["2026-08-21"], "not_found": ["2026-08-20"]})
+        self.assertEqual(load_entries(self.root), [])
+
+    def test_no_matching_dates_leaves_the_file_untouched(self):
+        self._seed("2026-08-21")
+        before = release_notes_path(self.root).read_text(encoding="utf-8")
+
+        result = delete_entries(self.root, ["2026-08-20"])
+
+        self.assertEqual(result, {"deleted": [], "not_found": ["2026-08-20"]})
+        self.assertEqual(release_notes_path(self.root).read_text(encoding="utf-8"), before)
+
+    def test_missing_file_is_a_quiet_no_op(self):
+        result = delete_entries(self.root, ["2026-08-20"])
+
+        self.assertEqual(result, {"deleted": [], "not_found": ["2026-08-20"]})
+        self.assertFalse(release_notes_path(self.root).exists())
+
+    def test_remaining_entries_stay_newest_first(self):
+        self._seed("2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23")
+
+        delete_entries(self.root, ["2026-08-22"])
+
+        self.assertEqual(
+            [entry["date"] for entry in load_entries(self.root)],
+            ["2026-08-23", "2026-08-21", "2026-08-20"],
+        )
 
 
 class LoadEntriesTests(unittest.TestCase):

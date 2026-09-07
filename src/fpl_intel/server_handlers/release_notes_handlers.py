@@ -161,6 +161,12 @@ def make_handle_release_notes(root, release_notes_notify_email_action):
     ever hold that token. Idempotent by date: re-publishing the same date overwrites that date's
     entry rather than duplicating it (`release_notes.upsert_entry`'s own docstring) -- safe for
     the daily job to retry.
+
+    A body of `{"delete": ["YYYY-MM-DD", ...]}` deletes those entries instead of publishing one
+    (issue #300 -- operator cleanup of the self-archival junk entries the same issue fixes at the
+    source, via `scripts/purge_release_notes_entries.py`). Same path, not a new one, following
+    `/api/reminder-opt-in`'s "one path carries enable and disable" precedent; no subscriber
+    notification on the delete branch (nothing was published).
     """
 
     def handle_release_notes(self, body):
@@ -169,6 +175,22 @@ def make_handle_release_notes(root, release_notes_notify_email_action):
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._json(400, {"status": "error", "message": "Invalid release-notes payload"})
             return
+
+        if isinstance(payload, dict) and "delete" in payload:
+            try:
+                dates = release_notes.validate_delete_payload(payload)
+            except release_notes.ReleaseNotesValidationError as error:
+                self._json(400, {"status": "error", "message": str(error)})
+                return
+            try:
+                result = release_notes.delete_entries(root, dates)
+            except Exception as error:
+                print(f"Release-notes delete failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Release-notes delete failed"})
+                return
+            self._json(200, {"status": "ok", **result})
+            return
+
         try:
             stored = release_notes.upsert_entry(root, payload)
         except release_notes.ReleaseNotesValidationError as error:

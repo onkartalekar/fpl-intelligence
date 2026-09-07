@@ -12,8 +12,11 @@ What it does, each run:
 1. Determines "yesterday" in `America/New_York` (`target_date`) -- the previous calendar day,
    ET, regardless of which of the two UTC cron triggers actually fired this run.
 2. Lists every PR merged to `main` on that ET calendar day (`fetch_merged_prs`, via the GitHub
-   REST search API). **Nothing merged -> exits quietly, no entry published** -- this is the
-   expected, self-resolving no-op case the issue's own point 1 asks for, not a failure.
+   REST search API), minus this workflow's own `release-notes/<date>.md` archival PRs
+   (`_is_own_archival_pr`, issue #300 -- otherwise the job feeds on its own bookkeeping commits
+   and generates a "we archived the release notes" entry every quiet day, forever).
+   **Nothing else merged -> exits quietly, no entry published** -- this is the expected,
+   self-resolving no-op case the issue's own point 1 asks for, not a failure.
 3. Generates the day's headline/summary/per-change copy, categorizing each change into one of
    `release_notes.CATEGORIES` (`Feature`/`Fix`/`Data`/`Docs`/`Chore`). Tries an LLM first
    (`FPL_INTEL_RELEASE_NOTES_LLM_*` env vars, provider-agnostic like `news_signals.py`'s existing
@@ -197,9 +200,34 @@ def _et_day_bounds_in_utc(date):
     return start_local.astimezone(zoneinfo.ZoneInfo("UTC")), end_local.astimezone(zoneinfo.ZoneInfo("UTC"))
 
 
+# Issue #300: `.github/workflows/release-notes.yml`'s "Commit the archived entry via a PR" step
+# opens one PR per published entry, purely to land `release-notes/<date>.md` -- title
+# `Archive <date> release notes`, body starting with the marker below. Left unfiltered, that PR
+# is itself a "merged PR" the next day, and on a day when nothing else shipped it's the *only*
+# one: the job then generates a "we archived the release notes" entry from it, which opens the
+# next archival PR, which is the day-after's only input, forever. `_is_own_archival_pr` drops it
+# so a nothing-else-merged day collapses back to the real no-op path in `run()`. Both signals
+# must match (title shape AND body marker), never just one, so a human PR that happens to be
+# titled "Archive ... release notes" is never silently dropped. The two constants sit together,
+# mirroring `server_handlers/common.py`'s `SYNTHETIC_TEAM_ID_THRESHOLD` (issue #296 -- the same
+# "our own automated artifact swept into a real-data consumer" shape); keep them in step with
+# the workflow's `git commit -m` / `gh pr create --body` strings.
+_OWN_ARCHIVAL_PR_TITLE_RE = re.compile(r"^Archive \d{4}-\d{2}-\d{2} release notes$")
+_OWN_ARCHIVAL_PR_BODY_PREFIX = "Automated archival commit from release-notes.yml"
+
+
+def _is_own_archival_pr(pr):
+    """True for `release-notes.yml`'s own `release-notes/<date>.md` archival PR (issue #300) --
+    see `_OWN_ARCHIVAL_PR_TITLE_RE`/`_OWN_ARCHIVAL_PR_BODY_PREFIX`."""
+    title = (pr.get("title") or "").strip()
+    body = (pr.get("body") or "").strip()
+    return bool(_OWN_ARCHIVAL_PR_TITLE_RE.match(title)) and body.startswith(_OWN_ARCHIVAL_PR_BODY_PREFIX)
+
+
 def fetch_merged_prs(repository, date, github_token=None, timeout=_REQUEST_TIMEOUT_SECONDS):
-    """List every PR merged to `repository` on `date` (an ET calendar day). Returns `[]` if none
-    merged -- the expected, self-resolving no-op case, not an error.
+    """List every PR merged to `repository` on `date` (an ET calendar day), **excluding
+    `release-notes.yml`'s own archival PRs** (`_is_own_archival_pr`, issue #300). Returns `[]` if
+    nothing else merged -- the expected, self-resolving no-op case, not an error.
     """
     start_utc, end_utc = _et_day_bounds_in_utc(date)
     query = (
@@ -213,7 +241,7 @@ def fetch_merged_prs(repository, date, github_token=None, timeout=_REQUEST_TIMEO
     request = Request(url, headers=headers)
     with urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read())
-    return payload.get("items", [])
+    return [item for item in payload.get("items", []) if not _is_own_archival_pr(item)]
 
 
 # Deterministic categorization for the template fallback (no LLM available) -- title-keyword

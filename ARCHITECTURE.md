@@ -75,7 +75,7 @@ flowchart TB
 
     releaseNotes -->|"list merged PRs<br/>(GITHUB_TOKEN)"| githubApi
     releaseNotes -->|"generate copy<br/>(optional; template fallback if unset/fails)"| llmApi
-    releaseNotes -->|"POST /api/release-notes<br/>(X-Refresh-Token)"| server
+    releaseNotes -->|"POST /api/release-notes<br/>(X-Refresh-Token; same path also<br/>takes {&quot;delete&quot;: [...]} for the<br/>operator purge, issue #300)"| server
     releaseNotes -->|"git commit + push<br/>release-notes/&lt;date&gt;.md<br/>(contents: write --<br/>the one workflow with repo write access)"| githubApi
 
     classDef ephemeral stroke-dasharray: 4 3
