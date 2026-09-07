@@ -172,6 +172,82 @@ class ReleaseNotesApiTests(unittest.TestCase):
 
         self.assertEqual(sent, [])
 
+    _ARCHIVAL_CHANGE = {
+        "category": "Chore", "audience": "developer",
+        "title": "Archive previous release notes",
+        "description": "Automated archival of the previous day's release notes.",
+    }
+
+    def test_prune_archival_changes_strips_junk_and_keeps_real_changes(self):
+        # Issue #303: `{"prune_archival_changes": true}` on the same path.
+        self._post({
+            **self._VALID_PAYLOAD, "date": "2026-08-27",
+            "changes": [self._VALID_PAYLOAD["changes"][0], self._ARCHIVAL_CHANGE],
+        })
+
+        response = self._post({"prune_archival_changes": True})
+        payload = json.loads(response.read())
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {
+            "status": "ok",
+            "removed": [{"date": "2026-08-27", "title": self._ARCHIVAL_CHANGE["title"]}],
+            "modified": ["2026-08-27"], "emptied": [],
+        })
+        stored = json.loads((self.root / "data" / "release-notes.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            [change["title"] for change in stored["entries"][0]["changes"]],
+            [self._VALID_PAYLOAD["changes"][0]["title"]],
+        )
+
+    def test_prune_archival_changes_deletes_an_entry_left_empty(self):
+        self._post({**self._VALID_PAYLOAD, "date": "2026-08-28", "changes": [self._ARCHIVAL_CHANGE]})
+
+        response = self._post({"prune_archival_changes": True})
+        payload = json.loads(response.read())
+
+        self.assertEqual(payload, {
+            "status": "ok",
+            "removed": [{"date": "2026-08-28", "title": self._ARCHIVAL_CHANGE["title"]}],
+            "modified": [], "emptied": ["2026-08-28"],
+        })
+        stored = json.loads((self.root / "data" / "release-notes.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["entries"], [])
+
+    def test_prune_archival_changes_requires_the_token(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"prune_archival_changes": True}, token=None)
+        self.assertEqual(error.exception.code, 403)
+
+    def test_prune_archival_changes_must_be_true(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"prune_archival_changes": False})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_delete_and_prune_together_is_a_400(self):
+        with self.assertRaises(HTTPError) as error:
+            self._post({"delete": ["2026-08-20"], "prune_archival_changes": True})
+        self.assertEqual(error.exception.code, 400)
+
+    def test_prune_does_not_notify_subscribers(self):
+        sent = []
+        self.server.shutdown()
+        self.thread.join(timeout=2)
+        self.server = create_server(
+            self.root, host="127.0.0.1", port=0, token="test-token",
+            release_notes_notify_email_action=lambda email, entry, url: sent.append(email),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+        self._post({**self._VALID_PAYLOAD, "date": "2026-08-27", "changes": [self._ARCHIVAL_CHANGE]})
+        sent.clear()
+        self._post({"prune_archival_changes": True})
+
+        self.assertEqual(sent, [])
+
+
 class ReleaseNotesSubscribeEndpointTests(unittest.TestCase):
     """Issue #143: POST /api/release-notes-subscribe -- double opt-in, same shape as
     /api/reminder-opt-in's "enable" path. All SMTP sending is mocked via an injected

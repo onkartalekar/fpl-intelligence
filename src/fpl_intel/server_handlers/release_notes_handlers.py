@@ -164,9 +164,13 @@ def make_handle_release_notes(root, release_notes_notify_email_action):
 
     A body of `{"delete": ["YYYY-MM-DD", ...]}` deletes those entries instead of publishing one
     (issue #300 -- operator cleanup of the self-archival junk entries the same issue fixes at the
-    source, via `scripts/purge_release_notes_entries.py`). Same path, not a new one, following
-    `/api/reminder-opt-in`'s "one path carries enable and disable" precedent; no subscriber
-    notification on the delete branch (nothing was published).
+    source, via `scripts/purge_release_notes_entries.py`). A body of
+    `{"prune_archival_changes": true}` strips the leftover archival-bookkeeping *changes* from
+    inside mixed-day entries (issue #303 -- the ones #300's whole-entry delete can't reach
+    without destroying the real content alongside them), via
+    `scripts/prune_release_notes_archival_changes.py`. Same path for all three, not new ones,
+    following `/api/reminder-opt-in`'s "one path carries enable and disable" precedent; no
+    subscriber notification on the delete or prune branch (nothing was published).
     """
 
     def handle_release_notes(self, body):
@@ -174,6 +178,10 @@ def make_handle_release_notes(root, release_notes_notify_email_action):
             payload = json.loads(body.decode("utf-8")) if body else None
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._json(400, {"status": "error", "message": "Invalid release-notes payload"})
+            return
+
+        if isinstance(payload, dict) and "delete" in payload and "prune_archival_changes" in payload:
+            self._json(400, {"status": "error", "message": "send delete or prune_archival_changes, not both"})
             return
 
         if isinstance(payload, dict) and "delete" in payload:
@@ -187,6 +195,19 @@ def make_handle_release_notes(root, release_notes_notify_email_action):
             except Exception as error:
                 print(f"Release-notes delete failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
                 self._json(500, {"status": "error", "message": "Release-notes delete failed"})
+                return
+            self._json(200, {"status": "ok", **result})
+            return
+
+        if isinstance(payload, dict) and "prune_archival_changes" in payload:
+            if payload.get("prune_archival_changes") is not True:
+                self._json(400, {"status": "error", "message": "prune_archival_changes must be true"})
+                return
+            try:
+                result = release_notes.prune_archival_changes(root)
+            except Exception as error:
+                print(f"Release-notes prune failed: {error!r}\n{traceback.format_exc()}", file=sys.stderr)
+                self._json(500, {"status": "error", "message": "Release-notes prune failed"})
                 return
             self._json(200, {"status": "ok", **result})
             return

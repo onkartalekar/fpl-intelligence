@@ -212,6 +212,74 @@ def delete_entries(root, dates):
     return {"deleted": deleted, "not_found": not_found}
 
 
+def is_archival_bookkeeping_change(change):
+    """True for a `changes[]` item that is the daily job's own "we archived yesterday's entry"
+    bookkeeping rather than a real shipped change -- issue #303.
+
+    These accumulated before issue #300 filtered `release-notes.yml`'s own archival PR out of
+    `fetch_merged_prs`: handed only "Archive <date> release notes" as a merged PR, the generator
+    dutifully wrote a `Chore` change about archiving release notes. The exact wording varies
+    ("Archive previous / old / past / outdated release notes", "Archive 2026-08-16 release
+    notes", "Archive the latest release notes"), so this can't reuse
+    `publish_release_notes._OWN_ARCHIVAL_PR_TITLE_RE` -- that matches the *PR* title's one fixed
+    shape; this matches the looser space of change titles the generator actually produced.
+
+    Deliberately tight, to never strip a real change that merely mentions archiving or release
+    notes. Verified 2026-09-07 against the full live dataset: "Enhance team forecast archiving
+    mechanism" (#286, a Fix), "Add fine-grained PAT for archival PR" (a Fix), "Fix release-notes
+    workflow", "Launch the What's New tab for release notes" all survive. Requires all three:
+    `Chore` category, title starts with "archive", title mentions a release note.
+    """
+    if not isinstance(change, dict) or change.get("category") != "Chore":
+        return False
+    title = (change.get("title") or "").strip().lower()
+    return title.startswith("archive") and "release note" in title
+
+
+def prune_archival_changes(root):
+    """Strip every `is_archival_bookkeeping_change` from every stored entry in
+    `data/release-notes.json`, in place -- issue #303's one-time cleanup of the junk changes
+    left inside *mixed* days (real changelog content plus a stray archival bullet) after issue
+    #300's whole-entry purge (`delete_entries`). An entry left with zero `changes[]` is dropped
+    entirely, exactly as if it had been deleted outright.
+
+    Returns `{"removed": [{"date", "title"}, ...], "modified": [...dates], "emptied": [...dates]}`
+    -- `removed` names every change stripped (title included) so a one-shot operator run against
+    production is auditable after the fact, since there is no GET endpoint to diff against and
+    the match is a heuristic. All three lists are sorted by date. A no-op (file missing, nothing
+    matches) is success -- operator cleanup, safe to re-run.
+    """
+    entries = load_entries(root)
+    removed = []
+    modified = []
+    emptied = []
+    kept = []
+    for entry in entries:
+        changes = entry.get("changes") or []
+        surviving = [change for change in changes if not is_archival_bookkeeping_change(change)]
+        if len(surviving) == len(changes):
+            kept.append(entry)
+            continue
+        date = entry.get("date", "")
+        removed.extend(
+            {"date": date, "title": change.get("title", "")}
+            for change in changes
+            if is_archival_bookkeeping_change(change)
+        )
+        if surviving:
+            modified.append(date)
+            kept.append({**entry, "changes": surviving})
+        else:
+            emptied.append(date)
+    if removed:
+        kept.sort(key=lambda entry: entry.get("date", ""), reverse=True)
+        path = release_notes_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"entries": kept}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    removed.sort(key=lambda item: item["date"])
+    return {"removed": removed, "modified": sorted(modified), "emptied": sorted(emptied)}
+
+
 def render_entry_markdown(entry):
     """Render one entry as the Markdown archived to the git-tracked `release-notes/` folder
     (issue #143's plan doc, Candidate C3 -- "important piece of documentation" alongside the
