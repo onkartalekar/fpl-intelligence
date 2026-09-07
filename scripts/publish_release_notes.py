@@ -201,24 +201,35 @@ def _et_day_bounds_in_utc(date):
 
 
 # Issue #300: `.github/workflows/release-notes.yml`'s "Commit the archived entry via a PR" step
-# opens one PR per published entry, purely to land `release-notes/<date>.md` -- title
-# `Archive <date> release notes`, body starting with the marker below. Left unfiltered, that PR
-# is itself a "merged PR" the next day, and on a day when nothing else shipped it's the *only*
-# one: the job then generates a "we archived the release notes" entry from it, which opens the
-# next archival PR, which is the day-after's only input, forever. `_is_own_archival_pr` drops it
-# so a nothing-else-merged day collapses back to the real no-op path in `run()`. Both signals
-# must match (title shape AND body marker), never just one, so a human PR that happens to be
-# titled "Archive ... release notes" is never silently dropped. The two constants sit together,
-# mirroring `server_handlers/common.py`'s `SYNTHETIC_TEAM_ID_THRESHOLD` (issue #296 -- the same
-# "our own automated artifact swept into a real-data consumer" shape); keep them in step with
-# the workflow's `git commit -m` / `gh pr create --body` strings.
+# opens one PR per published entry, purely to land `release-notes/<date>.md`. Left unfiltered,
+# that PR is itself a "merged PR" the next day, and on a day when nothing else shipped it's the
+# *only* one: the job then generates a "we archived the release notes" entry from it, which opens
+# the next archival PR, which is the day-after's only input, forever. `_is_own_archival_pr` drops
+# it so a nothing-else-merged day collapses back to the real no-op path in `run()`.
+#
+# Two independent signals, either sufficient (issue #305):
+#   1. the `_OWN_ARCHIVAL_PR_LABEL` label -- primary; `release-notes.yml`'s `gh pr create` sets
+#      it (the label is created once in the repo, not per-run). Structural, hard to reword.
+#   2. title shape AND body marker together -- fallback, for a PR whose label failed to apply.
+#      Both halves required so a *human* PR that happens to be titled "Archive ... release notes"
+#      is never silently dropped on the strength of its title alone.
+# `test_publish_release_notes.py`'s `ArchivalPrFilterCouplingTests` reads the real workflow file
+# and asserts every one of these strings still matches what the workflow actually writes -- so a
+# reword on either side of the coupling fails CI instead of silently reopening issue #300. The
+# constants mirror `server_handlers/common.py`'s `SYNTHETIC_TEAM_ID_THRESHOLD` (issue #296 -- the
+# same "our own automated artifact swept into a real-data consumer" shape).
+_OWN_ARCHIVAL_PR_LABEL = "automated:release-notes-archival"
 _OWN_ARCHIVAL_PR_TITLE_RE = re.compile(r"^Archive \d{4}-\d{2}-\d{2} release notes$")
 _OWN_ARCHIVAL_PR_BODY_PREFIX = "Automated archival commit from release-notes.yml"
 
 
 def _is_own_archival_pr(pr):
-    """True for `release-notes.yml`'s own `release-notes/<date>.md` archival PR (issue #300) --
-    see `_OWN_ARCHIVAL_PR_TITLE_RE`/`_OWN_ARCHIVAL_PR_BODY_PREFIX`."""
+    """True for `release-notes.yml`'s own `release-notes/<date>.md` archival PR (issue #300/#305):
+    the `_OWN_ARCHIVAL_PR_LABEL` label, OR the `_OWN_ARCHIVAL_PR_TITLE_RE` title shape together
+    with the `_OWN_ARCHIVAL_PR_BODY_PREFIX` body marker."""
+    labels = pr.get("labels") or []
+    if any(isinstance(label, dict) and label.get("name") == _OWN_ARCHIVAL_PR_LABEL for label in labels):
+        return True
     title = (pr.get("title") or "").strip()
     body = (pr.get("body") or "").strip()
     return bool(_OWN_ARCHIVAL_PR_TITLE_RE.match(title)) and body.startswith(_OWN_ARCHIVAL_PR_BODY_PREFIX)

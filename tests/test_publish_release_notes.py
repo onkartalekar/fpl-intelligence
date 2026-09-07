@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pathlib import Path
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -531,6 +532,75 @@ class IsOwnArchivalPrTests(unittest.TestCase):
     def test_missing_title_or_body_keys_do_not_raise(self):
         self.assertFalse(prn._is_own_archival_pr({}))
 
+    def test_the_label_alone_is_enough(self):
+        # Issue #305: the label is the primary signal -- it matches even when the copy drifted
+        # so far that the title/body fallback no longer would.
+        self.assertTrue(prn._is_own_archival_pr({
+            "title": "chore: tidy the changelog", "body": "whatever",
+            "labels": [{"name": prn._OWN_ARCHIVAL_PR_LABEL}],
+        }))
+
+    def test_label_match_ignores_other_labels(self):
+        self.assertTrue(prn._is_own_archival_pr({
+            "title": "x", "body": "y",
+            "labels": [{"name": "documentation"}, {"name": prn._OWN_ARCHIVAL_PR_LABEL}],
+        }))
+
+    def test_an_unrelated_label_is_not_a_match(self):
+        self.assertFalse(prn._is_own_archival_pr({
+            "title": "Add a feature", "body": "## Summary",
+            "labels": [{"name": "enhancement"}],
+        }))
+
+    def test_malformed_labels_do_not_raise(self):
+        self.assertFalse(prn._is_own_archival_pr({"title": "x", "body": "y", "labels": ["enhancement", None]}))
+
+
+class ArchivalPrFilterCouplingTests(unittest.TestCase):
+    """Issue #305: `_is_own_archival_pr` matches strings that `.github/workflows/release-notes.yml`
+    writes from a *different* file. Nothing structurally ties the two together, so a reword on
+    the workflow side would silently reopen issue #300 (the job feeding on its own archival PRs)
+    with every test still green. This reads the real workflow and fails the moment either side of
+    the coupling drifts from the other."""
+
+    _WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release-notes.yml"
+
+    def _archival_pr_strings(self):
+        """The title/body the workflow's `gh pr create` writes and the label its `gh pr edit
+        --add-label` applies, with $DATE resolved to a concrete date. Regex over the raw file
+        (not a YAML parse): the repo is stdlib-only, and these are stable single invocations."""
+        text = self._WORKFLOW.read_text(encoding="utf-8")
+        create = re.search(r"gh pr create .*?--head \"\$BRANCH\"", text, re.DOTALL)
+        self.assertIsNotNone(create, "could not find the `gh pr create` invocation in release-notes.yml")
+        found = {}
+        for flag in ("title", "body"):
+            match = re.search(rf'--{flag} "([^"]*)"', create.group(0))
+            self.assertIsNotNone(match, f"`gh pr create` has no --{flag} in release-notes.yml")
+            found[flag] = match.group(1).replace("$DATE", "2026-09-04")
+        label = re.search(r'--add-label "([^"]*)"', text)
+        self.assertIsNotNone(label, "release-notes.yml no longer applies a label to the archival PR")
+        found["label"] = label.group(1)
+        return found
+
+    def test_workflow_label_is_the_constant_the_filter_checks(self):
+        self.assertEqual(self._archival_pr_strings()["label"], prn._OWN_ARCHIVAL_PR_LABEL)
+
+    def test_label_from_the_workflow_alone_makes_the_filter_match(self):
+        args = self._archival_pr_strings()
+        self.assertTrue(prn._is_own_archival_pr({
+            "title": "unrelated", "body": "unrelated", "labels": [{"name": args["label"]}],
+        }))
+
+    def test_title_and_body_from_the_workflow_alone_make_the_filter_match(self):
+        args = self._archival_pr_strings()
+        self.assertTrue(prn._is_own_archival_pr({"title": args["title"], "body": args["body"]}))
+
+    def test_all_three_signals_from_the_workflow_together_match(self):
+        args = self._archival_pr_strings()
+        self.assertTrue(prn._is_own_archival_pr({
+            "title": args["title"], "body": args["body"], "labels": [{"name": args["label"]}],
+        }))
+
 
 class FetchMergedPrsTests(unittest.TestCase):
     def test_returns_items_from_the_search_response(self):
@@ -571,6 +641,21 @@ class FetchMergedPrsTests(unittest.TestCase):
             return _FakeResponse({"items": [
                 {"title": "Archive 2026-09-04 release notes",
                  "body": "Automated archival commit from release-notes.yml -- issue #143."},
+                {"title": "Add transfers panel to Model Performance", "body": "## Summary\nNew panel."},
+            ]})
+
+        with patch.object(prn, "urlopen", fake_urlopen):
+            prs = prn.fetch_merged_prs("owner/repo", date(2026, 9, 5))
+
+        self.assertEqual([pr["title"] for pr in prs], ["Add transfers panel to Model Performance"])
+
+    def test_archival_pr_filtered_by_label_even_when_the_copy_drifted(self):
+        # Issue #305: the label alone is enough -- a future reword of the PR title/body doesn't
+        # let the archival PR back into the generator.
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse({"items": [
+                {"title": "chore: archive changelog for 2026-09-04", "body": "different wording now",
+                 "labels": [{"name": prn._OWN_ARCHIVAL_PR_LABEL}]},
                 {"title": "Add transfers panel to Model Performance", "body": "## Summary\nNew panel."},
             ]})
 
